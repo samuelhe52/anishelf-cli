@@ -66,6 +66,13 @@ def test_auth_fixture_captures_documented_redirect_and_successor_shapes() -> Non
     assert successor_web_auth_token({"ckWebAuthToken": "next-token"}) == "next-token"
 
 
+def test_login_http_client_supports_socks_proxy_env(monkeypatch) -> None:
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:9999")
+
+    with root._make_http_client() as client:
+        assert isinstance(client, httpx.Client)
+
+
 def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(root.webbrowser, "open", lambda url: url == "https://apple.example/sign-in")

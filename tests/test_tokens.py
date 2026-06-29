@@ -101,6 +101,8 @@ def test_keyring_delete_password_ignores_missing_macos_item(monkeypatch) -> None
     class MissingItemError(Exception):
         pass
 
+    monkeypatch.setattr(secrets_module.keyring, "get_password", lambda service, account: "token")
+
     def delete_password(service: str, account: str) -> None:
         _ = service, account
         try:
@@ -116,12 +118,37 @@ def test_keyring_delete_password_ignores_missing_macos_item(monkeypatch) -> None
     KeyringSecretStore().delete_password("service", "account")
 
 
+def test_keyring_delete_password_ignores_absent_password_without_delete(monkeypatch) -> None:
+    def delete_password(service: str, account: str) -> None:
+        _ = service, account
+        raise PasswordDeleteError("service")
+
+    monkeypatch.setattr(secrets_module.keyring, "get_keyring", lambda: AvailableKeyring())
+    monkeypatch.setattr(secrets_module.keyring, "get_password", lambda service, account: None)
+    monkeypatch.setattr(secrets_module.keyring, "delete_password", delete_password)
+
+    KeyringSecretStore().delete_password("service", "account")
+
+
+def test_keyring_delete_password_ignores_secretservice_missing_message(monkeypatch) -> None:
+    def delete_password(service: str, account: str) -> None:
+        _ = service, account
+        raise PasswordDeleteError("No such password!")
+
+    monkeypatch.setattr(secrets_module.keyring, "get_keyring", lambda: AvailableKeyring())
+    monkeypatch.setattr(secrets_module.keyring, "get_password", lambda service, account: "token")
+    monkeypatch.setattr(secrets_module.keyring, "delete_password", delete_password)
+
+    KeyringSecretStore().delete_password("service", "account")
+
+
 def test_keyring_delete_password_reports_real_delete_failure(monkeypatch) -> None:
     def delete_password(service: str, account: str) -> None:
         _ = service, account
         raise PasswordDeleteError("Can't delete password in keychain: (-128, 'denied')")
 
     monkeypatch.setattr(secrets_module.keyring, "get_keyring", lambda: AvailableKeyring())
+    monkeypatch.setattr(secrets_module.keyring, "get_password", lambda service, account: "token")
     monkeypatch.setattr(secrets_module.keyring, "delete_password", delete_password)
 
     with pytest.raises(SecretStorageUnavailableError):

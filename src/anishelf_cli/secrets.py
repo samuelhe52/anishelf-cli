@@ -51,6 +51,12 @@ class KeyringSecretStore:
     def delete_password(self, service: str, account: str) -> None:
         self._ensure_available()
         try:
+            if keyring.get_password(service, account) is None:
+                return
+        except (KeyringError, NoKeyringError) as exc:
+            raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
+
+        try:
             keyring.delete_password(service, account)
         except keyring.errors.PasswordDeleteError as exc:
             if _is_missing_password_delete_error(exc):
@@ -68,7 +74,7 @@ def _is_missing_password_delete_error(exc: keyring.errors.PasswordDeleteError) -
             return True
 
     message = str(exc).lower()
-    return "-25300" in message and "item not found" in message
+    return ("-25300" in message and "item not found" in message) or "no such password" in message
 
 
 @dataclass(frozen=True, slots=True)
