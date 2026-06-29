@@ -17,11 +17,11 @@
 
 ## 3. CloudKit Auth Flow
 
-- [ ] 3.1 Verify current CloudKit Web Services auth behavior against official Apple docs and capture the endpoint, redirect, and successor-token response shape in code comments or fixtures.
-- [ ] 3.2 Implement login initiation by calling a private database endpoint with `ckAPIToken` only and extracting the authentication redirect URL.
-- [ ] 3.3 Implement the primary production login flow as browser redirect plus manual copy/paste of the final HTTPS callback URL containing `ckWebAuthToken`.
-- [ ] 3.4 Implement optional loopback callback capture for development tokens that permit localhost callbacks, with timeout and clean failure behavior.
-- [ ] 3.5 Add tests for successful manual-paste login, malformed callback URL handling, optional loopback timeout, and token redaction.
+- [x] 3.1 Verify current CloudKit Web Services auth behavior against official Apple docs and capture the endpoint, redirect, and successor-token response shape in code comments or fixtures.
+- [x] 3.2 Implement login initiation by calling a private database endpoint with `ckAPIToken` only and extracting the authentication redirect URL.
+- [x] 3.3 Implement the primary production login flow as browser redirect plus manual copy/paste of the final HTTPS callback URL containing `ckWebAuthToken`.
+- [x] 3.4 Implement optional loopback callback capture for development tokens that permit localhost callbacks, with timeout and clean failure behavior.
+- [x] 3.5 Add tests for successful manual-paste login, malformed callback URL handling, optional loopback timeout, and token redaction.
 
 ## 4. Serialized CloudKit Executor
 
