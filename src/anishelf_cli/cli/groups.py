@@ -42,7 +42,7 @@ def _effective_scope_payload() -> dict[str, object]:
     }
 
 
-@config_app.command("status")
+@config_app.command("status", help="Show effective CloudKit, callback, and TMDb configuration.")
 def config_status(ctx: typer.Context) -> None:
     state = state_from_context(ctx)
     payload = _effective_scope_payload()
@@ -58,7 +58,7 @@ def config_status(ctx: typer.Context) -> None:
     typer.echo(f"TMDb API key envs: {', '.join(config.DEFAULT_TMDB_API_KEY_ENVS)}")
 
 
-@config_app.command("show")
+@config_app.command("show", help="Show local AniShelf CLI config, cache, and data paths.")
 def config_show(ctx: typer.Context) -> None:
     state = state_from_context(ctx)
     payload = {
@@ -71,7 +71,7 @@ def config_show(ctx: typer.Context) -> None:
     )
 
 
-@config_app.command("set-tmdb-api-key")
+@config_app.command("set-tmdb-api-key", help="Store a TMDb API key in the secure credential store.")
 def config_set_tmdb_api_key(
     ctx: typer.Context,
     from_stdin: Annotated[

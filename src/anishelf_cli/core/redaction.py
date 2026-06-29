@@ -34,6 +34,13 @@ class SecretRedactor:
             pattern = rf"({re.escape(key)}=)([^\s&]+)"
             redacted = re.sub(pattern, rf"\1<redacted:{key}>", redacted)
 
+        sensitive_keys = "|".join(re.escape(key) for key in SENSITIVE_QUERY_KEYS)
+        redacted = re.sub(
+            rf"https?://[^\s]+[?&](?:[^=\s&]+=[^\s&]*&)*({sensitive_keys})=[^\s]+",
+            "<redacted:sensitive-url>",
+            redacted,
+        )
+
         return redacted
 
 

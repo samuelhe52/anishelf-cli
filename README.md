@@ -26,8 +26,10 @@ uv run mypy src
 
 ## Secret handling
 
-`ani login` stores the user-scoped CloudKit web auth token in the OS secure
+`ani auth login` stores the user-scoped CloudKit web auth token in the OS secure
 credential store. This token authorizes access to the signed-in user's private
-CloudKit data and is removed with `ani logout`.
+CloudKit data and is removed with `ani auth logout`. Use `ani auth status` to
+verify the current login and `ani auth refresh` to roll forward stored auth state
+when CloudKit returns a successor token.
 
 TMDb API keys can be stored in Keychain with `ani config set-tmdb-api-key`.

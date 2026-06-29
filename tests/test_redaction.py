@@ -24,5 +24,5 @@ def test_redacts_callback_urls_even_without_registered_secret() -> None:
 
     assert "abc123" not in output
     assert "def456" not in output
-    assert "ckWebAuthToken=<redacted:ckWebAuthToken>" in output
-    assert "ckAPIToken=<redacted:ckAPIToken>" in output
+    assert "https://example.com/callback" not in output
+    assert output == "paste <redacted:sensitive-url>"

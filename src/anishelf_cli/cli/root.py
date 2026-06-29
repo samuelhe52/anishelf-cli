@@ -22,11 +22,17 @@ from anishelf_cli.cloudkit.auth import (
     extract_web_auth_token,
     initiate_login,
 )
-from anishelf_cli.core.output import emit_error, emit_json, emit_placeholder
+from anishelf_cli.cloudkit.executor import (
+    CloudKitExecutor,
+    CloudKitWhoamiError,
+    CurrentUser,
+)
+from anishelf_cli.core.output import emit_error, emit_json
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
+    default_secret_store,
     delete_cloudkit_web_auth_token,
     store_cloudkit_web_auth_token,
 )
@@ -36,6 +42,9 @@ app = typer.Typer(
     help="Read-only AniShelf and CloudKit inspection CLI.",
     no_args_is_help=True,
 )
+auth_app = typer.Typer(help="CloudKit authentication commands.", no_args_is_help=True)
+
+whoami_lock_factory = None
 
 
 @app.callback()
@@ -122,7 +131,7 @@ def _read_hidden_tty_line(stream: TextIO) -> str:
     return value.removeprefix("\x1b[200~").removesuffix("\x1b[201~")
 
 
-@app.command()
+@auth_app.command("login", help="Sign in to CloudKit and store the web auth token.")
 def login(
     ctx: typer.Context,
     callback_strategy: Annotated[
@@ -193,7 +202,7 @@ def login(
     typer.echo("Logged in to CloudKit.")
 
 
-@app.command()
+@auth_app.command("logout", help="Remove the stored CloudKit web auth token.")
 def logout(ctx: typer.Context) -> None:
     state = ctx.obj
     if not isinstance(state, AppState):
@@ -214,11 +223,59 @@ def logout(ctx: typer.Context) -> None:
     typer.echo("Removed CloudKit web auth token.")
 
 
-@app.command()
-def whoami(ctx: typer.Context) -> None:
-    emit_placeholder(ctx.obj, "whoami")
+@auth_app.command("status", help="Show the current CloudKit authentication status.")
+def auth_status(ctx: typer.Context) -> None:
+    current_user = _get_current_user_or_exit()
+    state = state_from_context(ctx)
+    if state.json_output:
+        emit_json(current_user.to_json_payload())
+        return
+
+    _emit_auth_status_human(current_user)
 
 
+@auth_app.command("refresh", help="Verify login and save any successor auth token.")
+def auth_refresh(ctx: typer.Context) -> None:
+    current_user = _get_current_user_or_exit()
+    state = state_from_context(ctx)
+    if state.json_output:
+        payload = current_user.to_json_payload()
+        payload["status"] = "refreshed"
+        emit_json(payload)
+        return
+
+    typer.echo("Refreshed CloudKit auth state.")
+    _emit_auth_status_human(current_user)
+
+
+def _get_current_user_or_exit() -> CurrentUser:
+    try:
+        api_token = resolve_cloudkit_api_token()
+        with _make_http_client() as client:
+            return CloudKitExecutor(
+                client=client,
+                api_token_resolver=lambda: api_token,
+                secret_store=default_secret_store(),
+                lock_factory=whoami_lock_factory,
+            ).get_current_user()
+    except (
+        CloudKitWhoamiError,
+        MissingCloudKitAPITokenError,
+    ) as exc:
+        emit_error(str(exc), redactor=getattr(exc, "redactor", None))
+        raise typer.Exit(code=2) from exc
+
+
+def _emit_auth_status_human(current_user: CurrentUser) -> None:
+    typer.echo("Authenticated to CloudKit.")
+    if display_name := current_user.display_name:
+        typer.echo(f"Name: {display_name}")
+    if current_user.email:
+        typer.echo(f"Email: {current_user.email}")
+    typer.echo(f"User record: {current_user.user_record_name}")
+
+
+app.add_typer(auth_app, name="auth")
 app.add_typer(groups.config_app, name="config")
 app.add_typer(groups.zones_app, name="zones")
 app.add_typer(groups.records_app, name="records")

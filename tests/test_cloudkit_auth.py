@@ -93,7 +93,7 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     callback_url = "https://callback.example/done?ckWebAuthToken=web-secret-token"
     result = runner.invoke(
         app,
-        ["--json", "login"],
+        ["--json", "auth", "login"],
         input=f"{callback_url}\n",
     )
 
@@ -130,7 +130,7 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     callback_url = "https://callback.example/done?ckWebAuthToken=web-secret-token"
     result = runner.invoke(
         app,
-        ["--json", "login"],
+        ["--json", "auth", "login"],
         input=f"{callback_url}\n",
     )
 
@@ -169,7 +169,7 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     callback_url = "https://callback.example/done?ckWebAuthToken=web-secret-token"
     result = runner.invoke(
         app,
-        ["login"],
+        ["auth", "login"],
         input="https://callback.example/done?missing=web-secret-token\n",
     )
 
@@ -251,6 +251,7 @@ def test_loopback_login_timeout_does_not_store_partial_token(monkeypatch) -> Non
     result = runner.invoke(
         app,
         [
+            "auth",
             "login",
             "--callback-strategy",
             "loopback",
@@ -290,6 +291,7 @@ def test_loopback_login_rejects_non_loopback_host_without_side_effects(
     result = runner.invoke(
         app,
         [
+            "auth",
             "login",
             "--callback-strategy",
             "loopback",
