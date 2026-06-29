@@ -6,6 +6,7 @@ from pathlib import Path
 import httpx
 from typer.testing import CliRunner
 
+from anishelf_cli import config
 from anishelf_cli.cli import groups, root
 from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
@@ -74,6 +75,35 @@ def test_config_status_json_shows_effective_scope_without_secrets() -> None:
     assert "cloudkit-api-token" not in result.stdout
     assert "api-secret-token" not in result.stdout
     assert "ckWebAuthToken" not in result.stdout
+
+
+def test_default_posix_app_paths_use_dotdir(monkeypatch, tmp_path) -> None:
+    monkeypatch.setattr(config.sys, "platform", "darwin")
+    monkeypatch.setattr(config.Path, "home", lambda: tmp_path)
+
+    assert config.config_dir() == tmp_path / ".anishelf-cli"
+    assert config.data_dir() == tmp_path / ".anishelf-cli"
+    assert config.cache_dir() == tmp_path / ".anishelf-cli" / "cache"
+
+
+def test_windows_app_paths_use_local_app_data(monkeypatch, tmp_path) -> None:
+    local_app_data = tmp_path / "LocalAppData"
+    monkeypatch.setattr(config.sys, "platform", "win32")
+    monkeypatch.setenv("LOCALAPPDATA", str(local_app_data))
+
+    assert config.config_dir() == local_app_data / "anishelf-cli"
+    assert config.data_dir() == local_app_data / "anishelf-cli"
+    assert config.cache_dir() == local_app_data / "anishelf-cli" / "cache"
+
+
+def test_path_overrides_are_preserved(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config-override"))
+    monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache-override"))
+    monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data-override"))
+
+    assert config.config_dir() == tmp_path / "config-override"
+    assert config.cache_dir() == tmp_path / "cache-override"
+    assert config.data_dir() == tmp_path / "data-override"
 
 
 def test_profile_command_group_is_removed() -> None:
