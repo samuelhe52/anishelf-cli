@@ -324,6 +324,15 @@ def test_library_decoder_accepts_empty_notes() -> None:
     assert decoded["notes"] == ""
 
 
+def test_library_decoder_uses_swift_reference_epoch_for_episode_progress_dates() -> None:
+    record = _live_record("movie:55", "movie", 55)
+    decoded = decode_library_entry_record(record)
+
+    assert decoded["date_saved"] == "2026-05-01T00:00:00Z"
+    assert decoded["date_started"] == "2026-05-02T00:00:00Z"
+    assert decoded["episode_progresses"][0]["updated_at"] == "2026-05-08T00:00:00Z"
+
+
 def _install_lookup(
     monkeypatch: pytest.MonkeyPatch,
     payload: dict[str, Any],
@@ -409,7 +418,7 @@ def _episode_progresses_bytes() -> str:
             {
                 "seasonNumber": 1,
                 "watchedThroughEpisode": 12,
-                "updatedAt": "2026-05-08T00:00:00Z",
+                "updatedAt": 799891200.0,
             }
         ],
         sort_keys=True,

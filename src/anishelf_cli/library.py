@@ -4,12 +4,13 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
 SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION = 2
+SWIFT_REFERENCE_DATE = datetime(2001, 1, 1, tzinfo=UTC)
 
 WATCH_STATUS_VALUES = {"planToWatch", "watching", "watched", "dropped"}
 
@@ -339,7 +340,10 @@ def _required_episode_progresses(fields: dict[str, Any], field: str) -> list[dic
                     item.get("watchedThroughEpisode"),
                     "watchedThroughEpisode",
                 ),
-                "updated_at": _datetime_from_raw(item.get("updatedAt"), "updatedAt"),
+                "updated_at": _swift_reference_datetime_from_raw(
+                    item.get("updatedAt"),
+                    "updatedAt",
+                ),
             }
         )
     return progresses
@@ -449,6 +453,14 @@ def _datetime_from_raw(raw: Any, field: str) -> str:
         if abs(timestamp) > 10_000_000_000:
             timestamp /= 1000
         return _iso_z(datetime.fromtimestamp(timestamp, UTC))
+    raise LibraryRecordDecodeError(f"Invalid {field} value.")
+
+
+def _swift_reference_datetime_from_raw(raw: Any, field: str) -> str:
+    if isinstance(raw, str):
+        return _datetime_from_raw(raw, field)
+    if isinstance(raw, int | float) and not isinstance(raw, bool):
+        return _iso_z(SWIFT_REFERENCE_DATE + timedelta(seconds=float(raw)))
     raise LibraryRecordDecodeError(f"Invalid {field} value.")
 
 
