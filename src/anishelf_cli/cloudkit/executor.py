@@ -168,15 +168,14 @@ class CloudKitExecutor:
             return payload
 
     def lock_path(self) -> Path:
-        lock_dir = config.data_dir() / "locks"
-        lock_dir.mkdir(parents=True, exist_ok=True)
-        return lock_dir / f"cloudkit-web-auth-token.{_safe_lock_name(self.profile_id)}.lock"
+        return cloudkit_web_auth_token_lock_path(self.profile_id)
 
     def _token_lock(self) -> AbstractContextManager[Any]:
-        lock_path = self.lock_path()
-        if self.lock_factory is not None:
-            return self.lock_factory(lock_path)
-        return FileLock(str(lock_path), timeout=self.lock_timeout_seconds)
+        return cloudkit_web_auth_token_lock(
+            profile_id=self.profile_id,
+            lock_factory=self.lock_factory,
+            lock_timeout_seconds=self.lock_timeout_seconds,
+        )
 
     def _load_web_auth_token(self, redactor: SecretRedactor) -> str:
         try:
@@ -235,12 +234,6 @@ class CloudKitExecutor:
         try:
             payload = response.json()
         except ValueError as exc:
-            if response.status_code in (401, 403):
-                self._clear_web_auth_token_after_auth_failure(redactor)
-                raise CloudKitAuthenticationFailedError(
-                    "CloudKit authentication failed. Cleared stored login; run `ani auth login`.",
-                    redactor=redactor,
-                ) from exc
             message = (
                 f"{response_description} returned a non-JSON response "
                 f"(HTTP {response.status_code})."
@@ -309,10 +302,27 @@ def _optional_string(value: object) -> str | None:
 
 
 def _is_authentication_failure(response: httpx.Response, payload: dict[str, Any]) -> bool:
+    _ = response
     code = payload.get("serverErrorCode")
-    if isinstance(code, str) and code in AUTH_FAILURE_CODES:
-        return True
-    return response.status_code in (401, 403) and code is None
+    return isinstance(code, str) and code in AUTH_FAILURE_CODES
+
+
+def cloudkit_web_auth_token_lock_path(profile_id: str = DEFAULT_PROFILE_ID) -> Path:
+    lock_dir = config.data_dir() / "locks"
+    lock_dir.mkdir(parents=True, exist_ok=True)
+    return lock_dir / f"cloudkit-web-auth-token.{_safe_lock_name(profile_id)}.lock"
+
+
+def cloudkit_web_auth_token_lock(
+    *,
+    profile_id: str = DEFAULT_PROFILE_ID,
+    lock_factory: LockFactory | None = None,
+    lock_timeout_seconds: float = -1.0,
+) -> AbstractContextManager[Any]:
+    lock_path = cloudkit_web_auth_token_lock_path(profile_id)
+    if lock_factory is not None:
+        return lock_factory(lock_path)
+    return FileLock(str(lock_path), timeout=lock_timeout_seconds)
 
 
 def _cloudkit_failure_message(

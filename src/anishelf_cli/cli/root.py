@@ -26,6 +26,7 @@ from anishelf_cli.cloudkit.executor import (
     CloudKitExecutor,
     CloudKitWhoamiError,
     CurrentUser,
+    cloudkit_web_auth_token_lock,
 )
 from anishelf_cli.core.output import emit_error, emit_json
 from anishelf_cli.core.redaction import SecretRedactor
@@ -209,7 +210,8 @@ def logout(
     ] = False,
 ) -> None:
     try:
-        delete_cloudkit_web_auth_token()
+        with cloudkit_web_auth_token_lock(lock_factory=whoami_lock_factory):
+            delete_cloudkit_web_auth_token()
     except SecretStorageUnavailableError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc

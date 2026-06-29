@@ -305,6 +305,31 @@ def test_logout_deletes_web_auth_token(monkeypatch) -> None:
     assert json.loads(result.stdout) == {"status": "logged-out"}
 
 
+def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> None:
+    events: list[str] = []
+
+    def delete_token() -> None:
+        events.append("delete-token")
+
+    @contextmanager
+    def recording_lock(path: Path) -> Iterator[None]:
+        _ = path
+        events.append("enter-lock")
+        try:
+            yield
+        finally:
+            events.append("exit-lock")
+
+    monkeypatch.setattr(root, "delete_cloudkit_web_auth_token", delete_token)
+    monkeypatch.setattr(root, "whoami_lock_factory", lambda path: recording_lock(path))
+
+    result = runner.invoke(app, ["--json", "auth", "logout"])
+
+    assert result.exit_code == 0
+    assert events == ["enter-lock", "delete-token", "exit-lock"]
+    assert json.loads(result.stdout) == {"status": "logged-out"}
+
+
 def test_whoami_success_json_uses_authenticated_current_user(monkeypatch) -> None:
     store = MemorySecretStore()
     descriptor = cloudkit_web_auth_token_secret()
@@ -536,6 +561,84 @@ def test_whoami_auth_failure_clears_login_and_redacts_tokens(monkeypatch) -> Non
     assert "successor-secret-token" not in combined
     assert "callback-secret-token" not in combined
     assert "https://callback.example/done" not in combined
+
+
+def test_whoami_non_json_403_preserves_login(monkeypatch) -> None:
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    deleted: list[tuple[str, str]] = []
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    original_delete_password = store.delete_password
+
+    def delete_password(service: str, account: str) -> None:
+        deleted.append((service, account))
+        original_delete_password(service, account)
+
+    store.delete_password = delete_password  # type: ignore[method-assign]
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                403,
+                content=b"<html><body>forbidden</body></html>",
+                request=request,
+            )
+        )
+    )
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["auth", "status"])
+
+    assert result.exit_code == 2
+    assert "non-JSON response (HTTP 403)" in result.stderr
+    assert "run `ani auth login`" not in result.stderr
+    assert deleted == []
+    assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
+    assert "api-secret-token" not in result.stdout + result.stderr
+    assert "web-secret-token" not in result.stdout + result.stderr
+
+
+def test_whoami_unclassified_json_403_preserves_login(monkeypatch) -> None:
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    deleted: list[tuple[str, str]] = []
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    original_delete_password = store.delete_password
+
+    def delete_password(service: str, account: str) -> None:
+        deleted.append((service, account))
+        original_delete_password(service, account)
+
+    store.delete_password = delete_password  # type: ignore[method-assign]
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                403,
+                json={"reason": "interstitial blocked request"},
+                request=request,
+            )
+        )
+    )
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["auth", "status"])
+
+    assert result.exit_code == 2
+    assert "CloudKit whoami request failed (HTTP 403: interstitial blocked request)" in (
+        result.stderr
+    )
+    assert "run `ani auth login`" not in result.stderr
+    assert deleted == []
+    assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
+    assert "api-secret-token" not in result.stdout + result.stderr
+    assert "web-secret-token" not in result.stdout + result.stderr
 
 
 def test_whoami_redacts_non_auth_cloudkit_error_details(monkeypatch) -> None:
