@@ -1,0 +1,20 @@
+.DS_Store
+.coverage
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+htmlcov/
+uv.lock
+
+# Local secrets and runtime state
+.env
+.env.local
+.anishelf-cli/
+
+# Personal agent tooling
+.claude/
+.codex/
+

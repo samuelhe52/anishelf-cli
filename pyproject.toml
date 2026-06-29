@@ -1,0 +1,58 @@
+[build-system]
+requires = ["hatchling>=1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "anishelf-cli"
+version = "0.1.0"
+description = "Read-only AniShelf and CloudKit inspection CLI."
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [
+  { name = "Samuel He" }
+]
+dependencies = [
+  "filelock>=3.19.1",
+  "httpx>=0.28.1",
+  "keyring>=25.6.0",
+  "platformdirs>=4.4.0",
+  "pydantic>=2.11.7",
+  "rich>=14.1.0",
+  "tmdbsimple>=2.9.1",
+  "typer>=0.16.1",
+]
+
+[project.scripts]
+ani = "anishelf_cli.app:main"
+
+[dependency-groups]
+dev = [
+  "mypy>=1.17.1",
+  "pytest>=8.4.1",
+  "pytest-cov>=6.2.1",
+  "ruff>=0.12.2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/anishelf_cli"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "RUF"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unused_configs = true
+packages = ["anishelf_cli"]
+
