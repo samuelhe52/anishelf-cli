@@ -4,7 +4,7 @@ Read-only AniShelf and CloudKit inspection CLI.
 
 ## Status
 
-This repository is being scaffolded from the `cloudkit-private-db-agent-cli` OpenSpec change. The command surface exists, but most commands are still placeholders while the implementation is completed task-by-task.
+The command surface exists, but most commands are still placeholders while the implementation is completed in small vertical slices.
 
 ## Tooling
 
