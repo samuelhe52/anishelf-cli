@@ -47,54 +47,26 @@ domain concepts rather than raw CloudKit records whenever practical.
 - The default CloudKit container is `iCloud.com.samuelhe.MyAnimeList`.
 - The default CloudKit environment is `production`.
 - The default database scope is `private`.
-- The CLI should use an internal CloudKit API-token provider interface rather
-  than hard-coding token lookup inside command handlers.
-- Developer-configured CloudKit API tokens may come from process environment or
-  secure local storage.
+- The AniShelf CloudKit custom zone is `AniShelfLibrary`.
+- The synced record types are `LibraryEntry` and `LibrarySettings`.
+- The settings record name is `userDefaults`.
 - User-scoped `ckWebAuthToken` values should be stored in secure local storage
   when available.
 - The first-class production login flow may require browser login followed by
   manual paste of an HTTPS callback URL.
 - Local profile configuration should describe the effective container,
-  environment, database, callback strategy, token-source choices, and AniShelf
-  source path without exposing secret values.
+  environment, database, callback strategy, and AniShelf source path without
+  exposing secret values.
 - The CLI should use stable exit behavior and stable error codes for automated
   callers, but the exact code table should be defined in the relevant stage spec.
 
-## Planning Guidance
-
-Planning notes should stay small and describe behavior that is ready to commit
-now, plus the local tests and manual checks needed for that slice.
-
-Good stage boundaries:
-
-- Profile configuration and secret storage.
-- CloudKit login/logout and current-user read.
-- Serialized CloudKit executor for authenticated reads.
-- Generic read-only CloudKit lookup/query/change commands.
-- AniShelf schema snapshot and minimal domain decoding.
-- Library list/get/export behavior.
-- Local cache behavior, once real command usage proves the needed shape.
-- TMDb metadata hydration, once output needs are settled.
-- Public API-token distribution and rotation diagnostics.
-
-Avoid putting the following in an early stage spec unless the implementation has
-already produced enough evidence:
-
-- Exact SQLite schema.
-- Full batch grammar.
-- Complete JSON/JSONL schemas for commands not being implemented in the stage.
-- TMDb summary/details/full field lists.
-- Token rotation release mechanics.
-- Broad Swift source parsing rules.
-- Performance claims that have not been measured.
-
 ## Current Open Questions
 
-- What is the smallest useful first vertical slice after profile and login?
 - Which CloudKit successor-token response fields are verified by live requests?
 - What stable JSON envelope should the first implemented command use?
 - Should schema compatibility start from a committed snapshot before attempting
   source parsing?
 - Which library operations actually need a persistent cache, and which can stay
   direct-read for longer?
+- What metadata cache invalidation rule is good enough for TMDb summaries:
+  fixed TTL, TMDb change tracking, or both?

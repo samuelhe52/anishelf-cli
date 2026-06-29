@@ -6,12 +6,20 @@ import pytest
 from keyring.errors import PasswordDeleteError, PasswordSetError
 
 from anishelf_cli import secrets as secrets_module
-from anishelf_cli.cloudkit.tokens import ConfiguredCloudKitAPITokenProvider
+from anishelf_cli.cloudkit import api_token as cloudkit_api_token_module
+from anishelf_cli.cloudkit.api_token import (
+    EMBEDDED_PUBLIC_TOKEN_VERSION,
+    MissingCloudKitAPITokenError,
+    resolve_cloudkit_api_token,
+)
+from anishelf_cli.cloudkit.app_auth_transform import (
+    restore_transformed_hex,
+    transform_hex,
+)
 from anishelf_cli.models import ProfileConfig
 from anishelf_cli.secrets import (
     KeyringSecretStore,
     SecretStorageUnavailableError,
-    cloudkit_api_token_secret,
     store_cloudkit_web_auth_token,
     tmdb_api_key_secret,
 )
@@ -47,19 +55,51 @@ class AvailableKeyring:
     priority = 1
 
 
-def test_cloudkit_api_token_prefers_process_env_over_keychain(monkeypatch) -> None:
-    store = MemorySecretStore()
-    descriptor = cloudkit_api_token_secret("default")
-    store.set_password(descriptor.service, descriptor.account, "keychain-token")
+def test_cloudkit_api_token_prefers_process_env_over_embedded(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "env-token")
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN_VERSION", "v1")
 
-    token = ConfiguredCloudKitAPITokenProvider("default", ProfileConfig(), store).resolve()
+    token = resolve_cloudkit_api_token()
 
     assert token.value == "env-token"
-    assert token.source_label == "env:ANI_CLOUDKIT_API_TOKEN"
-    assert token.token_version == "v1"
-    assert store.values[(descriptor.service, descriptor.account)] == "keychain-token"
+    assert token.source == "env"
+    assert token.version == "v1"
+    assert token.is_public is False
+
+
+def test_cloudkit_api_token_uses_embedded_when_env_absent(monkeypatch) -> None:
+    monkeypatch.delenv("ANI_CLOUDKIT_API_TOKEN", raising=False)
+    monkeypatch.delenv("ANI_CLOUDKIT_API_TOKEN_VERSION", raising=False)
+
+    token = resolve_cloudkit_api_token()
+
+    assert token.value
+    assert token.value == cloudkit_api_token_module._embedded_public_token()
+    assert token.source == "embedded-public"
+    assert token.version == EMBEDDED_PUBLIC_TOKEN_VERSION
+    assert token.is_public is True
+
+
+def test_cloudkit_app_auth_transform_round_trips_hex_fixture() -> None:
+    fixture = "0123456789abcdef"
+    transformed = transform_hex(fixture, key="test-key")
+
+    assert transformed != fixture
+    assert restore_transformed_hex(transformed, key="test-key") == fixture
+
+
+def test_cloudkit_api_token_reports_clear_build_error_without_env_or_embedded(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("ANI_CLOUDKIT_API_TOKEN", raising=False)
+    monkeypatch.setattr(
+        cloudkit_api_token_module,
+        "_EMBEDDED_PUBLIC_TOKEN_TRANSFORMED_FRAGMENTS",
+        (),
+    )
+
+    with pytest.raises(MissingCloudKitAPITokenError, match="not configured in this build"):
+        resolve_cloudkit_api_token()
 
 
 def test_tmdb_token_prefers_env_then_env_file_then_keychain(tmp_path, monkeypatch) -> None:

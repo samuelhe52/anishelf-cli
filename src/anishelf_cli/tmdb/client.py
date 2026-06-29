@@ -8,4 +8,3 @@ class TMDbClient:
     """Placeholder for metadata and search adapters."""
 
     profile: str
-

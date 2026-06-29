@@ -92,14 +92,6 @@ class SecretDescriptor:
     label: str
 
 
-def cloudkit_api_token_secret(profile: str) -> SecretDescriptor:
-    return SecretDescriptor(
-        service=config.KEYCHAIN_SERVICE_CLOUDKIT_API_TOKEN,
-        account=profile,
-        label="CloudKit API token",
-    )
-
-
 def cloudkit_web_auth_token_secret(profile: str) -> SecretDescriptor:
     return SecretDescriptor(
         service=config.KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN,

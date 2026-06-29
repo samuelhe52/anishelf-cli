@@ -34,11 +34,21 @@ def test_root_help_mentions_global_options() -> None:
 
 
 def test_profile_status_json_shows_effective_scope_without_secrets() -> None:
-    result = runner.invoke(app, ["--json", "profile", "status"])
+    result = runner.invoke(
+        app,
+        ["--json", "profile", "status"],
+        env={"ANI_CLOUDKIT_API_TOKEN": "api-secret-token"},
+    )
 
     assert result.exit_code == 0
     assert "iCloud.com.samuelhe.MyAnimeList" in result.stdout
+    payload = json.loads(result.stdout)
+    assert payload["cloudkit_api_token_source"] == "env"
+    assert payload["cloudkit_api_token_version"] is None
+    assert "cloudkit_token_source" not in payload
+    assert "cloudkit_api_token_env" not in payload
     assert "cloudkit-api-token" not in result.stdout
+    assert "api-secret-token" not in result.stdout
     assert "ckWebAuthToken" not in result.stdout
 
 
@@ -59,8 +69,6 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
             str(env_file),
             "--anishelf-source",
             str(anishelf_source),
-            "--cloudkit-token-env",
-            "CK_TOKEN",
             "--tmdb-token-env",
             "ANI_TMDB_API_KEY",
             "--tmdb-token-env",
@@ -78,11 +86,11 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
 
     assert status.exit_code == 0
     status_payload = json.loads(status.stdout)
-    assert status_payload["cloudkit_api_token_env"] == "CK_TOKEN"
+    assert status_payload["cloudkit_api_token_source"] == "embedded-public"
     assert status_payload["tmdb_api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
 
 
-def test_profile_configure_rejects_cloudkit_env_file_source(tmp_path, monkeypatch) -> None:
+def test_profile_configure_has_no_cloudkit_token_source_option(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
 
     result = runner.invoke(
@@ -96,7 +104,7 @@ def test_profile_configure_rejects_cloudkit_env_file_source(tmp_path, monkeypatc
     )
 
     assert result.exit_code == 2
-    assert "env-file" in result.stderr
+    assert "cloudkit-token-source" in result.stderr
 
 
 def test_profile_configure_still_allows_tmdb_env_file_source(tmp_path, monkeypatch) -> None:
@@ -118,27 +126,26 @@ def test_profile_configure_still_allows_tmdb_env_file_source(tmp_path, monkeypat
     assert payload["tmdb_token_source"] == "env-file"
 
 
-def test_config_set_tokens_store_without_echoing_secret(monkeypatch) -> None:
+def test_config_set_tmdb_token_stores_without_echoing_secret(monkeypatch) -> None:
     store = MemorySecretStore()
     monkeypatch.setattr(groups, "default_secret_store", lambda: store)
 
-    cloudkit = runner.invoke(
-        app,
-        ["--json", "config", "set-cloudkit-token", "--stdin"],
-        input="ck-secret-token\n",
-    )
     tmdb = runner.invoke(
         app,
         ["--json", "config", "set-tmdb-token", "--stdin"],
         input="tmdb-secret-token\n",
     )
 
-    assert cloudkit.exit_code == 0
     assert tmdb.exit_code == 0
-    assert "ck-secret-token" not in cloudkit.stdout + cloudkit.stderr
     assert "tmdb-secret-token" not in tmdb.stdout + tmdb.stderr
-    assert ("anishelf-cli.cloudkit-api-token", "default") in store.values
     assert ("anishelf-cli.tmdb-api-key", "default") in store.values
+
+
+def test_config_has_no_cloudkit_api_token_storage_command() -> None:
+    result = runner.invoke(app, ["config", "set-cloudkit-token", "--help"])
+
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
 
 
 def test_logout_deletes_selected_profile_web_auth_token(monkeypatch) -> None:

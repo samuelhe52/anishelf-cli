@@ -10,4 +10,3 @@ def state_from_context(ctx: typer.Context) -> AppState:
     if not isinstance(state, AppState):
         raise RuntimeError("CLI context was not initialized")
     return state
-

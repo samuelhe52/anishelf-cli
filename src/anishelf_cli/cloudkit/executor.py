@@ -8,4 +8,3 @@ class CloudKitExecutor:
     """Placeholder for the serialized token-consuming executor."""
 
     profile: str
-

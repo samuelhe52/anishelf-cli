@@ -10,6 +10,7 @@ from typer.testing import CliRunner
 
 from anishelf_cli.cli import root
 from anishelf_cli.cli.root import app
+from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.auth import (
     CLOUDKIT_AUTH_BEHAVIOR_FIXTURE,
     LoopbackLoginSetupError,
@@ -20,7 +21,6 @@ from anishelf_cli.cloudkit.auth import (
     initiate_login,
     successor_web_auth_token,
 )
-from anishelf_cli.cloudkit.tokens import CloudKitAPIToken
 from anishelf_cli.models import ProfileConfig
 
 runner = CliRunner()
@@ -43,7 +43,7 @@ def test_login_initiation_calls_private_current_user_with_api_token_only() -> No
     client = httpx.Client(transport=httpx.MockTransport(handler))
     initiation = initiate_login(
         ProfileConfig(),
-        CloudKitAPIToken("api-secret-token", "env:ANI_CLOUDKIT_API_TOKEN"),
+        CloudKitAPIToken("api-secret-token", "env"),
         client,
     )
 
@@ -194,6 +194,8 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     assert "web-secret-token" not in combined
     assert callback_url not in combined
     assert "missing ckWebAuthToken" in combined
+
+
 def test_loopback_capture_times_out_cleanly() -> None:
     with pytest.raises(LoopbackLoginTimeoutError):
         capture_loopback_callback(

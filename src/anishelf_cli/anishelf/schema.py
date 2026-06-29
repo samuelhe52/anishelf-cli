@@ -12,4 +12,3 @@ class SchemaSnapshot:
     entry_record_type: str = "LibraryEntry"
     settings_record_type: str = "LibrarySettings"
     settings_record_name: str = "userDefaults"
-

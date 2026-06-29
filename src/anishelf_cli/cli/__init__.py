@@ -1,2 +1,1 @@
 """Typer command surface."""
-

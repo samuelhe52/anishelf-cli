@@ -7,4 +7,3 @@ from pathlib import Path
 @dataclass(slots=True)
 class CacheStore:
     path: Path
-

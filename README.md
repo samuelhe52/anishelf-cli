@@ -26,4 +26,9 @@ uv run mypy src
 
 ## Secret handling
 
-Do not commit CloudKit or TMDb credentials to this repository. Use Keychain-backed storage or a local env file outside the repo such as `~/.secrets/env/anishelf-cli.env`.
+`ani login` stores the user-scoped CloudKit web auth token in the OS secure
+credential store. This token authorizes access to the signed-in user's private
+CloudKit data and is removed with `ani logout`.
+
+TMDb API keys can be stored in Keychain with `ani config set-tmdb-token` or read
+from a local env file outside the repo such as `~/.secrets/env/anishelf-cli.env`.

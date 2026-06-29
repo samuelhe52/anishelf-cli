@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
-from anishelf_cli.cloudkit.tokens import CloudKitAPIToken
+from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.models import ProfileConfig
 
 APPLE_CLOUDKIT_API_BASE_URL = "https://api.apple-cloudkit.com"
@@ -30,9 +30,7 @@ CLOUDKIT_AUTH_BEHAVIOR_FIXTURE: dict[str, Any] = {
         "https://developer.apple.com/library/archive/documentation/DataManagement/"
         "Conceptual/CloudKitWebServicesReference/GetCurrentUser.html",
     ],
-    "login_probe_endpoint": (
-        "GET /database/1/{container}/{environment}/{database}/users/current"
-    ),
+    "login_probe_endpoint": ("GET /database/1/{container}/{environment}/{database}/users/current"),
     "login_probe_query": {"ckAPIToken": "<api-token>"},
     "auth_required_response": {
         "serverErrorCode": "AUTHENTICATION_REQUIRED",
@@ -126,9 +124,7 @@ def initiate_login(
 def extract_web_auth_token(callback_url: str, *, allow_loopback_http: bool = False) -> str:
     parsed = urlsplit(callback_url)
     if not parsed.scheme or not parsed.netloc:
-        raise MalformedCallbackURLError(
-            "CloudKit callback URL is malformed or missing a host"
-        )
+        raise MalformedCallbackURLError("CloudKit callback URL is malformed or missing a host")
     if parsed.scheme != "https" and not (
         allow_loopback_http
         and parsed.scheme == "http"
@@ -145,16 +141,12 @@ def extract_web_auth_token(callback_url: str, *, allow_loopback_http: bool = Fal
 
     tokens = values.get(CK_WEB_AUTH_TOKEN_QUERY_KEY)
     if not tokens or not tokens[0]:
-        raise MalformedCallbackURLError(
-            "CloudKit callback URL is missing ckWebAuthToken"
-        )
+        raise MalformedCallbackURLError("CloudKit callback URL is missing ckWebAuthToken")
     return tokens[0]
 
 
 def successor_web_auth_token(payload: dict[str, Any]) -> str | None:
-    for key in CLOUDKIT_AUTH_BEHAVIOR_FIXTURE[
-        "observed_successor_token_response_keys"
-    ]:
+    for key in CLOUDKIT_AUTH_BEHAVIOR_FIXTURE["observed_successor_token_response_keys"]:
         token = payload.get(key)
         if isinstance(token, str) and token:
             return token

@@ -28,13 +28,10 @@ def emit_placeholder(state: AppState, area: str) -> None:
         emit_json(message)
         raise typer.Exit(code=1)
 
-    console(stderr=True).print(
-        f"[yellow]{area} is scaffolded but not implemented yet.[/yellow]"
-    )
+    console(stderr=True).print(f"[yellow]{area} is scaffolded but not implemented yet.[/yellow]")
     raise typer.Exit(code=1)
 
 
 def emit_error(message: str, *, redactor: SecretRedactor | None = None) -> None:
     output = redactor.redact(message) if redactor else message
     console(stderr=True).print(f"[red]{output}[/red]")
-

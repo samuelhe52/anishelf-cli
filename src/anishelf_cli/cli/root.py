@@ -12,16 +12,16 @@ import typer
 
 from anishelf_cli.cli import groups
 from anishelf_cli.cli.common import state_from_context
+from anishelf_cli.cloudkit.api_token import (
+    MissingCloudKitAPITokenError,
+    resolve_cloudkit_api_token,
+)
 from anishelf_cli.cloudkit.auth import (
     CloudKitAuthError,
     LoopbackLoginTimeoutError,
     capture_loopback_callback,
     extract_web_auth_token,
     initiate_login,
-)
-from anishelf_cli.cloudkit.tokens import (
-    ConfiguredCloudKitAPITokenProvider,
-    MissingCloudKitAPITokenError,
 )
 from anishelf_cli.core.output import emit_error, emit_json, emit_placeholder
 from anishelf_cli.core.redaction import SecretRedactor
@@ -157,7 +157,7 @@ def login(
     redactor = SecretRedactor()
 
     try:
-        api_token = ConfiguredCloudKitAPITokenProvider(state.profile, profile).resolve()
+        api_token = resolve_cloudkit_api_token()
         redactor.register(api_token.value, "cloudkit-api-token")
 
         with _make_http_client() as client:
@@ -194,7 +194,8 @@ def login(
         "status": "logged-in",
         "storage": "keychain",
         "callback_strategy": strategy,
-        "api_token_source": api_token.source_label,
+        "cloudkit_api_token_source": api_token.source,
+        "cloudkit_api_token_version": api_token.version,
     }
     if state.json_output:
         emit_json(payload)

@@ -1,2 +1,1 @@
 """CloudKit adapters and models."""
-

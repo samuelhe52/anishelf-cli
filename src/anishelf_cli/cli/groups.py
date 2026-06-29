@@ -8,12 +8,12 @@ import typer
 
 from anishelf_cli import config
 from anishelf_cli.cli.common import state_from_context
+from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
 from anishelf_cli.core.output import emit_json, emit_placeholder
-from anishelf_cli.models import CallbackStrategy, CloudKitTokenSourceKind, TokenSourceKind
+from anishelf_cli.models import CallbackStrategy, TokenSourceKind
 from anishelf_cli.profiles import load_profile, update_profile
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
-    cloudkit_api_token_secret,
     default_secret_store,
     env_file_permission_warning,
     set_secret,
@@ -36,6 +36,7 @@ schema_app = typer.Typer(help="AniShelf schema validation commands.", no_args_is
 def profile_status(ctx: typer.Context) -> None:
     state = state_from_context(ctx)
     profile = load_profile(state.profile)
+    api_token = resolve_cloudkit_api_token()
     tmdb_api_key_envs = list(profile.tmdb_api_key_envs)
     payload = {
         "profile": state.profile,
@@ -43,9 +44,8 @@ def profile_status(ctx: typer.Context) -> None:
         "environment": profile.environment,
         "database": profile.database,
         "callback_strategy": profile.callback_strategy,
-        "cloudkit_token_source": profile.cloudkit_token_source,
-        "cloudkit_api_token_env": profile.cloudkit_api_token_env,
-        "cloudkit_api_token_version_env": profile.cloudkit_api_token_version_env,
+        "cloudkit_api_token_source": api_token.source,
+        "cloudkit_api_token_version": api_token.version,
         "tmdb_token_source": profile.tmdb_token_source,
         "tmdb_api_key_envs": tmdb_api_key_envs,
         "env_file": str(profile.env_file) if profile.env_file else None,
@@ -59,8 +59,8 @@ def profile_status(ctx: typer.Context) -> None:
     typer.echo(f"Environment: {payload['environment']}")
     typer.echo(f"Database: {payload['database']}")
     typer.echo(f"Callback strategy: {payload['callback_strategy']}")
-    typer.echo(f"CloudKit token source: {payload['cloudkit_token_source']}")
-    typer.echo(f"CloudKit token env: {payload['cloudkit_api_token_env']}")
+    typer.echo(f"CloudKit app auth source: {payload['cloudkit_api_token_source']}")
+    typer.echo(f"CloudKit app auth version: {payload['cloudkit_api_token_version']}")
     typer.echo(f"TMDb token source: {payload['tmdb_token_source']}")
     typer.echo(f"TMDb token envs: {', '.join(tmdb_api_key_envs)}")
     if payload["env_file"]:
@@ -83,18 +83,6 @@ def profile_configure(
     callback_strategy: Annotated[
         CallbackStrategy | None,
         typer.Option(help="Login callback capture strategy."),
-    ] = None,
-    cloudkit_token_source: Annotated[
-        CloudKitTokenSourceKind | None,
-        typer.Option(help="CloudKit API token source selection."),
-    ] = None,
-    cloudkit_token_env: Annotated[
-        str | None,
-        typer.Option(help="Environment variable used for CloudKit API tokens."),
-    ] = None,
-    cloudkit_token_version_env: Annotated[
-        str | None,
-        typer.Option(help="Environment variable used for CloudKit token version labels."),
     ] = None,
     tmdb_token_source: Annotated[
         TokenSourceKind | None,
@@ -119,9 +107,6 @@ def profile_configure(
         "environment": environment,
         "database": database,
         "callback_strategy": callback_strategy,
-        "cloudkit_token_source": cloudkit_token_source,
-        "cloudkit_api_token_env": cloudkit_token_env,
-        "cloudkit_api_token_version_env": cloudkit_token_version_env,
         "tmdb_token_source": tmdb_token_source,
         "tmdb_api_key_envs": tuple(tmdb_token_env) if tmdb_token_env else None,
         "env_file": env_file.expanduser() if env_file else None,
@@ -135,7 +120,6 @@ def profile_configure(
         "environment": profile.environment,
         "database": profile.database,
         "callback_strategy": profile.callback_strategy,
-        "cloudkit_token_source": profile.cloudkit_token_source,
         "tmdb_token_source": profile.tmdb_token_source,
         "env_file": str(profile.env_file) if profile.env_file else None,
         "anishelf_source": str(profile.anishelf_source),
@@ -160,27 +144,6 @@ def config_show(ctx: typer.Context) -> None:
     )
 
 
-@config_app.command("set-cloudkit-token")
-def config_set_cloudkit_token(
-    ctx: typer.Context,
-    from_stdin: Annotated[
-        bool,
-        typer.Option("--stdin", help="Read the token from stdin instead of prompting."),
-    ] = False,
-) -> None:
-    state = state_from_context(ctx)
-    token = sys.stdin.read().strip() if from_stdin else typer.prompt(
-        "CloudKit API token",
-        hide_input=True,
-    )
-    try:
-        set_secret(cloudkit_api_token_secret(state.profile), token, default_secret_store())
-    except (SecretStorageUnavailableError, ValueError) as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2) from exc
-    _emit_secret_saved(state.json_output, state.profile, "cloudkit-api-token")
-
-
 @config_app.command("set-tmdb-token")
 def config_set_tmdb_token(
     ctx: typer.Context,
@@ -193,9 +156,13 @@ def config_set_tmdb_token(
     profile = load_profile(state.profile)
     if profile.env_file and (warning := env_file_permission_warning(profile.env_file)):
         typer.echo(warning, err=True)
-    token = sys.stdin.read().strip() if from_stdin else typer.prompt(
-        "TMDb API key",
-        hide_input=True,
+    token = (
+        sys.stdin.read().strip()
+        if from_stdin
+        else typer.prompt(
+            "TMDb API key",
+            hide_input=True,
+        )
     )
     try:
         set_secret(tmdb_api_key_secret(state.profile), token, default_secret_store())
