@@ -1,0 +1,73 @@
+# AniShelf Domain Reference
+
+Developer reference for decoding AniShelf library data and shaping read-only
+library commands. This is not a full command specification.
+
+## CloudKit Schema
+
+Current reference constants:
+
+- Container: `iCloud.com.samuelhe.MyAnimeList`
+- Custom zone: `AniShelfLibrary`
+- Library entry record type: `LibraryEntry`
+- Settings record type: `LibrarySettings`
+- Settings record name: `userDefaults`
+
+Stable library identities are semantic record names:
+
+- `movie:<tmdbID>`
+- `series:<tmdbID>`
+- `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`
+
+`LibraryEntry` live snapshots should decode identity, TMDb IDs, entry type,
+display state, saved date, watch status, dates, score, favorite, notes, custom
+poster path, episode progress, and update clocks. Tombstones should decode from
+valid identity fields plus `deletedAt`.
+
+Unsupported future schema versions should fail explicitly instead of silently
+dropping fields or guessing.
+
+## Cache
+
+Full-library commands should prefer zone changes over broad queries once cache
+work starts. The cache should be rebuildable, live under the platform user cache
+directory, and key state by CloudKit scope plus authenticated user.
+
+Token advancement must be commit-after-apply: persist a durable change token
+only after the matching record changes have been applied. If CloudKit reports an
+expired change token, discard the affected cursor and rebuild.
+
+## Public Commands
+
+Normal user commands should stay library-first. Useful read-only surfaces
+include:
+
+- `library get <identity...>`
+- `library list` with filters
+- `library search --title`
+- `library export`
+- `schema check`
+- `tmdb search --title`
+- `metadata hydrate`
+
+Low-level CloudKit zone, record, and change commands are diagnostics. If they
+remain public, keep them clearly separate from the library UX.
+
+## Batch And Output
+
+Commands that naturally accept one identity should usually accept many. Batch
+input can grow from positional arguments first, then stdin/file/JSONL when a
+real workflow needs it.
+
+Batch output should preserve caller order, keep item-level errors, and keep
+progress or diagnostics on stderr. Partial-success exit behavior should be
+defined when the first batch command needs it.
+
+## Metadata Hydration
+
+CloudKit records do not contain rich TMDb metadata such as localized titles,
+overviews, posters for normal TMDb items, runtime, credits, or season detail.
+Hydration should be explicit and optional.
+
+Initial depth names can remain `none`, `summary`, `details`, and `full`, but the
+exact fields should be finalized alongside the first implemented metadata path.

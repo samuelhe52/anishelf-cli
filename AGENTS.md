@@ -7,13 +7,15 @@ the relevant one when the task touches that area.
 
 - `docs/north-star.md`: Read when changing product direction, command scope,
   read-only policy, configuration shape, or other broad CLI design decisions.
-- `docs/cloudkit-auth-and-execution.md`: Read when working on CloudKit login,
+- `docs/implementation-state.md`: Read when you need the lightweight current
+  repo state, near-term direction, or known open decisions.
+- `docs/reference/cloudkit-auth.md`: Read when working on CloudKit login,
   logout, web auth token storage, authenticated request execution, successor
   token handling, locking, retry/error classification, or token redaction.
-- `docs/cloudkit-app-auth-distribution.md`: Read when working on embedded
+- `docs/reference/cloudkit-app-auth.md`: Read when working on embedded
   CloudKit app auth, environment overrides, app-token redaction, token
   invalidation diagnostics, manifest checks, or release rotation.
-- `docs/anishelf-domain-reference.md`: Read when working on AniShelf library
+- `docs/reference/anishelf-domain.md`: Read when working on AniShelf library
   decoding, record identities, schema drift checks, local cache behavior, batch
   input/output, library commands, exports, TMDb metadata hydration, or metadata
   caching.
