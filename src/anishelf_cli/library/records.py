@@ -3,10 +3,11 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
+
+from anishelf_cli.library.identity import LibraryIdentity
 
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
 SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION = 2
@@ -15,39 +16,8 @@ SWIFT_REFERENCE_DATE = datetime(2001, 1, 1, tzinfo=UTC)
 WATCH_STATUS_VALUES = {"planToWatch", "watching", "watched", "dropped"}
 
 
-class LibraryIdentityError(ValueError):
-    pass
-
-
 class LibraryRecordDecodeError(ValueError):
     pass
-
-
-@dataclass(frozen=True, slots=True)
-class LibraryIdentity:
-    raw: str
-    entry_type: str
-    tmdb_id: int
-    parent_series_id: int | None = None
-    season_number: int | None = None
-
-
-def parse_library_identity(raw_identity: str) -> LibraryIdentity:
-    parts = raw_identity.split(":")
-    if len(parts) == 2 and parts[0] in {"movie", "series"}:
-        tmdb_id = _parse_positive_int(parts[1], "tmdbID")
-        return LibraryIdentity(raw_identity, parts[0], tmdb_id)
-
-    if len(parts) == 4 and parts[0] == "season":
-        parent_series_id = _parse_positive_int(parts[1], "parentSeriesID")
-        season_number = _parse_non_negative_int(parts[2], "seasonNumber")
-        tmdb_id = _parse_positive_int(parts[3], "tmdbID")
-        return LibraryIdentity(raw_identity, "season", tmdb_id, parent_series_id, season_number)
-
-    raise LibraryIdentityError(
-        "Expected identity in one of these forms: movie:<tmdbID>, series:<tmdbID>, "
-        "season:<parentSeriesID>:<seasonNumber>:<tmdbID>."
-    )
 
 
 def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
@@ -124,120 +94,6 @@ def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
         "library_updated_at": _optional_datetime(fields, "libraryUpdatedAt"),
         "tracking_updated_at": _optional_datetime(fields, "trackingUpdatedAt"),
     }
-
-
-def library_get_envelope(
-    identities: list[str],
-    lookup_payload: dict[str, Any] | None,
-) -> dict[str, Any]:
-    parsed_identities: dict[str, LibraryIdentity] = {}
-    items: list[dict[str, Any] | None] = []
-
-    for raw_identity in identities:
-        try:
-            parsed = parse_library_identity(raw_identity)
-        except LibraryIdentityError as exc:
-            items.append(
-                _error_item(raw_identity, "invalid_identity", str(exc)),
-            )
-        else:
-            parsed_identities[raw_identity] = parsed
-            items.append(None)
-
-    lookup_results = _lookup_results_by_record_name(lookup_payload or {})
-    for index, raw_identity in enumerate(identities):
-        if items[index] is not None:
-            continue
-        if raw_identity not in parsed_identities:
-            continue
-
-        result = lookup_results.get(raw_identity)
-        if result is None:
-            items[index] = _error_item(raw_identity, "not_found", "Library entry not found.")
-            continue
-        if code := _optional_string(result.get("serverErrorCode")):
-            items[index] = _error_item(
-                raw_identity,
-                _item_error_code(code),
-                _cloudkit_item_error_message(result),
-            )
-            continue
-        try:
-            entry = decode_library_entry_record(result)
-        except LibraryRecordDecodeError as exc:
-            items[index] = _error_item(raw_identity, "decode_error", str(exc))
-            continue
-
-        items[index] = {"identity": raw_identity, "status": "found", "entry": entry}
-
-    completed_items = [item for item in items if item is not None]
-    return {
-        "items": completed_items,
-        "summary": {
-            "requested": len(identities),
-            "found": sum(1 for item in completed_items if item["status"] == "found"),
-            "errors": sum(1 for item in completed_items if item["status"] == "error"),
-        },
-    }
-
-
-def valid_lookup_record_names(identities: list[str]) -> list[str]:
-    valid: list[str] = []
-    for identity in identities:
-        try:
-            parse_library_identity(identity)
-        except LibraryIdentityError:
-            continue
-        valid.append(identity)
-    return valid
-
-
-def has_any_found_item(envelope: dict[str, Any]) -> bool:
-    items = envelope.get("items")
-    return isinstance(items, list) and any(
-        isinstance(item, dict) and item.get("status") == "found" for item in items
-    )
-
-
-def _lookup_results_by_record_name(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    records = payload.get("records")
-    if not isinstance(records, list):
-        return {}
-
-    results: dict[str, dict[str, Any]] = {}
-    for item in records:
-        if not isinstance(item, dict):
-            continue
-        record_name = _record_name_or_none(item)
-        if record_name:
-            results[record_name] = item
-    return results
-
-
-def _error_item(identity: str, code: str, message: str) -> dict[str, Any]:
-    return {
-        "identity": identity,
-        "status": "error",
-        "error": {
-            "code": code,
-            "message": message,
-        },
-    }
-
-
-def _item_error_code(server_error_code: str) -> str:
-    normalized = server_error_code.lower().replace("-", "_")
-    if normalized in {"not_found", "unknown_item"}:
-        return "not_found"
-    return normalized
-
-
-def _cloudkit_item_error_message(result: dict[str, Any]) -> str:
-    if reason := _optional_string(result.get("reason")):
-        return reason
-    if code := _optional_string(result.get("serverErrorCode")):
-        return code
-    return "CloudKit returned an item-level error."
 
 
 def _record_name(record: dict[str, Any]) -> str:
@@ -470,24 +326,3 @@ def _iso_z(value: datetime) -> str:
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
-
-
-def _parse_positive_int(raw: str, label: str) -> int:
-    value = _parse_int(raw, label)
-    if value <= 0:
-        raise LibraryIdentityError(f"{label} must be a positive integer.")
-    return value
-
-
-def _parse_non_negative_int(raw: str, label: str) -> int:
-    value = _parse_int(raw, label)
-    if value < 0:
-        raise LibraryIdentityError(f"{label} must be a non-negative integer.")
-    return value
-
-
-def _parse_int(raw: str, label: str) -> int:
-    try:
-        return int(raw)
-    except ValueError as exc:
-        raise LibraryIdentityError(f"{label} must be an integer.") from exc
