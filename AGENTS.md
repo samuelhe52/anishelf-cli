@@ -25,5 +25,6 @@ the relevant one when the task touches that area.
 - Never print secret values, raw callback URLs containing tokens, or stored auth
   tokens in normal output, JSON output, logs, errors, tests, or docs.
 - Do not add user-facing CloudKit app-token setup or storage instructions.
-- Keep Keychain storage for user-scoped CloudKit web auth tokens and TMDb keys;
   do not add Keychain storage for CloudKit app auth.
+- Commit messages should use concise `type: Subject` style, for example
+  `feat: Add CloudKit login flow` or `fix: Tighten credential source handling`.
