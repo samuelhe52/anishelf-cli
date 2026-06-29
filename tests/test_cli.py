@@ -30,7 +30,7 @@ def test_root_help_mentions_global_options() -> None:
     assert "--json" in result.stdout
     assert "--verbose" in result.stdout
     assert "--metadata-depth" in result.stdout
-    assert "--anishelf-source" in result.stdout
+    assert "--anishelf-source" not in result.stdout
 
 
 def test_profile_status_json_shows_effective_scope_without_secrets() -> None:
@@ -47,6 +47,7 @@ def test_profile_status_json_shows_effective_scope_without_secrets() -> None:
     assert payload["cloudkit_api_token_version"] is None
     assert "cloudkit_token_source" not in payload
     assert "cloudkit_api_token_env" not in payload
+    assert "anishelf_source" not in payload
     assert "cloudkit-api-token" not in result.stdout
     assert "api-secret-token" not in result.stdout
     assert "ckWebAuthToken" not in result.stdout
@@ -55,7 +56,6 @@ def test_profile_status_json_shows_effective_scope_without_secrets() -> None:
 def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     env_file = tmp_path / "tokens.env"
-    anishelf_source = tmp_path / "AniShelf"
 
     result = runner.invoke(
         app,
@@ -67,8 +67,6 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
             "configure",
             "--env-file",
             str(env_file),
-            "--anishelf-source",
-            str(anishelf_source),
             "--tmdb-token-env",
             "ANI_TMDB_API_KEY",
             "--tmdb-token-env",
@@ -80,7 +78,9 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
     payload = json.loads(result.stdout)
     assert payload["profile"] == "prod"
     assert payload["env_file"] == str(env_file)
-    assert payload["anishelf_source"] == str(anishelf_source)
+    assert "anishelf_source" not in payload
+    saved_profile = json.loads((tmp_path / "config" / "profiles" / "prod.json").read_text())
+    assert "anishelf_source" not in saved_profile
 
     status = runner.invoke(app, ["--json", "--profile", "prod", "profile", "status"])
 
@@ -88,6 +88,24 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
     status_payload = json.loads(status.stdout)
     assert status_payload["cloudkit_api_token_source"] == "embedded-public"
     assert status_payload["tmdb_api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
+    assert "anishelf_source" not in status_payload
+
+
+def test_profile_configure_has_no_anishelf_source_option(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        [
+            "profile",
+            "configure",
+            "--anishelf-source",
+            str(tmp_path / "AniShelf"),
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "anishelf-source" in result.stderr
 
 
 def test_profile_configure_has_no_cloudkit_token_source_option(tmp_path, monkeypatch) -> None:

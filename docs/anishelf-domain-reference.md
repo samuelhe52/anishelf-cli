@@ -34,10 +34,11 @@ dropping fields or guessing.
 
 ## Schema Drift
 
-The CLI should use a committed schema snapshot for runtime decoding, then expose
-a schema check command that compares that snapshot against an AniShelf checkout.
-The source authority is the `DataProvider/Sources/LibrarySync` area of the
-AniShelf repo.
+The CLI should use a committed schema snapshot for runtime decoding. Schema
+drift detection is a manual developer-maintainer workflow that compares that
+snapshot against an explicitly supplied local AniShelf checkout when needed,
+not a value stored in user profiles or global CLI configuration. The source
+authority is the `DataProvider/Sources/LibrarySync` area of the AniShelf repo.
 
 Schema checks should compare:
 

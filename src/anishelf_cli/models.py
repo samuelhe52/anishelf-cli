@@ -3,10 +3,9 @@ from __future__ import annotations
 from enum import StrEnum
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from anishelf_cli.config import (
-    DEFAULT_ANISHELF_SOURCE,
     DEFAULT_CONTAINER,
     DEFAULT_DATABASE,
     DEFAULT_ENVIRONMENT,
@@ -41,7 +40,6 @@ class ProfileConfig(BaseModel):
     tmdb_token_source: TokenSourceKind = TokenSourceKind.AUTO
     tmdb_api_key_envs: tuple[str, ...] = DEFAULT_TMDB_API_KEY_ENVS
     env_file: Path | None = None
-    anishelf_source: Path = Field(default_factory=lambda: DEFAULT_ANISHELF_SOURCE)
 
 
 class AppState(BaseModel):
@@ -49,4 +47,3 @@ class AppState(BaseModel):
     json_output: bool = False
     verbosity: int = 0
     metadata_depth: MetadataDepth | None = None
-    anishelf_source: Path | None = None

@@ -4,7 +4,6 @@ import os
 import sys
 import termios
 import webbrowser
-from pathlib import Path
 from typing import Annotated, TextIO
 
 import httpx
@@ -61,17 +60,12 @@ def root_callback(
         MetadataDepth | None,
         typer.Option(help="Override command-specific metadata depth defaults."),
     ] = None,
-    anishelf_source: Annotated[
-        Path | None,
-        typer.Option(help="Path to the AniShelf checkout used for schema checks."),
-    ] = None,
 ) -> None:
     ctx.obj = AppState(
         profile=profile,
         json_output=json_output,
         verbosity=verbose,
         metadata_depth=metadata_depth,
-        anishelf_source=anishelf_source,
     )
 
 

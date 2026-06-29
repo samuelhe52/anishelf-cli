@@ -19,7 +19,7 @@ def load_profile(profile: str) -> ProfileConfig:
 def update_profile(profile: str, updates: dict[str, Any]) -> tuple[ProfileConfig, Path]:
     config = load_profile(profile)
     non_empty_updates = {key: value for key, value in updates.items() if value is not None}
-    next_config = config.model_copy(update=non_empty_updates)
+    next_config = ProfileConfig.model_validate(config.model_dump() | non_empty_updates)
     return next_config, save_profile(profile, next_config)
 
 

@@ -12,7 +12,6 @@ DEFAULT_CONTAINER = "iCloud.com.samuelhe.MyAnimeList"
 DEFAULT_ENVIRONMENT = "production"
 DEFAULT_DATABASE = "private"
 DEFAULT_PROFILE = "default"
-DEFAULT_ANISHELF_SOURCE = Path("~/projects/AniShelf").expanduser()
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
 
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"

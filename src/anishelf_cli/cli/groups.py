@@ -49,7 +49,6 @@ def profile_status(ctx: typer.Context) -> None:
         "tmdb_token_source": profile.tmdb_token_source,
         "tmdb_api_key_envs": tmdb_api_key_envs,
         "env_file": str(profile.env_file) if profile.env_file else None,
-        "anishelf_source": str(state.anishelf_source or profile.anishelf_source),
     }
     if state.json_output:
         emit_json(payload)
@@ -65,7 +64,6 @@ def profile_status(ctx: typer.Context) -> None:
     typer.echo(f"TMDb token envs: {', '.join(tmdb_api_key_envs)}")
     if payload["env_file"]:
         typer.echo(f"Env file: {payload['env_file']}")
-    typer.echo(f"AniShelf source: {payload['anishelf_source']}")
 
 
 @profile_app.command("configure")
@@ -96,10 +94,6 @@ def profile_configure(
         Path | None,
         typer.Option(help="Optional plaintext env file for headless token lookup."),
     ] = None,
-    anishelf_source: Annotated[
-        Path | None,
-        typer.Option(help="Path to the AniShelf checkout used for schema checks."),
-    ] = None,
 ) -> None:
     state = state_from_context(ctx)
     updates = {
@@ -110,7 +104,6 @@ def profile_configure(
         "tmdb_token_source": tmdb_token_source,
         "tmdb_api_key_envs": tuple(tmdb_token_env) if tmdb_token_env else None,
         "env_file": env_file.expanduser() if env_file else None,
-        "anishelf_source": anishelf_source.expanduser() if anishelf_source else None,
     }
     profile, path = update_profile(state.profile, updates)
     payload = {
@@ -122,7 +115,6 @@ def profile_configure(
         "callback_strategy": profile.callback_strategy,
         "tmdb_token_source": profile.tmdb_token_source,
         "env_file": str(profile.env_file) if profile.env_file else None,
-        "anishelf_source": str(profile.anishelf_source),
     }
     if state.json_output:
         emit_json(payload)

@@ -55,8 +55,10 @@ domain concepts rather than raw CloudKit records whenever practical.
 - The first-class production login flow may require browser login followed by
   manual paste of an HTTPS callback URL.
 - Local profile configuration should describe the effective container,
-  environment, database, callback strategy, and AniShelf source path without
-  exposing secret values.
+  environment, database, and callback strategy without exposing secret values.
+- Schema drift checks are a manual developer-maintainer workflow against an
+  explicit local AniShelf checkout when needed, not persisted user profile or
+  global CLI configuration.
 - The CLI should use stable exit behavior and stable error codes for automated
   callers, but the exact code table should be defined in the relevant stage spec.
 
