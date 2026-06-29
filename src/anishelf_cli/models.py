@@ -7,9 +7,12 @@ from pydantic import BaseModel, Field
 
 from anishelf_cli.config import (
     DEFAULT_ANISHELF_SOURCE,
+    DEFAULT_CLOUDKIT_API_TOKEN_ENV,
+    DEFAULT_CLOUDKIT_API_TOKEN_VERSION_ENV,
     DEFAULT_CONTAINER,
     DEFAULT_DATABASE,
     DEFAULT_ENVIRONMENT,
+    DEFAULT_TMDB_API_KEY_ENVS,
 )
 
 
@@ -38,7 +41,10 @@ class ProfileConfig(BaseModel):
     database: str = DEFAULT_DATABASE
     callback_strategy: CallbackStrategy = CallbackStrategy.MANUAL_PASTE
     cloudkit_token_source: TokenSourceKind = TokenSourceKind.AUTO
+    cloudkit_api_token_env: str = DEFAULT_CLOUDKIT_API_TOKEN_ENV
+    cloudkit_api_token_version_env: str = DEFAULT_CLOUDKIT_API_TOKEN_VERSION_ENV
     tmdb_token_source: TokenSourceKind = TokenSourceKind.AUTO
+    tmdb_api_key_envs: tuple[str, ...] = DEFAULT_TMDB_API_KEY_ENVS
     env_file: Path | None = None
     anishelf_source: Path = Field(default_factory=lambda: DEFAULT_ANISHELF_SOURCE)
 
@@ -49,4 +55,3 @@ class AppState(BaseModel):
     verbosity: int = 0
     metadata_depth: MetadataDepth | None = None
     anishelf_source: Path | None = None
-

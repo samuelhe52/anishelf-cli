@@ -7,13 +7,13 @@
 
 ## 2. Profile and Credential Storage
 
-- [ ] 2.1 Implement profile config load/save with container, production environment, private database, callback strategy, CloudKit API token provider selection, TMDb token source, optional env-file path, and optional AniShelf path.
-- [ ] 2.2 Implement profile status output in human-readable and JSON formats without exposing secret values.
-- [ ] 2.3 Implement a CloudKit API token provider interface returning token value, redacted source label, and optional token version, with developer-configured environment variable precedence and Keychain fallback in this change.
-- [ ] 2.4 Implement TMDb token lookup with process environment precedence, optional user env-file support, and Keychain fallback.
-- [ ] 2.5 Implement secure CloudKit web auth token storage through keyring with a fail-closed path when no secure backend is available.
-- [ ] 2.6 Implement logout by deleting the stored web auth token for the selected profile.
-- [ ] 2.7 Implement non-echoing config commands for storing CloudKit and TMDb tokens in Keychain, plus env-file permission warnings.
+- [x] 2.1 Implement profile config load/save with container, production environment, private database, callback strategy, CloudKit API token provider selection, TMDb token source, optional env-file path, and optional AniShelf path.
+- [x] 2.2 Implement profile status output in human-readable and JSON formats without exposing secret values.
+- [x] 2.3 Implement a CloudKit API token provider interface returning token value, redacted source label, and optional token version, with developer-configured environment variable precedence and Keychain fallback in this change.
+- [x] 2.4 Implement TMDb token lookup with process environment precedence, optional user env-file support, and Keychain fallback.
+- [x] 2.5 Implement secure CloudKit web auth token storage through keyring with a fail-closed path when no secure backend is available.
+- [x] 2.6 Implement logout by deleting the stored web auth token for the selected profile.
+- [x] 2.7 Implement non-echoing config commands for storing CloudKit and TMDb tokens in Keychain, plus env-file permission warnings.
 
 ## 3. CloudKit Auth Flow
 

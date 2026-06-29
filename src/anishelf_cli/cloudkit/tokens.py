@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Protocol
+
+from anishelf_cli.models import ProfileConfig, TokenSourceKind
+from anishelf_cli.secrets import SecretStore, cloudkit_api_token_secret, get_secret
 
 
 @dataclass(frozen=True, slots=True)
@@ -15,3 +19,38 @@ class CloudKitAPITokenProvider(Protocol):
     def resolve(self) -> CloudKitAPIToken:
         """Return the token value plus non-secret source metadata."""
 
+
+class MissingCloudKitAPITokenError(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ConfiguredCloudKitAPITokenProvider:
+    profile_name: str
+    profile: ProfileConfig
+    store: SecretStore | None = None
+
+    def resolve(self) -> CloudKitAPIToken:
+        source = self.profile.cloudkit_token_source
+
+        if source in (TokenSourceKind.AUTO, TokenSourceKind.ENV):
+            token = os.environ.get(self.profile.cloudkit_api_token_env)
+            if token:
+                return CloudKitAPIToken(
+                    value=token,
+                    source_label=f"env:{self.profile.cloudkit_api_token_env}",
+                    token_version=os.environ.get(self.profile.cloudkit_api_token_version_env),
+                )
+
+        if source in (TokenSourceKind.AUTO, TokenSourceKind.KEYCHAIN):
+            token = get_secret(cloudkit_api_token_secret(self.profile_name), self.store)
+            if token:
+                return CloudKitAPIToken(
+                    value=token,
+                    source_label=f"keychain:{self.profile_name}",
+                )
+
+        raise MissingCloudKitAPITokenError(
+            "CloudKit API token is not configured. Set "
+            f"{self.profile.cloudkit_api_token_env} or run `ani config set-cloudkit-token`."
+        )

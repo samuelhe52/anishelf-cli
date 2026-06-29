@@ -8,6 +8,7 @@ import typer
 from anishelf_cli.cli import groups
 from anishelf_cli.core.output import emit_placeholder
 from anishelf_cli.models import AppState, MetadataDepth
+from anishelf_cli.secrets import SecretStorageUnavailableError, delete_cloudkit_web_auth_token
 
 app = typer.Typer(
     add_completion=False,
@@ -58,7 +59,23 @@ def login(ctx: typer.Context) -> None:
 
 @app.command()
 def logout(ctx: typer.Context) -> None:
-    emit_placeholder(ctx.obj, "logout")
+    state = ctx.obj
+    if not isinstance(state, AppState):
+        raise RuntimeError("CLI context was not initialized")
+
+    try:
+        delete_cloudkit_web_auth_token(state.profile)
+    except SecretStorageUnavailableError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    if state.json_output:
+        from anishelf_cli.core.output import emit_json
+
+        emit_json({"profile": state.profile, "status": "logged-out"})
+        return
+
+    typer.echo(f"Removed CloudKit web auth token for profile {state.profile}.")
 
 
 @app.command()
