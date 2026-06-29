@@ -24,10 +24,10 @@ The system SHALL let a user configure a CloudKit profile containing container id
 - **WHEN** both the CloudKit API token environment variable and a Keychain token are available
 - **THEN** the CLI uses the environment variable value for that process and does not overwrite the Keychain value
 
-#### Scenario: TMDb token source order is deterministic
+#### Scenario: TMDb API key source order is deterministic
 
 - **WHEN** a command requires TMDb access
-- **THEN** the CLI resolves a TMDb API Read Access Token from process environment, then the configured user env file, then Keychain, and never prints the token source value
+- **THEN** the CLI resolves a TMDb API key from process environment, then the configured user env file, then Keychain, and never prints the token source value
 
 #### Scenario: Plaintext env file warns on broad permissions
 

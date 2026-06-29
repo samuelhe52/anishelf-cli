@@ -28,18 +28,9 @@ def cloudkit_web_auth_token_secret(profile: str) -> SecretDescriptor:
     )
 
 
-def tmdb_read_access_token_secret(profile: str) -> SecretDescriptor:
-    return SecretDescriptor(
-        service=config.KEYCHAIN_SERVICE_TMDB_READ_ACCESS_TOKEN,
-        account=profile,
-        label="TMDb read access token",
-    )
-
-
 def tmdb_api_key_secret(profile: str) -> SecretDescriptor:
     return SecretDescriptor(
         service=config.KEYCHAIN_SERVICE_TMDB_API_KEY,
         account=profile,
         label="TMDb API key",
     )
-

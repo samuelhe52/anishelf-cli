@@ -4,6 +4,8 @@
 .pytest_cache/
 .ruff_cache/
 .venv/
+__pycache__/
+*.py[cod]
 build/
 dist/
 htmlcov/
@@ -17,4 +19,3 @@ uv.lock
 # Personal agent tooling
 .claude/
 .codex/
-

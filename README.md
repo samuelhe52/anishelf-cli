@@ -8,7 +8,7 @@ This repository is being scaffolded from the `cloudkit-private-db-agent-cli` Ope
 
 ## Tooling
 
-- Python `>=3.12`
+- Python `>=3.13`
 - `uv` for environment and dependency management
 - `pytest` for tests
 - `ruff` for linting
@@ -27,4 +27,3 @@ uv run mypy src
 ## Secret handling
 
 Do not commit CloudKit or TMDb credentials to this repository. Use Keychain-backed storage or a local env file outside the repo such as `~/.secrets/env/anishelf-cli.env`.
-

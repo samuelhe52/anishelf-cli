@@ -1,6 +1,6 @@
 ## 1. Project Setup
 
-- [x] 1.1 Create a Python 3.12+ `uv` project with package metadata, console script entry point, pytest configuration, and lint/type-check commands.
+- [x] 1.1 Create a Python 3.13+ `uv` project with package metadata, console script entry point, pytest configuration, and lint/type-check commands.
 - [x] 1.2 Add initial dependencies for Typer, HTTPX, Pydantic, keyring, platformdirs, filelock, `tmdbsimple`, and rich/table output.
 - [x] 1.3 Define the `ani` CLI command tree and global options for profile, JSON output, verbosity, metadata depth, and AniShelf source path.
 - [x] 1.4 Add a token-redacting logging/error utility and tests proving CloudKit tokens, TMDb tokens, and callback URLs are never printed.

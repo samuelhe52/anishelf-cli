@@ -15,7 +15,6 @@ DEFAULT_ANISHELF_SOURCE = Path("~/projects/AniShelf").expanduser()
 
 KEYCHAIN_SERVICE_CLOUDKIT_API_TOKEN = "anishelf-cli.cloudkit-api-token"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
-KEYCHAIN_SERVICE_TMDB_READ_ACCESS_TOKEN = "anishelf-cli.tmdb-read-access-token"
 KEYCHAIN_SERVICE_TMDB_API_KEY = "anishelf-cli.tmdb-api-key"
 
 dirs = PlatformDirs(appname=APP_NAME, appauthor=APP_AUTHOR)
@@ -39,4 +38,3 @@ def profile_config_path(profile: str) -> Path:
 
 def profile_lock_path(profile: str) -> Path:
     return data_dir() / "locks" / f"{profile}.lock"
-
