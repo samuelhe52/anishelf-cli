@@ -4,7 +4,7 @@ import os
 from dataclasses import dataclass
 from typing import Protocol
 
-from anishelf_cli.models import ProfileConfig, TokenSourceKind
+from anishelf_cli.models import CloudKitTokenSourceKind, ProfileConfig
 from anishelf_cli.secrets import SecretStore, cloudkit_api_token_secret, get_secret
 
 
@@ -33,7 +33,7 @@ class ConfiguredCloudKitAPITokenProvider:
     def resolve(self) -> CloudKitAPIToken:
         source = self.profile.cloudkit_token_source
 
-        if source in (TokenSourceKind.AUTO, TokenSourceKind.ENV):
+        if source in (CloudKitTokenSourceKind.AUTO, CloudKitTokenSourceKind.ENV):
             token = os.environ.get(self.profile.cloudkit_api_token_env)
             if token:
                 return CloudKitAPIToken(
@@ -42,7 +42,7 @@ class ConfiguredCloudKitAPITokenProvider:
                     token_version=os.environ.get(self.profile.cloudkit_api_token_version_env),
                 )
 
-        if source in (TokenSourceKind.AUTO, TokenSourceKind.KEYCHAIN):
+        if source in (CloudKitTokenSourceKind.AUTO, CloudKitTokenSourceKind.KEYCHAIN):
             token = get_secret(cloudkit_api_token_secret(self.profile_name), self.store)
             if token:
                 return CloudKitAPIToken(

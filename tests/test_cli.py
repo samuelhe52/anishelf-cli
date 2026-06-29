@@ -82,6 +82,42 @@ def test_profile_configure_persists_effective_scope(tmp_path, monkeypatch) -> No
     assert status_payload["tmdb_api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
 
 
+def test_profile_configure_rejects_cloudkit_env_file_source(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        [
+            "profile",
+            "configure",
+            "--cloudkit-token-source",
+            "env-file",
+        ],
+    )
+
+    assert result.exit_code == 2
+    assert "env-file" in result.stderr
+
+
+def test_profile_configure_still_allows_tmdb_env_file_source(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "profile",
+            "configure",
+            "--tmdb-token-source",
+            "env-file",
+        ],
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["tmdb_token_source"] == "env-file"
+
+
 def test_config_set_tokens_store_without_echoing_secret(monkeypatch) -> None:
     store = MemorySecretStore()
     monkeypatch.setattr(groups, "default_secret_store", lambda: store)

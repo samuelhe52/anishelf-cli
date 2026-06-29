@@ -35,12 +35,18 @@ class TokenSourceKind(StrEnum):
     AUTO = "auto"
 
 
+class CloudKitTokenSourceKind(StrEnum):
+    ENV = "env"
+    KEYCHAIN = "keychain"
+    AUTO = "auto"
+
+
 class ProfileConfig(BaseModel):
     container: str = DEFAULT_CONTAINER
     environment: str = DEFAULT_ENVIRONMENT
     database: str = DEFAULT_DATABASE
     callback_strategy: CallbackStrategy = CallbackStrategy.MANUAL_PASTE
-    cloudkit_token_source: TokenSourceKind = TokenSourceKind.AUTO
+    cloudkit_token_source: CloudKitTokenSourceKind = CloudKitTokenSourceKind.AUTO
     cloudkit_api_token_env: str = DEFAULT_CLOUDKIT_API_TOKEN_ENV
     cloudkit_api_token_version_env: str = DEFAULT_CLOUDKIT_API_TOKEN_VERSION_ENV
     tmdb_token_source: TokenSourceKind = TokenSourceKind.AUTO

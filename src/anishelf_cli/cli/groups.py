@@ -9,7 +9,7 @@ import typer
 from anishelf_cli import config
 from anishelf_cli.cli.common import state_from_context
 from anishelf_cli.core.output import emit_json, emit_placeholder
-from anishelf_cli.models import CallbackStrategy, TokenSourceKind
+from anishelf_cli.models import CallbackStrategy, CloudKitTokenSourceKind, TokenSourceKind
 from anishelf_cli.profiles import load_profile, update_profile
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
@@ -85,7 +85,7 @@ def profile_configure(
         typer.Option(help="Login callback capture strategy."),
     ] = None,
     cloudkit_token_source: Annotated[
-        TokenSourceKind | None,
+        CloudKitTokenSourceKind | None,
         typer.Option(help="CloudKit API token source selection."),
     ] = None,
     cloudkit_token_env: Annotated[
