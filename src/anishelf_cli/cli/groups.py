@@ -4,12 +4,21 @@ import sys
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 import typer
 
 from anishelf_cli import config
-from anishelf_cli.cli.common import state_from_context
-from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
-from anishelf_cli.core.output import HumanSection, emit_human_blocks, emit_json, emit_placeholder
+from anishelf_cli.cli.common import json_output_requested, state_from_context
+from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError, resolve_cloudkit_api_token
+from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
+from anishelf_cli.core.output import (
+    HumanSection,
+    emit_error,
+    emit_human_blocks,
+    emit_json,
+    emit_placeholder,
+)
+from anishelf_cli.library import has_any_found_item, library_get_envelope, valid_lookup_record_names
 from anishelf_cli.models import CallbackStrategy
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
@@ -38,6 +47,11 @@ metadata_app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode=None,
 )
+library_lock_factory = None
+
+
+def _make_http_client() -> httpx.Client:
+    return httpx.Client(timeout=30.0)
 
 
 def _config_payload() -> dict[str, object]:
@@ -65,10 +79,15 @@ def _config_payload() -> dict[str, object]:
 
 
 @config_app.command("show", help="Show effective configuration and local paths.")
-def config_show(ctx: typer.Context) -> None:
-    state = state_from_context(ctx)
+def config_show(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
     payload = _config_payload()
-    if state.json_output:
+    if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
     cloudkit = payload["cloudkit"]
@@ -125,8 +144,11 @@ def config_set_tmdb_api_key(
         bool,
         typer.Option("--stdin", help="Read the API key from stdin instead of prompting."),
     ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
-    state = state_from_context(ctx)
     token = (
         sys.stdin.read().strip()
         if from_stdin
@@ -140,7 +162,7 @@ def config_set_tmdb_api_key(
     except (SecretStorageUnavailableError, ValueError) as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    _emit_secret_saved(state.json_output, "tmdb-api-key")
+    _emit_secret_saved(json_output_requested(ctx, json_output), "tmdb-api-key")
 
 
 def _emit_secret_saved(json_output: bool, secret_type: str) -> None:
@@ -155,13 +177,155 @@ def _emit_secret_saved(json_output: bool, secret_type: str) -> None:
     typer.echo(f"Stored {secret_type} in Keychain.")
 
 
-@library_app.command("get")
+@library_app.command("get", help="Read AniShelf library entries by semantic identity.")
 def library_get(
     ctx: typer.Context,
     identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
-    _ = identities
-    emit_placeholder(state_from_context(ctx), "library get")
+    lookup_record_names = valid_lookup_record_names(identities)
+    lookup_payload: dict[str, object] | None = None
+
+    if lookup_record_names:
+        try:
+            api_token = resolve_cloudkit_api_token()
+            with _make_http_client() as client:
+                lookup_payload = CloudKitExecutor(
+                    client=client,
+                    api_token_resolver=lambda: api_token,
+                    secret_store=default_secret_store(),
+                    lock_factory=library_lock_factory,
+                ).lookup_records(lookup_record_names)
+        except (CloudKitWhoamiError, MissingCloudKitAPITokenError) as exc:
+            emit_error(str(exc), redactor=getattr(exc, "redactor", None))
+            raise typer.Exit(code=2) from exc
+
+    envelope = library_get_envelope(identities, lookup_payload)
+    if json_output_requested(ctx, json_output):
+        emit_json(envelope)
+    else:
+        _emit_library_get_human(envelope)
+
+    if not has_any_found_item(envelope):
+        raise typer.Exit(code=1)
+
+
+def _emit_library_get_human(envelope: dict[str, object]) -> None:
+    items = envelope.get("items")
+    summary = envelope.get("summary")
+    blocks: list[HumanSection] = []
+
+    if isinstance(summary, dict):
+        blocks.append(
+            HumanSection(
+                "Library entries",
+                (
+                    ("Requested", summary.get("requested")),
+                    ("Found", summary.get("found")),
+                    ("Errors", summary.get("errors")),
+                ),
+            )
+        )
+
+    if isinstance(items, list):
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            blocks.append(_library_get_item_section(item))
+
+    emit_human_blocks(blocks)
+
+
+def _library_get_item_section(item: dict[str, object]) -> HumanSection:
+    identity = str(item.get("identity") or "unknown identity")
+    status = str(item.get("status") or "unknown")
+    if status != "found":
+        error = item.get("error")
+        code = ""
+        message = ""
+        if isinstance(error, dict):
+            code = str(error.get("code") or "")
+            message = str(error.get("message") or "")
+        return HumanSection(
+            identity,
+            (
+                ("Status", status),
+                ("Error", code),
+                ("Detail", message),
+            ),
+        )
+
+    entry = item.get("entry")
+    if not isinstance(entry, dict):
+        return HumanSection(identity, (("Status", "decode-error"),))
+
+    if entry.get("kind") == "tombstone":
+        return HumanSection(
+            identity,
+            (
+                ("Status", status),
+                ("Kind", entry.get("kind")),
+                ("Type", entry.get("entry_type")),
+                ("TMDb ID", entry.get("tmdb_id")),
+                ("Parent series", entry.get("parent_series_id")),
+                ("Season", entry.get("season_number")),
+                ("Deleted", entry.get("deleted_at")),
+                ("Schema", entry.get("schema_version")),
+            ),
+        )
+
+    return HumanSection(
+        identity,
+        (
+            ("Status", status),
+            ("Kind", entry.get("kind")),
+            ("Type", entry.get("entry_type")),
+            ("TMDb ID", entry.get("tmdb_id")),
+            ("Parent series", entry.get("parent_series_id")),
+            ("Season", entry.get("season_number")),
+            ("Watch status", entry.get("watch_status")),
+            ("Score", entry.get("score")),
+            ("Favorite", entry.get("favorite")),
+            ("On display", entry.get("on_display")),
+            ("Date saved", entry.get("date_saved")),
+            ("Date started", entry.get("date_started")),
+            ("Date finished", entry.get("date_finished")),
+            ("Date tracking", entry.get("is_date_tracking_enabled")),
+            ("Custom poster", entry.get("custom_poster_path")),
+            ("Episode progress", _format_episode_progresses(entry.get("episode_progresses"))),
+            ("Library updated", entry.get("library_updated_at")),
+            ("Tracking updated", entry.get("tracking_updated_at")),
+            ("Notes", _optional_human_text(entry.get("notes"))),
+            ("Schema", entry.get("schema_version")),
+        ),
+    )
+
+
+def _format_episode_progresses(value: object) -> str | None:
+    if not isinstance(value, list) or not value:
+        return None
+
+    parts: list[str] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        season = item.get("season_number")
+        episode = item.get("watched_through_episode")
+        updated_at = item.get("updated_at")
+        label = f"S{season}:E{episode}"
+        if updated_at:
+            label += f" ({updated_at})"
+        parts.append(label)
+    return ", ".join(parts) if parts else None
+
+
+def _optional_human_text(value: object) -> object:
+    if value == "":
+        return None
+    return value
 
 
 @library_app.command("list")

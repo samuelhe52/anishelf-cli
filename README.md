@@ -33,3 +33,21 @@ verify the current login and `ani auth refresh` to roll forward stored auth stat
 when CloudKit returns a successor token.
 
 TMDb API keys can be stored in Keychain with `ani config set-tmdb-api-key`.
+
+## JSON output
+
+Commands that support JSON accept `--json` either globally or on the command:
+
+```bash
+uv run ani --json library get movie:55
+uv run ani library get movie:55 --json
+```
+
+`library get` emits an ordered envelope designed for `jq`: `.summary` contains
+counts, and `.items[]` contains either `.entry` or `.error`.
+
+```bash
+uv run ani library get movie:55 --json | jq '.items[].entry.watch_status'
+uv run ani library get movie:55 --json | jq '.items[] | {identity, score: .entry.score}'
+uv run ani library get movie:55 --json | jq '.items[] | select(.status == "error")'
+```

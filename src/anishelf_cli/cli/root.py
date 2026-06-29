@@ -10,7 +10,7 @@ import httpx
 import typer
 
 from anishelf_cli.cli import groups
-from anishelf_cli.cli.common import state_from_context
+from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cloudkit.api_token import (
     MissingCloudKitAPITokenError,
     resolve_cloudkit_api_token,
@@ -145,8 +145,11 @@ def login(
         float,
         typer.Option(help="Seconds to wait for a loopback callback."),
     ] = 120.0,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
-    state = state_from_context(ctx)
     strategy = callback_strategy or CallbackStrategy.MANUAL_PASTE
     redactor = SecretRedactor()
 
@@ -190,7 +193,7 @@ def login(
         "cloudkit_api_token_source": api_token.source,
         "cloudkit_api_token_version": api_token.version,
     }
-    if state.json_output:
+    if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
 
@@ -198,20 +201,20 @@ def login(
 
 
 @auth_app.command("logout", help="Remove the stored CloudKit web auth token.")
-def logout(ctx: typer.Context) -> None:
-    state = ctx.obj
-    if not isinstance(state, AppState):
-        raise RuntimeError("CLI context was not initialized")
-
+def logout(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
     try:
         delete_cloudkit_web_auth_token()
     except SecretStorageUnavailableError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
-    if state.json_output:
-        from anishelf_cli.core.output import emit_json
-
+    if json_output_requested(ctx, json_output):
         emit_json({"status": "logged-out"})
         return
 
@@ -219,10 +222,15 @@ def logout(ctx: typer.Context) -> None:
 
 
 @auth_app.command("status", help="Show the current CloudKit authentication status.")
-def auth_status(ctx: typer.Context) -> None:
+def auth_status(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
     current_user = _get_current_user_or_exit()
-    state = state_from_context(ctx)
-    if state.json_output:
+    if json_output_requested(ctx, json_output):
         emit_json(current_user.to_json_payload())
         return
 
@@ -230,10 +238,15 @@ def auth_status(ctx: typer.Context) -> None:
 
 
 @auth_app.command("refresh", help="Verify login and save any successor auth token.")
-def auth_refresh(ctx: typer.Context) -> None:
+def auth_refresh(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
     current_user = _get_current_user_or_exit()
-    state = state_from_context(ctx)
-    if state.json_output:
+    if json_output_requested(ctx, json_output):
         payload = current_user.to_json_payload()
         payload["status"] = "refreshed"
         emit_json(payload)

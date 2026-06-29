@@ -3,6 +3,15 @@
 Use this file as routing guidance. Do not read every document by default; read
 the relevant one when the task touches that area.
 
+## Project Relationship
+
+This repo is a sibling CLI project for the main AniShelf app at
+`~/projects/AniShelf`.
+
+When work touches AniShelf CloudKit schema, record fields, model decoding,
+schema drift checks, refer to the source code in `~/projects/AniShelf` as
+the authority. Do not infer schema shape from this CLI alone.
+
 ## Reference Docs
 
 - `docs/north-star.md`: Read when changing product direction, command scope,

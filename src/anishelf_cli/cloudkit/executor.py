@@ -25,6 +25,7 @@ DEFAULT_PROFILE_ID = "default"
 
 API_TOKEN_PARAM = "ckAPIToken"
 WEB_AUTH_TOKEN_PARAM = "ckWebAuthToken"
+ANI_SHELF_LIBRARY_ZONE_NAME = "AniShelfLibrary"
 AUTH_FAILURE_CODES = {
     "AUTHENTICATION_FAILED",
     "AUTHENTICATION_REQUIRED",
@@ -32,6 +33,7 @@ AUTH_FAILURE_CODES = {
 
 TokenResolver = Callable[[], CloudKitAPIToken]
 LockFactory = Callable[[Path], AbstractContextManager[Any]]
+QueryParamValue = str | int | float | bool | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,14 +92,59 @@ class CloudKitExecutor:
     lock_timeout_seconds: float = -1.0
 
     def get_current_user(self) -> CurrentUser:
+        payload = self.authenticated_request(
+            "GET",
+            "users/current",
+            error_context="CloudKit whoami request",
+            response_description="CloudKit whoami",
+        )
+        return _current_user_from_payload(payload, SecretRedactor())
+
+    def lookup_records(
+        self,
+        record_names: list[str],
+        *,
+        zone_name: str = ANI_SHELF_LIBRARY_ZONE_NAME,
+    ) -> dict[str, Any]:
+        request_payload = {
+            "records": [{"recordName": record_name} for record_name in record_names],
+            "zoneID": {"zoneName": zone_name},
+        }
+        return self.authenticated_request(
+            "POST",
+            "records/lookup",
+            json_payload=request_payload,
+            error_context="CloudKit library lookup request",
+            response_description="CloudKit library lookup",
+        )
+
+    def authenticated_request(
+        self,
+        method: str,
+        operation_subpath: str,
+        *,
+        params: dict[str, QueryParamValue] | None = None,
+        json_payload: dict[str, Any] | None = None,
+        error_context: str = "CloudKit request",
+        response_description: str = "CloudKit response",
+    ) -> dict[str, Any]:
         redactor = SecretRedactor()
         api_token = self.api_token_resolver()
         redactor.register(api_token.value, "cloudkit-api-token")
 
         with self._token_lock():
             web_auth_token = self._load_web_auth_token(redactor)
-            response = self._request_current_user(api_token, web_auth_token, redactor)
-            payload = self._parse_response(response, redactor)
+            response = self._request_authenticated(
+                method,
+                operation_subpath,
+                api_token,
+                web_auth_token,
+                redactor,
+                params=params,
+                json_payload=json_payload,
+                error_context=error_context,
+            )
+            payload = self._parse_response(response, redactor, response_description)
 
             successor_token = successor_web_auth_token(payload)
             redactor.register(successor_token, "cloudkit-successor-web-auth-token")
@@ -111,14 +158,14 @@ class CloudKitExecutor:
 
             if response.is_error:
                 raise CloudKitRequestFailedError(
-                    _cloudkit_failure_message("CloudKit whoami request failed", response, payload),
+                    _cloudkit_failure_message(f"{error_context} failed", response, payload),
                     redactor=redactor,
                 )
 
             if successor_token:
                 self._store_successor_web_auth_token(successor_token, redactor)
 
-            return _current_user_from_payload(payload, redactor)
+            return payload
 
     def lock_path(self) -> Path:
         lock_dir = config.data_dir() / "locks"
@@ -148,23 +195,34 @@ class CloudKitExecutor:
             )
         return web_auth_token
 
-    def _request_current_user(
+    def _request_authenticated(
         self,
+        method: str,
+        operation_subpath: str,
         api_token: CloudKitAPIToken,
         web_auth_token: str,
         redactor: SecretRedactor,
+        *,
+        params: dict[str, QueryParamValue] | None,
+        json_payload: dict[str, Any] | None,
+        error_context: str,
     ) -> httpx.Response:
+        request_params: dict[str, QueryParamValue] = {
+            API_TOKEN_PARAM: api_token.value,
+            WEB_AUTH_TOKEN_PARAM: web_auth_token,
+        }
+        if params:
+            request_params.update(params)
         try:
-            return self.client.get(
-                database_endpoint_url("users/current"),
-                params={
-                    API_TOKEN_PARAM: api_token.value,
-                    WEB_AUTH_TOKEN_PARAM: web_auth_token,
-                },
+            return self.client.request(
+                method,
+                database_endpoint_url(operation_subpath),
+                params=request_params,
+                json=json_payload,
             )
         except httpx.HTTPError as exc:
             raise CloudKitRequestFailedError(
-                "CloudKit whoami request failed.",
+                f"{error_context} failed.",
                 redactor=redactor,
             ) from exc
 
@@ -172,6 +230,7 @@ class CloudKitExecutor:
         self,
         response: httpx.Response,
         redactor: SecretRedactor,
+        response_description: str,
     ) -> dict[str, Any]:
         try:
             payload = response.json()
@@ -182,14 +241,22 @@ class CloudKitExecutor:
                     "CloudKit authentication failed. Cleared stored login; run `ani auth login`.",
                     redactor=redactor,
                 ) from exc
+            message = (
+                f"{response_description} returned a non-JSON response "
+                f"(HTTP {response.status_code})."
+            )
             raise CloudKitUnexpectedResponseError(
-                f"CloudKit whoami returned a non-JSON response (HTTP {response.status_code}).",
+                message,
                 redactor=redactor,
             ) from exc
 
         if not isinstance(payload, dict):
+            message = (
+                f"{response_description} returned an unexpected response "
+                f"(HTTP {response.status_code})."
+            )
             raise CloudKitUnexpectedResponseError(
-                f"CloudKit whoami returned an unexpected response (HTTP {response.status_code}).",
+                message,
                 redactor=redactor,
             )
         return payload

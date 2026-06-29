@@ -113,6 +113,19 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert "ckWebAuthToken" not in result.stdout
 
 
+def test_config_show_accepts_command_level_json() -> None:
+    result = runner.invoke(
+        app,
+        ["config", "show", "--json"],
+        env={"ANI_CLOUDKIT_API_TOKEN": "api-secret-token"},
+    )
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["cloudkit"]["app_auth_source"] == "env"
+    assert "api-secret-token" not in result.stdout
+
+
 def test_config_show_human_output_uses_readable_sections() -> None:
     result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
 
@@ -236,6 +249,37 @@ def test_auth_group_lists_auth_commands() -> None:
     assert "logout" in result.stdout
     assert "status" in result.stdout
     assert "refresh" in result.stdout
+
+
+def test_auth_status_accepts_command_level_json(monkeypatch) -> None:
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                json={
+                    "userRecordName": "_abc123",
+                    "firstName": "Ani",
+                },
+            )
+        )
+    )
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["auth", "status", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "authenticated"
+    assert payload["user"]["user_record_name"] == "_abc123"
+    assert "api-secret-token" not in result.stdout + result.stderr
+    assert "web-secret-token" not in result.stdout + result.stderr
 
 
 def test_auth_commands_are_not_top_level() -> None:
