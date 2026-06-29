@@ -44,7 +44,7 @@ Every CloudKit request that uses `ckWebAuthToken` should go through one executor
 The executor owns:
 
 - appending auth query parameters;
-- holding a per-profile lock across token read, HTTP request, response parse,
+- holding a single local lock across token read, HTTP request, response parse,
   successor-token save, and error handling;
 - replacing the stored web auth token before releasing the lock when CloudKit
   returns a successor token;
@@ -53,8 +53,8 @@ The executor owns:
 - retrying throttled and transient failures with bounded backoff;
 - redacting tokens and callback URLs in logs, errors, and diagnostics.
 
-Correctness requires serializing token-consuming requests. Concurrent commands
-for the same profile must not reuse the same rolling web auth token.
+Correctness requires serializing token-consuming requests. Concurrent local
+commands must not reuse the same rolling web auth token.
 
 ## Error Categories
 
@@ -77,7 +77,7 @@ cursor and rebuilding from the beginning.
 ## Security Notes
 
 The CLI must never print app auth, `ckWebAuthToken`, successor web auth tokens,
-TMDb tokens, or raw callback URLs containing tokens. Private library data can
+TMDb API keys, or raw callback URLs containing tokens. Private library data can
 still appear in normal command output and exports, so structured exports should
 be treated as private user data.
 

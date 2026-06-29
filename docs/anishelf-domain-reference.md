@@ -37,7 +37,7 @@ dropping fields or guessing.
 The CLI should use a committed schema snapshot for runtime decoding. Schema
 drift detection is a manual developer-maintainer workflow that compares that
 snapshot against an explicitly supplied local AniShelf checkout when needed,
-not a value stored in user profiles or global CLI configuration. The source
+not a value stored in user or global CLI configuration. The source
 authority is the `DataProvider/Sources/LibrarySync` area of the AniShelf repo.
 
 Schema checks should compare:
@@ -60,10 +60,10 @@ Full-library commands should prefer CloudKit zone changes over broad queries.
 The derived local cache should be rebuildable and live under the platform user
 cache directory.
 
-Cache keys should include profile, container, environment, database scope,
-authenticated user, owner, and zone. Persisting the environment and database is
-important so future development or shared-database support cannot accidentally
-reuse a production private-database cursor.
+Cache keys should include container, environment, database scope, authenticated
+user, owner, and zone. Persisting the environment and database is important so
+future development or shared-database support cannot accidentally reuse a
+production private-database cursor.
 
 The cache should store:
 

@@ -21,7 +21,6 @@ from anishelf_cli.cloudkit.auth import (
     initiate_login,
     successor_web_auth_token,
 )
-from anishelf_cli.models import ProfileConfig
 
 runner = CliRunner()
 
@@ -42,7 +41,6 @@ def test_login_initiation_calls_private_current_user_with_api_token_only() -> No
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     initiation = initiate_login(
-        ProfileConfig(),
         CloudKitAPIToken("api-secret-token", "env"),
         client,
     )
@@ -76,12 +74,8 @@ def test_login_http_client_supports_socks_proxy_env(monkeypatch) -> None:
 
 def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    stored: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        root,
-        "store_cloudkit_web_auth_token",
-        lambda profile, token: stored.append((profile, token)),
-    )
+    stored: list[str] = []
+    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -104,7 +98,7 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     )
 
     assert result.exit_code == 0, result.output
-    assert stored == [("default", "web-secret-token")]
+    assert stored == ["web-secret-token"]
     assert json.loads(result.stdout)["status"] == "logged-in"
     combined = result.stdout + result.stderr
     assert "api-secret-token" not in combined
@@ -117,12 +111,8 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
-    stored: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        root,
-        "store_cloudkit_web_auth_token",
-        lambda profile, token: stored.append((profile, token)),
-    )
+    stored: list[str] = []
+    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -145,7 +135,7 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert stored == [("default", "web-secret-token")]
+    assert stored == ["web-secret-token"]
     assert opened == []
 
 
@@ -160,12 +150,8 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    stored: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        root,
-        "store_cloudkit_web_auth_token",
-        lambda profile, token: stored.append((profile, token)),
-    )
+    stored: list[str] = []
+    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -239,12 +225,8 @@ def test_loopback_capture_reports_listener_setup_failure_cleanly() -> None:
 def test_loopback_login_timeout_does_not_store_partial_token(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(root.webbrowser, "open", lambda url: True)
-    stored: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        root,
-        "store_cloudkit_web_auth_token",
-        lambda profile, token: stored.append((profile, token)),
-    )
+    stored: list[str] = []
+    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -289,12 +271,8 @@ def test_loopback_login_rejects_non_loopback_host_without_side_effects(
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
-    stored: list[tuple[str, str]] = []
-    monkeypatch.setattr(
-        root,
-        "store_cloudkit_web_auth_token",
-        lambda profile, token: stored.append((profile, token)),
-    )
+    stored: list[str] = []
+    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request

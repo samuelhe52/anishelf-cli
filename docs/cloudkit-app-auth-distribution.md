@@ -23,7 +23,7 @@ storage.
   diagnosis.
 - Use embedded public app auth when no override is present.
 - Return non-secret metadata with resolved auth: source and version.
-- Never print the reconstructed token value in profile status, login output,
+- Never print the reconstructed token value in status output, login output,
   logs, errors, tests, docs, or diagnostics.
 - Keep CloudKit requests direct from the CLI to Apple.
 - Do not build a remote decrypt/unwrap service.
@@ -42,7 +42,7 @@ Tests should prove:
 - override version metadata is surfaced when present;
 - embedded auth is used when no override exists;
 - missing embedded auth fails with a clear build/configuration error;
-- profile status and login output never include the token value;
+- status and login output never include the token value;
 - callback URLs and user web auth tokens remain redacted.
 
 ## Rotation Manifest

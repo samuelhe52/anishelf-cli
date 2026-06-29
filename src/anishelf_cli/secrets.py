@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import stat
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Protocol
 
 import keyring
@@ -92,18 +90,18 @@ class SecretDescriptor:
     label: str
 
 
-def cloudkit_web_auth_token_secret(profile: str) -> SecretDescriptor:
+def cloudkit_web_auth_token_secret() -> SecretDescriptor:
     return SecretDescriptor(
         service=config.KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN,
-        account=profile,
+        account=config.KEYCHAIN_ACCOUNT,
         label="CloudKit web auth token",
     )
 
 
-def tmdb_api_key_secret(profile: str) -> SecretDescriptor:
+def tmdb_api_key_secret() -> SecretDescriptor:
     return SecretDescriptor(
         service=config.KEYCHAIN_SERVICE_TMDB_API_KEY,
-        account=profile,
+        account=config.KEYCHAIN_ACCOUNT,
         label="TMDb API key",
     )
 
@@ -133,42 +131,18 @@ def delete_secret(descriptor: SecretDescriptor, store: SecretStore | None = None
     backend.delete_password(descriptor.service, descriptor.account)
 
 
-def env_file_permission_warning(path: Path) -> str | None:
-    try:
-        mode = path.stat().st_mode
-    except FileNotFoundError:
-        return None
-
-    if mode & (stat.S_IRWXG | stat.S_IRWXO):
-        return f"Env file {path} is readable or writable by group/other users."
-    return None
-
-
-def read_env_file(path: Path) -> dict[str, str]:
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        values[key.strip()] = value.strip().strip("\"'")
-    return values
-
-
 def store_cloudkit_web_auth_token(
-    profile: str,
     token: str,
     store: SecretStore | None = None,
 ) -> None:
-    set_secret(cloudkit_web_auth_token_secret(profile), token, store)
+    set_secret(cloudkit_web_auth_token_secret(), token, store)
 
 
 def load_cloudkit_web_auth_token(
-    profile: str,
     store: SecretStore | None = None,
 ) -> str | None:
-    return get_secret(cloudkit_web_auth_token_secret(profile), store)
+    return get_secret(cloudkit_web_auth_token_secret(), store)
 
 
-def delete_cloudkit_web_auth_token(profile: str, store: SecretStore | None = None) -> None:
-    delete_secret(cloudkit_web_auth_token_secret(profile), store)
+def delete_cloudkit_web_auth_token(store: SecretStore | None = None) -> None:
+    delete_secret(cloudkit_web_auth_token_secret(), store)

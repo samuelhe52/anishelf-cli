@@ -22,7 +22,6 @@ def emit_placeholder(state: AppState, area: str) -> None:
     message = {
         "status": "not-implemented",
         "area": area,
-        "profile": state.profile,
     }
     if state.json_output:
         emit_json(message)

@@ -1,7 +1,7 @@
 from anishelf_cli.core.redaction import SecretRedactor, redact_text
 
 
-def test_redacts_registered_cloudkit_and_tmdb_tokens() -> None:
+def test_redacts_registered_cloudkit_and_tmdb_api_keys() -> None:
     redactor = SecretRedactor()
     cloudkit_token = "test-cloudkit-token-value"
     redactor.register(cloudkit_token, "cloudkit-api-token")

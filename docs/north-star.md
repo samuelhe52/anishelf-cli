@@ -23,7 +23,7 @@ domain concepts rather than raw CloudKit records whenever practical.
 - A user should not have to manually sequence CloudKit web auth tokens or reason
   about rolling token replacement.
 - Secrets must not be printed in normal output, structured output, logs, errors,
-  profile status, or debug diagnostics.
+  status output, or debug diagnostics.
 - Structured output must be suitable for agents: deterministic, parseable, and
   free of progress text on stdout.
 - Human output should be concise and terminal-friendly.
@@ -54,10 +54,11 @@ domain concepts rather than raw CloudKit records whenever practical.
   when available.
 - The first-class production login flow may require browser login followed by
   manual paste of an HTTPS callback URL.
-- Local profile configuration should describe the effective container,
-  environment, database, and callback strategy without exposing secret values.
+- The CLI should not expose persisted local scope configuration; AniShelf's
+  CloudKit scope is fixed unless a future design deliberately reopens that
+  decision.
 - Schema drift checks are a manual developer-maintainer workflow against an
-  explicit local AniShelf checkout when needed, not persisted user profile or
+  explicit local AniShelf checkout when needed, not persisted user or
   global CLI configuration.
 - The CLI should use stable exit behavior and stable error codes for automated
   callers, but the exact code table should be defined in the relevant stage spec.

@@ -11,9 +11,9 @@ APP_AUTHOR = "samuelhe"
 DEFAULT_CONTAINER = "iCloud.com.samuelhe.MyAnimeList"
 DEFAULT_ENVIRONMENT = "production"
 DEFAULT_DATABASE = "private"
-DEFAULT_PROFILE = "default"
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
 
+KEYCHAIN_ACCOUNT = "anishelf-cli"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
 KEYCHAIN_SERVICE_TMDB_API_KEY = "anishelf-cli.tmdb-api-key"
 
@@ -36,11 +36,3 @@ def data_dir() -> Path:
     if override := os.environ.get("ANISHELF_CLI_DATA_DIR"):
         return Path(override).expanduser()
     return Path(dirs.user_data_dir)
-
-
-def profile_config_path(profile: str) -> Path:
-    return config_dir() / "profiles" / f"{profile}.json"
-
-
-def profile_lock_path(profile: str) -> Path:
-    return data_dir() / "locks" / f"{profile}.lock"

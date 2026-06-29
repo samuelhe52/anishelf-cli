@@ -6,7 +6,7 @@ the relevant one when the task touches that area.
 ## Reference Docs
 
 - `docs/north-star.md`: Read when changing product direction, command scope,
-  read-only policy, profile shape, or other broad CLI design decisions.
+  read-only policy, configuration shape, or other broad CLI design decisions.
 - `docs/cloudkit-auth-and-execution.md`: Read when working on CloudKit login,
   logout, web auth token storage, authenticated request execution, successor
   token handling, locking, retry/error classification, or token redaction.
@@ -25,6 +25,8 @@ the relevant one when the task touches that area.
 - Never print secret values, raw callback URLs containing tokens, or stored auth
   tokens in normal output, JSON output, logs, errors, tests, or docs.
 - Do not add user-facing CloudKit app-token setup or storage instructions.
+- Do not reintroduce persisted local configuration or credential namespaces.
+- Keep Keychain storage for user-scoped CloudKit web auth tokens and TMDb keys;
   do not add Keychain storage for CloudKit app auth.
 - Commit messages should use concise `type: Subject` style, for example
   `feat: Add CloudKit login flow` or `fix: Tighten credential source handling`.

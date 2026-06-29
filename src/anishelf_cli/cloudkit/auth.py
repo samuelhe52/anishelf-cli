@@ -10,8 +10,8 @@ from urllib.parse import parse_qs, urlsplit
 
 import httpx
 
+from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
-from anishelf_cli.models import ProfileConfig
 
 APPLE_CLOUDKIT_API_BASE_URL = "https://api.apple-cloudkit.com"
 CK_WEB_AUTH_TOKEN_QUERY_KEY = "ckWebAuthToken"
@@ -71,25 +71,24 @@ class LoopbackLoginSetupError(CloudKitAuthError):
 BrowserOpener = Callable[[str], bool]
 
 
-def database_endpoint_url(profile: ProfileConfig, operation_subpath: str) -> str:
+def database_endpoint_url(operation_subpath: str) -> str:
     parts = [
         APPLE_CLOUDKIT_API_BASE_URL,
         "database",
         "1",
-        profile.container,
-        profile.environment,
-        profile.database,
+        config.DEFAULT_CONTAINER,
+        config.DEFAULT_ENVIRONMENT,
+        config.DEFAULT_DATABASE,
         operation_subpath.strip("/"),
     ]
     return "/".join(part.strip("/") for part in parts)
 
 
 def initiate_login(
-    profile: ProfileConfig,
     api_token: CloudKitAPIToken,
     client: httpx.Client,
 ) -> LoginInitiation:
-    endpoint_url = database_endpoint_url(profile, "users/current")
+    endpoint_url = database_endpoint_url("users/current")
     try:
         response = client.get(endpoint_url, params={"ckAPIToken": api_token.value})
     except httpx.HTTPError as exc:

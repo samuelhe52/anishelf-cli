@@ -30,5 +30,4 @@ uv run mypy src
 credential store. This token authorizes access to the signed-in user's private
 CloudKit data and is removed with `ani logout`.
 
-TMDb API keys can be stored in Keychain with `ani config set-tmdb-token` or read
-from a local env file outside the repo such as `~/.secrets/env/anishelf-cli.env`.
+TMDb API keys can be stored in Keychain with `ani config set-tmdb-api-key`.

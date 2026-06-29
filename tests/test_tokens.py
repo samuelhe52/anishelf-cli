@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from keyring.errors import PasswordDeleteError, PasswordSetError
 
@@ -16,14 +14,13 @@ from anishelf_cli.cloudkit.app_auth_transform import (
     restore_transformed_hex,
     transform_hex,
 )
-from anishelf_cli.models import ProfileConfig
 from anishelf_cli.secrets import (
     KeyringSecretStore,
     SecretStorageUnavailableError,
     store_cloudkit_web_auth_token,
     tmdb_api_key_secret,
 )
-from anishelf_cli.tmdb.tokens import ConfiguredTMDbAPITokenProvider
+from anishelf_cli.tmdb.tokens import resolve_tmdb_api_token
 
 
 class MemorySecretStore:
@@ -102,39 +99,24 @@ def test_cloudkit_api_token_reports_clear_build_error_without_env_or_embedded(
         resolve_cloudkit_api_token()
 
 
-def test_tmdb_token_prefers_env_then_env_file_then_keychain(tmp_path, monkeypatch) -> None:
+def test_tmdb_api_key_prefers_env_then_keychain(monkeypatch) -> None:
     store = MemorySecretStore()
-    descriptor = tmdb_api_key_secret("default")
+    descriptor = tmdb_api_key_secret()
     store.set_password(descriptor.service, descriptor.account, "keychain-token")
-    env_file = tmp_path / "tokens.env"
-    env_file.write_text("TMDB_API_KEY=env-file-token\n", encoding="utf-8")
-    profile = ProfileConfig(env_file=env_file)
 
-    env_file_token = ConfiguredTMDbAPITokenProvider("default", profile, store).resolve()
-    assert env_file_token.value == "env-file-token"
-    assert env_file_token.source_label.endswith(":TMDB_API_KEY")
+    keychain_token = resolve_tmdb_api_token(store)
+    assert keychain_token.value == "keychain-token"
+    assert keychain_token.source_label == "keychain"
 
     monkeypatch.setenv("ANI_TMDB_API_KEY", "process-token")
-    process_token = ConfiguredTMDbAPITokenProvider("default", profile, store).resolve()
+    process_token = resolve_tmdb_api_token(store)
     assert process_token.value == "process-token"
     assert process_token.source_label == "env:ANI_TMDB_API_KEY"
 
 
-def test_tmdb_env_file_reports_broad_permissions(tmp_path) -> None:
-    env_file = tmp_path / "tokens.env"
-    env_file.write_text("ANI_TMDB_API_KEY=env-file-token\n", encoding="utf-8")
-    os.chmod(env_file, 0o644)
-    profile = ProfileConfig(env_file=env_file)
-
-    token = ConfiguredTMDbAPITokenProvider("default", profile, MemorySecretStore()).resolve()
-
-    assert token.value == "env-file-token"
-    assert token.warnings
-
-
 def test_cloudkit_web_auth_storage_fails_closed_without_secure_backend() -> None:
     with pytest.raises(SecretStorageUnavailableError):
-        store_cloudkit_web_auth_token("default", "web-auth-token", FailingSecretStore())
+        store_cloudkit_web_auth_token("web-auth-token", FailingSecretStore())
 
 
 def test_keyring_delete_password_ignores_missing_macos_item(monkeypatch) -> None:
