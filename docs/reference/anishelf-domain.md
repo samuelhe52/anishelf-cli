@@ -46,12 +46,12 @@ include:
 - `library list` with filters
 - `library search --title`
 - `library export`
-- `schema check`
 - `tmdb search --title`
 - `metadata hydrate`
 
-Low-level CloudKit zone, record, and change commands are diagnostics. If they
-remain public, keep them clearly separate from the library UX.
+Low-level CloudKit zone, record, change, settings, and schema-check commands
+are diagnostics. Keep them out of the normal user command tree unless a future
+dev-only entry point is intentionally added.
 
 ## Batch And Output
 

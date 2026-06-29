@@ -41,8 +41,13 @@ app = typer.Typer(
     add_completion=False,
     help="Read-only AniShelf and CloudKit inspection CLI.",
     no_args_is_help=True,
+    rich_markup_mode=None,
 )
-auth_app = typer.Typer(help="CloudKit authentication commands.", no_args_is_help=True)
+auth_app = typer.Typer(
+    help="CloudKit authentication commands.",
+    no_args_is_help=True,
+    rich_markup_mode=None,
+)
 
 whoami_lock_factory = None
 
@@ -277,11 +282,6 @@ def _emit_auth_status_human(current_user: CurrentUser) -> None:
 
 app.add_typer(auth_app, name="auth")
 app.add_typer(groups.config_app, name="config")
-app.add_typer(groups.zones_app, name="zones")
-app.add_typer(groups.records_app, name="records")
-app.add_typer(groups.changes_app, name="changes")
 app.add_typer(groups.library_app, name="library")
-app.add_typer(groups.settings_app, name="settings")
 app.add_typer(groups.tmdb_app, name="tmdb")
 app.add_typer(groups.metadata_app, name="metadata")
-app.add_typer(groups.schema_app, name="schema")

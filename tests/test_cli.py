@@ -42,6 +42,40 @@ def test_root_help_mentions_global_options() -> None:
     assert "--anishelf-source" not in result.stdout
 
 
+def test_help_uses_plain_agent_friendly_formatting() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "Usage: " in result.stdout
+    assert "Commands:" in result.stdout
+    for box_character in ("╭", "╮", "╰", "╯", "│", "─"):
+        assert box_character not in result.stdout
+
+
+def test_root_help_hides_non_user_command_groups() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    for command in ("zones", "records", "changes", "settings", "schema"):
+        assert command not in result.stdout
+
+
+def test_non_user_command_groups_are_removed() -> None:
+    for command in ("zones", "records", "changes", "settings", "schema"):
+        result = runner.invoke(app, [command, "--help"])
+        assert result.exit_code == 2
+        assert "No such command" in result.stderr
+
+
+def test_unknown_command_error_uses_plain_formatting() -> None:
+    result = runner.invoke(app, ["auth", "loggg"])
+
+    assert result.exit_code == 2
+    assert "No such command 'loggg'. Did you mean 'login'?" in result.stderr
+    for box_character in ("╭", "╮", "╰", "╯", "│", "─"):
+        assert box_character not in result.stderr
+
+
 def test_implemented_commands_have_help_text() -> None:
     missing: list[str] = []
     for group in app.registered_groups:
@@ -57,24 +91,50 @@ def test_implemented_commands_have_help_text() -> None:
     assert missing == []
 
 
-def test_config_status_json_shows_effective_scope_without_secrets() -> None:
+def test_config_show_json_shows_effective_config_without_secrets() -> None:
     result = runner.invoke(
         app,
-        ["--json", "config", "status"],
+        ["--json", "config", "show"],
         env={"ANI_CLOUDKIT_API_TOKEN": "api-secret-token"},
     )
 
     assert result.exit_code == 0
     assert "iCloud.com.samuelhe.MyAnimeList" in result.stdout
     payload = json.loads(result.stdout)
-    assert payload["cloudkit_api_token_source"] == "env"
-    assert payload["cloudkit_api_token_version"] is None
-    assert payload["tmdb_api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
+    assert payload["cloudkit"]["app_auth_source"] == "env"
+    assert payload["cloudkit"]["app_auth_version"] is None
+    assert payload["tmdb"]["api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
+    assert "config_dir" in payload["paths"]
+    assert "cache_dir" in payload["paths"]
+    assert "data_dir" in payload["paths"]
     assert "profile" not in payload
     assert "anishelf_source" not in payload
     assert "cloudkit-api-token" not in result.stdout
     assert "api-secret-token" not in result.stdout
     assert "ckWebAuthToken" not in result.stdout
+
+
+def test_config_show_human_output_uses_readable_sections() -> None:
+    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
+
+    assert result.exit_code == 0
+    assert "CloudKit\n" in result.stdout
+    assert "  Container     iCloud.com.samuelhe.MyAnimeList\n" in result.stdout
+    assert "  App auth      env\n" in result.stdout
+    assert "\nCallback\n" in result.stdout
+    assert "  Strategy      manual-paste\n" in result.stdout
+    assert "\nTMDb\n" in result.stdout
+    assert "  API key envs  ANI_TMDB_API_KEY, TMDB_API_KEY\n" in result.stdout
+    assert "\nPaths\n" in result.stdout
+    assert "  Config        " in result.stdout
+    assert "api" not in result.stdout
+
+
+def test_config_status_command_is_removed() -> None:
+    result = runner.invoke(app, ["config", "status"])
+
+    assert result.exit_code == 2
+    assert "No such command" in result.stderr
 
 
 def test_default_posix_app_paths_use_dotdir(monkeypatch, tmp_path) -> None:
@@ -114,13 +174,13 @@ def test_profile_command_group_is_removed() -> None:
 
 
 def test_profile_option_is_removed() -> None:
-    result = runner.invoke(app, ["--profile", "prod", "config", "status"])
+    result = runner.invoke(app, ["--profile", "prod", "config", "show"])
 
     assert result.exit_code == 2
     assert "No such option" in result.stderr
 
 
-def test_config_status_does_not_persist_profile_json(tmp_path, monkeypatch) -> None:
+def test_config_show_does_not_persist_profile_json(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
 
     result = runner.invoke(
@@ -128,7 +188,7 @@ def test_config_status_does_not_persist_profile_json(tmp_path, monkeypatch) -> N
         [
             "--json",
             "config",
-            "status",
+            "show",
         ],
     )
 
