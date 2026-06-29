@@ -26,8 +26,9 @@ poster path, episode progresses, and update clocks. Tombstones are represented
 by entry records with valid identity fields and `deletedAt`; they should not
 require live snapshot fields.
 
-`LibrarySettings` should decode supported settings schema versions, updated
-timestamp, and payload values as booleans, strings, or string arrays.
+`LibrarySettings` is part of the synced storage contract and may be decoded for
+cache/schema compatibility where needed. It is not a public CLI surface; the CLI
+is for accessing the user's personal library snapshot and its hydrated metadata.
 
 Unsupported future schema versions must fail explicitly rather than silently
 dropping fields or guessing.
@@ -101,7 +102,12 @@ Batch behavior should:
 Partial failures are expected in large batches. A distinct partial-success exit
 code should separate mixed success from complete success and complete failure.
 
-## Domain Commands
+## Public Domain Commands
+
+The public command surface should stay library-first. Users should not need to
+know which CloudKit zone stores their data, which raw records exist, or how
+change cursors are represented. Those are implementation details behind library
+snapshot reads, exports, cache refresh, and metadata hydration.
 
 Useful read-only domain surfaces include:
 
@@ -110,11 +116,14 @@ Useful read-only domain surfaces include:
   display state, tombstone inclusion, and updated-after clocks;
 - `library search --title`, scoped to the user's library;
 - `library export --format json|jsonl`;
-- `library changes` for explicit cursor diagnostics;
 - `library get --title --fields notes,score` for unambiguous title lookup;
-- `settings show`;
 - `schema check`;
 - `tmdb search --title`, separate from library search.
+
+Low-level CloudKit commands such as zone listing, raw record fetching, and
+change-cursor inspection should not be exposed as normal user commands. If a
+maintainer diagnostic path is ever needed, it should remain clearly separate
+from the library UX and must still preserve redaction and read-only behavior.
 
 Library title search should not hydrate the whole library. It should resolve
 TMDb candidates, intersect candidate identities with the user's library

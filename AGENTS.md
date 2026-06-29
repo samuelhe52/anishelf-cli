@@ -15,8 +15,8 @@ the relevant one when the task touches that area.
   invalidation diagnostics, manifest checks, or release rotation.
 - `docs/anishelf-domain-reference.md`: Read when working on AniShelf library
   decoding, record identities, schema drift checks, local cache behavior, batch
-  input/output, library commands, settings, exports, TMDb metadata hydration, or
-  metadata caching.
+  input/output, library commands, exports, TMDb metadata hydration, or metadata
+  caching.
 
 ## Standing Constraints
 

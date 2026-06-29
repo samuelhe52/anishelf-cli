@@ -7,12 +7,12 @@ behavior that is knowable for that stage.
 ## North Star Capability
 
 `ani` should be a read-only, local-first CLI for inspecting and exporting a
-user-authorized AniShelf CloudKit private database in a way that is safe for a
-human operator and predictable for an agent.
+user-authorized AniShelf library snapshot in a way that is safe for a human
+operator and predictable for an agent.
 
 The CLI should hide CloudKit authentication mechanics, avoid accidental writes,
 emit stable machine-readable output, and present AniShelf library data through
-domain concepts rather than raw CloudKit records whenever practical.
+domain concepts rather than raw CloudKit records.
 
 ## Valuable Demands
 
@@ -29,8 +29,10 @@ domain concepts rather than raw CloudKit records whenever practical.
 - Human output should be concise and terminal-friendly.
 - Batch workflows should be natural where they materially reduce repetitive CLI
   calls, but the exact grammar should be decided stage by stage.
-- AniShelf domain commands should decode the app's lean sync schema instead of
-  forcing users or agents to inspect raw CloudKit payloads.
+- AniShelf commands should expose personal library data and hydrated metadata,
+  not CloudKit zones, raw records, or other storage details.
+- AniShelf domain commands should decode the app's lean sync schema internally
+  instead of forcing users or agents to inspect raw CloudKit payloads.
 - Full-library operations should avoid unnecessary CloudKit requests and should
   become incrementally efficient when the implementation has enough evidence to
   choose the right cache shape.
@@ -50,6 +52,8 @@ domain concepts rather than raw CloudKit records whenever practical.
 - The AniShelf CloudKit custom zone is `AniShelfLibrary`.
 - The synced record types are `LibraryEntry` and `LibrarySettings`.
 - The settings record name is `userDefaults`.
+- `LibrarySettings` is an internal schema/cache concern, not a planned
+  user-facing command surface.
 - User-scoped `ckWebAuthToken` values should be stored in secure local storage
   when available.
 - The first-class production login flow may require browser login followed by

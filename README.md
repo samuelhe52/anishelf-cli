@@ -1,6 +1,6 @@
 # anishelf-cli
 
-Read-only AniShelf and CloudKit inspection CLI.
+Read-only AniShelf library inspection CLI.
 
 ## Status
 
