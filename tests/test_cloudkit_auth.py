@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import socket
+from io import StringIO
 
 import httpx
 import pytest
@@ -75,7 +76,6 @@ def test_login_http_client_supports_socks_proxy_env(monkeypatch) -> None:
 
 def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root.webbrowser, "open", lambda url: url == "https://apple.example/sign-in")
     stored: list[tuple[str, str]] = []
     monkeypatch.setattr(
         root,
@@ -110,13 +110,56 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     assert "api-secret-token" not in combined
     assert "web-secret-token" not in combined
     assert callback_url not in combined
+    assert "https://apple.example/sign-in" in result.stderr
+
+
+def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    opened: list[str] = []
+    monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
+    stored: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        root,
+        "store_cloudkit_web_auth_token",
+        lambda profile, token: stored.append((profile, token)),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _ = request
+        return httpx.Response(
+            401,
+            json={
+                "serverErrorCode": "AUTHENTICATION_REQUIRED",
+                "redirectURL": "https://apple.example/sign-in",
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    callback_url = "https://callback.example/done?ckWebAuthToken=web-secret-token"
+    result = runner.invoke(
+        app,
+        ["--json", "login"],
+        input=f"{callback_url}\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    assert stored == [("default", "web-secret-token")]
+    assert opened == []
+
+
+def test_read_callback_url_supports_long_piped_input() -> None:
+    token = "a" * 8192
+    callback_url = f"https://callback.example/done?ckWebAuthToken={token}"
+
+    assert root._read_callback_url(StringIO(f"{callback_url}\n")) == callback_url
 
 
 def test_manual_paste_login_rejects_malformed_callback_without_storing(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root.webbrowser, "open", lambda url: True)
     stored: list[tuple[str, str]] = []
     monkeypatch.setattr(
         root,
@@ -151,8 +194,6 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     assert "web-secret-token" not in combined
     assert callback_url not in combined
     assert "missing ckWebAuthToken" in combined
-
-
 def test_loopback_capture_times_out_cleanly() -> None:
     with pytest.raises(LoopbackLoginTimeoutError):
         capture_loopback_callback(

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
+import sys
+import termios
 import webbrowser
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, TextIO
 
 import httpx
 import typer
@@ -76,6 +79,58 @@ def _make_http_client() -> httpx.Client:
     return httpx.Client(timeout=30.0)
 
 
+def _manual_callback_instructions(redirect_url: str) -> None:
+    typer.echo("", err=True)
+    typer.echo("CloudKit sign-in", err=True)
+    typer.echo("", err=True)
+    typer.echo("1. Open this URL in your browser:", err=True)
+    typer.echo("", err=True)
+    typer.echo(redirect_url, err=True)
+    typer.echo("", err=True)
+    typer.echo("2. After Apple redirects you back, copy the full HTTPS callback URL.", err=True)
+    typer.echo("3. Paste that callback URL below and press Enter.", err=True)
+    typer.echo("", err=True)
+    typer.echo("The pasted URL is hidden because it contains a login token.", err=True)
+    typer.echo("", err=True)
+
+
+def _read_callback_url(stream: TextIO | None = None) -> str:
+    stream = stream or sys.stdin
+    if stream.isatty():
+        return _read_hidden_tty_line(stream).strip()
+    return stream.readline().strip()
+
+
+def _read_hidden_tty_line(stream: TextIO) -> str:
+    fd = stream.fileno()
+    original_attrs = termios.tcgetattr(fd)
+    new_attrs = original_attrs[:]
+    new_attrs[3] &= ~(termios.ECHO | termios.ICANON)
+    new_attrs[6][termios.VMIN] = 1
+    new_attrs[6][termios.VTIME] = 0
+
+    chunks = bytearray()
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, new_attrs)
+        while True:
+            char = os.read(fd, 1)
+            if not char or char in (b"\n", b"\r"):
+                break
+            if char in (b"\x03", b"\x04"):
+                raise KeyboardInterrupt
+            if char in (b"\x08", b"\x7f"):
+                if chunks:
+                    chunks.pop()
+                continue
+            chunks.extend(char)
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, original_attrs)
+        typer.echo("", err=True)
+
+    value = chunks.decode("utf-8", errors="replace")
+    return value.removeprefix("\x1b[200~").removesuffix("\x1b[201~")
+
+
 @app.command()
 def login(
     ctx: typer.Context,
@@ -117,14 +172,11 @@ def login(
                 browser_open=webbrowser.open,
             )
         else:
-            webbrowser.open(initiation.redirect_url)
-            callback_url = typer.prompt(
-                "Paste final HTTPS callback URL",
-                hide_input=True,
-                err=True,
-            ).strip()
-            redactor.register(callback_url, "cloudkit-callback-url")
-            web_auth_token = extract_web_auth_token(callback_url)
+            _manual_callback_instructions(initiation.redirect_url)
+            typer.echo("Callback URL: ", nl=False, err=True)
+            callback_url_value = _read_callback_url()
+            redactor.register(callback_url_value, "cloudkit-callback-url")
+            web_auth_token = extract_web_auth_token(callback_url_value)
 
         redactor.register(web_auth_token, "cloudkit-web-auth-token")
         store_cloudkit_web_auth_token(state.profile, web_auth_token)

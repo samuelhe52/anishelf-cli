@@ -38,32 +38,40 @@ class KeyringSecretStore:
         self._ensure_available()
         try:
             return keyring.get_password(service, account)
-        except (KeyringError, NoKeyringError) as exc:
+        except NoKeyringError as exc:
             raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
+        except KeyringError as exc:
+            raise SecretStorageUnavailableError(str(exc)) from exc
 
     def set_password(self, service: str, account: str, password: str) -> None:
         self._ensure_available()
         try:
             keyring.set_password(service, account, password)
-        except (KeyringError, NoKeyringError) as exc:
+        except NoKeyringError as exc:
             raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
+        except KeyringError as exc:
+            raise SecretStorageUnavailableError(str(exc)) from exc
 
     def delete_password(self, service: str, account: str) -> None:
         self._ensure_available()
         try:
             if keyring.get_password(service, account) is None:
                 return
-        except (KeyringError, NoKeyringError) as exc:
+        except NoKeyringError as exc:
             raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
+        except KeyringError as exc:
+            raise SecretStorageUnavailableError(str(exc)) from exc
 
         try:
             keyring.delete_password(service, account)
         except keyring.errors.PasswordDeleteError as exc:
             if _is_missing_password_delete_error(exc):
                 return
+            raise SecretStorageUnavailableError(str(exc)) from exc
+        except NoKeyringError as exc:
             raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
-        except (KeyringError, NoKeyringError) as exc:
-            raise SecretStorageUnavailableError("Secure credential backend is unavailable") from exc
+        except KeyringError as exc:
+            raise SecretStorageUnavailableError(str(exc)) from exc
 
 
 def _is_missing_password_delete_error(exc: keyring.errors.PasswordDeleteError) -> bool:

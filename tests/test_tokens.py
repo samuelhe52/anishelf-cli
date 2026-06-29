@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 
 import pytest
-from keyring.errors import PasswordDeleteError
+from keyring.errors import PasswordDeleteError, PasswordSetError
 
 from anishelf_cli import secrets as secrets_module
 from anishelf_cli.cloudkit.tokens import ConfiguredCloudKitAPITokenProvider
@@ -151,5 +151,17 @@ def test_keyring_delete_password_reports_real_delete_failure(monkeypatch) -> Non
     monkeypatch.setattr(secrets_module.keyring, "get_password", lambda service, account: "token")
     monkeypatch.setattr(secrets_module.keyring, "delete_password", delete_password)
 
-    with pytest.raises(SecretStorageUnavailableError):
+    with pytest.raises(SecretStorageUnavailableError, match="Can't delete password in keychain"):
         KeyringSecretStore().delete_password("service", "account")
+
+
+def test_keyring_set_password_reports_real_write_failure(monkeypatch) -> None:
+    def set_password(service: str, account: str, password: str) -> None:
+        _ = service, account, password
+        raise PasswordSetError("Can't store password on keychain: (-25244, 'Invalid attempt')")
+
+    monkeypatch.setattr(secrets_module.keyring, "get_keyring", lambda: AvailableKeyring())
+    monkeypatch.setattr(secrets_module.keyring, "set_password", set_password)
+
+    with pytest.raises(SecretStorageUnavailableError, match="Can't store password on keychain"):
+        KeyringSecretStore().set_password("service", "account", "token")
