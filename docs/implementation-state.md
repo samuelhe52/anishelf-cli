@@ -20,8 +20,6 @@ spec.
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.
-- `--verbose` is parsed into `AppState.verbosity`; new features should use it
-  only for extra stderr diagnostics and must keep stdout stable for data.
 - Human output uses shared `core.output` blocks: sections for detail views and
   aligned tables for collections.
 - Domain command groups exist for library, TMDb, and metadata, but they

@@ -37,7 +37,6 @@ def test_root_help_mentions_global_options() -> None:
     assert result.exit_code == 0
     assert "--profile" not in result.stdout
     assert "--json" in result.stdout
-    assert "--verbose" in result.stdout
     assert "--metadata-depth" in result.stdout
     assert "--anishelf-source" not in result.stdout
 

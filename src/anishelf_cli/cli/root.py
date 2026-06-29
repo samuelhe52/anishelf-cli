@@ -59,15 +59,6 @@ def root_callback(
         bool,
         typer.Option("--json", help="Emit machine-readable JSON when supported."),
     ] = False,
-    verbose: Annotated[
-        int,
-        typer.Option(
-            "--verbose",
-            "-v",
-            count=True,
-            help="Increase log verbosity.",
-        ),
-    ] = 0,
     metadata_depth: Annotated[
         MetadataDepth | None,
         typer.Option(help="Override command-specific metadata depth defaults."),
@@ -75,7 +66,6 @@ def root_callback(
 ) -> None:
     ctx.obj = AppState(
         json_output=json_output,
-        verbosity=verbose,
         metadata_depth=metadata_depth,
     )
 
