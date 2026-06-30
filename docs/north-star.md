@@ -50,6 +50,8 @@ library concepts instead of raw CloudKit records.
   overrides for development and diagnostics.
 - `LibrarySettings` is an internal schema/cache concern, not a primary
   user-facing command surface.
+- TMDb metadata enrichment belongs on library read commands via `--metadata`,
+  not as a separate top-level workflow.
 
 ## Values To Preserve
 

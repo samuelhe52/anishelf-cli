@@ -19,4 +19,3 @@ class CallbackStrategy(StrEnum):
 
 class AppState(BaseModel):
     json_output: bool = False
-    metadata_depth: MetadataDepth | None = None

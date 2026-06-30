@@ -8,7 +8,7 @@ from typer.testing import CliRunner
 
 from anishelf_cli import config
 from anishelf_cli.cli import groups, root
-from anishelf_cli.cli.root import app
+from anishelf_cli.cli.root import _normalize_metadata_args, app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
@@ -37,7 +37,7 @@ def test_root_help_mentions_global_options() -> None:
     assert result.exit_code == 0
     assert "--profile" not in result.stdout
     assert "--json" in result.stdout
-    assert "--metadata-depth" in result.stdout
+    assert "--metadata-depth" not in result.stdout
     assert "--anishelf-source" not in result.stdout
 
 
@@ -64,6 +64,83 @@ def test_non_user_command_groups_are_removed() -> None:
         result = runner.invoke(app, [command, "--help"])
         assert result.exit_code == 2
         assert "No such command" in result.stderr
+
+
+def test_metadata_command_group_is_removed() -> None:
+    result = runner.invoke(app, ["metadata", "--help"])
+
+    assert result.exit_code == 2
+    assert "No such command 'metadata'." in result.stderr
+
+
+def test_library_get_help_mentions_metadata_option() -> None:
+    result = runner.invoke(app, ["library", "get", "--help"])
+
+    assert result.exit_code == 0
+    assert "--metadata" in result.stdout
+    assert "none" in result.stdout
+    assert "summary" in result.stdout
+    assert "details" in result.stdout
+    assert "full" in result.stdout
+
+
+def test_normalize_metadata_args_uses_summary_for_bare_flag() -> None:
+    args = ["library", "get", "--metadata", "movie:55"]
+
+    assert _normalize_metadata_args(args) == [
+        "library",
+        "get",
+        "--metadata=summary",
+        "movie:55",
+    ]
+
+
+def test_normalize_metadata_args_preserves_explicit_level() -> None:
+    args = ["library", "list", "--metadata", "details", "--json"]
+
+    assert _normalize_metadata_args(args) == [
+        "library",
+        "list",
+        "--metadata=details",
+        "--json",
+    ]
+
+
+def test_normalize_metadata_args_preserves_none_level() -> None:
+    args = ["library", "export", "--metadata", "none"]
+
+    assert _normalize_metadata_args(args) == [
+        "library",
+        "export",
+        "--metadata=none",
+    ]
+
+
+def test_library_placeholder_accepts_bare_metadata_flag() -> None:
+    result = runner.invoke(app, ["--json", "library", "list", "--metadata"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["area"] == "library list"
+    assert payload["status"] == "not-implemented"
+
+
+def test_library_placeholder_accepts_explicit_metadata_level() -> None:
+    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "full"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["area"] == "library list"
+    assert payload["status"] == "not-implemented"
+
+
+def test_library_placeholder_accepts_none_metadata_level() -> None:
+    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "none"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["area"] == "library list"
+    assert payload["status"] == "not-implemented"
 
 
 def test_unknown_command_error_uses_plain_formatting() -> None:

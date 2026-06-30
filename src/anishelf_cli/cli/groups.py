@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import httpx
@@ -19,7 +18,7 @@ from anishelf_cli.core.output import (
     emit_placeholder,
 )
 from anishelf_cli.library import has_any_found_item, library_get_envelope, valid_lookup_record_names
-from anishelf_cli.models import CallbackStrategy
+from anishelf_cli.models import CallbackStrategy, MetadataDepth
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,
@@ -42,12 +41,20 @@ tmdb_app = typer.Typer(
     no_args_is_help=True,
     rich_markup_mode=None,
 )
-metadata_app = typer.Typer(
-    help="Metadata hydration commands.",
-    no_args_is_help=True,
-    rich_markup_mode=None,
-)
 library_lock_factory = None
+
+MetadataOption = Annotated[
+    MetadataDepth | None,
+    typer.Option(
+        "--metadata",
+        help=(
+            "Include TMDb metadata. Bare --metadata uses the default summary level; "
+            "explicit values are none, summary, details, or full. Use none to "
+            "disable TMDb requests."
+        ),
+        show_default=False,
+    ),
+]
 
 
 def _make_http_client() -> httpx.Client:
@@ -181,11 +188,13 @@ def _emit_secret_saved(json_output: bool, secret_type: str) -> None:
 def library_get(
     ctx: typer.Context,
     identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
+    metadata: MetadataOption = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    _ = metadata
     lookup_record_names = valid_lookup_record_names(identities)
     lookup_payload: dict[str, object] | None = None
 
@@ -329,7 +338,11 @@ def _optional_human_text(value: object) -> object:
 
 
 @library_app.command("list")
-def library_list(ctx: typer.Context) -> None:
+def library_list(
+    ctx: typer.Context,
+    metadata: MetadataOption = None,
+) -> None:
+    _ = metadata
     emit_placeholder(state_from_context(ctx), "library list")
 
 
@@ -337,18 +350,27 @@ def library_list(ctx: typer.Context) -> None:
 def library_search(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title")],
+    metadata: MetadataOption = None,
 ) -> None:
-    _ = title
+    _ = title, metadata
     emit_placeholder(state_from_context(ctx), "library search")
 
 
 @library_app.command("export")
-def library_export(ctx: typer.Context) -> None:
+def library_export(
+    ctx: typer.Context,
+    metadata: MetadataOption = None,
+) -> None:
+    _ = metadata
     emit_placeholder(state_from_context(ctx), "library export")
 
 
 @library_app.command("changes")
-def library_changes(ctx: typer.Context) -> None:
+def library_changes(
+    ctx: typer.Context,
+    metadata: MetadataOption = None,
+) -> None:
+    _ = metadata
     emit_placeholder(state_from_context(ctx), "library changes")
 
 
@@ -359,12 +381,3 @@ def tmdb_search(
 ) -> None:
     _ = title
     emit_placeholder(state_from_context(ctx), "tmdb search")
-
-
-@metadata_app.command("hydrate")
-def metadata_hydrate(
-    ctx: typer.Context,
-    input_path: Annotated[Path | None, typer.Option("--input")] = None,
-) -> None:
-    _ = input_path
-    emit_placeholder(state_from_context(ctx), "metadata hydrate")

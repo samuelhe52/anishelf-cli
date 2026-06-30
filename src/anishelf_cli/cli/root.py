@@ -4,10 +4,11 @@ import os
 import sys
 import termios
 import webbrowser
-from typing import Annotated, TextIO
+from typing import Annotated, Any, TextIO
 
 import httpx
 import typer
+from typer.core import TyperGroup
 
 from anishelf_cli.cli import groups
 from anishelf_cli.cli.common import json_output_requested
@@ -38,8 +39,43 @@ from anishelf_cli.secrets import (
     store_cloudkit_web_auth_token,
 )
 
+_DEFAULT_METADATA_DEPTH = MetadataDepth.SUMMARY.value
+_METADATA_DEPTH_VALUES = {depth.value for depth in MetadataDepth}
+
+
+def _normalize_metadata_args(args: list[str]) -> list[str]:
+    normalized: list[str] = []
+    index = 0
+
+    while index < len(args):
+        arg = args[index]
+        if arg == "--":
+            normalized.extend(args[index:])
+            break
+        if arg != "--metadata":
+            normalized.append(arg)
+            index += 1
+            continue
+
+        next_arg = args[index + 1] if index + 1 < len(args) else None
+        if next_arg in _METADATA_DEPTH_VALUES:
+            normalized.append(f"--metadata={next_arg}")
+            index += 2
+            continue
+
+        normalized.append(f"--metadata={_DEFAULT_METADATA_DEPTH}")
+        index += 1
+
+    return normalized
+
+
+class AniTyperGroup(TyperGroup):
+    def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        return super().parse_args(ctx, _normalize_metadata_args(list(args)))
+
 app = typer.Typer(
     add_completion=False,
+    cls=AniTyperGroup,
     help="Read-only AniShelf and CloudKit inspection CLI.",
     no_args_is_help=True,
     rich_markup_mode=None,
@@ -60,14 +96,9 @@ def root_callback(
         bool,
         typer.Option("--json", help="Emit machine-readable JSON when supported."),
     ] = False,
-    metadata_depth: Annotated[
-        MetadataDepth | None,
-        typer.Option(help="Override command-specific metadata depth defaults."),
-    ] = None,
 ) -> None:
     ctx.obj = AppState(
         json_output=json_output,
-        metadata_depth=metadata_depth,
     )
 
 
@@ -289,4 +320,3 @@ app.add_typer(auth_app, name="auth")
 app.add_typer(groups.config_app, name="config")
 app.add_typer(groups.library_app, name="library")
 app.add_typer(groups.tmdb_app, name="tmdb")
-app.add_typer(groups.metadata_app, name="metadata")

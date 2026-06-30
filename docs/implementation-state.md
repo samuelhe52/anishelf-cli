@@ -22,8 +22,9 @@ spec.
 - Secret redaction exists for known token values and sensitive URL query keys.
 - Human output uses shared `core.output` blocks: sections for detail views and
   aligned tables for collections.
-- Domain command groups exist for library, TMDb, and metadata, but they
-  currently return placeholders.
+- Domain command groups exist for library and TMDb. Library metadata enrichment
+  is planned as a command-local `--metadata` option, and most of that surface
+  still returns placeholders.
 - Low-level CloudKit diagnostics, settings, and schema checks are not
   user-facing command groups.
 - The cache module is only initial scaffolding.
@@ -42,7 +43,9 @@ spec.
   formatting.
 - Add only the cache shape needed by the first implemented library commands.
 - Treat schema drift checks as maintainer tooling rather than public CLI UX.
-- Keep TMDb hydration optional and separable from CloudKit user-state export.
+- Keep TMDb enrichment optional and attached to library reads/exports through
+  `--metadata`, including an explicit `none` level so CloudKit user-state
+  export remains possible without TMDb.
 
 ## Decisions Still Open
 

@@ -51,3 +51,8 @@ uv run ani library get movie:55 --json | jq '.items[].entry.watch_status'
 uv run ani library get movie:55 --json | jq '.items[] | {identity, score: .entry.score}'
 uv run ani library get movie:55 --json | jq '.items[] | select(.status == "error")'
 ```
+
+Library commands will also carry optional TMDb enrichment through `--metadata`
+instead of a separate top-level metadata command. Bare `--metadata` selects the
+default summary level; explicit levels use `none`, `summary`, `details`, or
+`full`. `none` means no TMDb request.

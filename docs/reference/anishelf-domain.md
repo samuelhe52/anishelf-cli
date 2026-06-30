@@ -42,12 +42,11 @@ expired change token, discard the affected cursor and rebuild.
 Normal user commands should stay library-first. Useful read-only surfaces
 include:
 
-- `library get <identity...>`
-- `library list` with filters
-- `library search --title`
-- `library export`
+- `library get <identity...> [--metadata[=none|summary|details|full]]`
+- `library list` with filters and optional `--metadata`
+- `library search --title` with optional `--metadata`
+- `library export` with optional `--metadata`
 - `tmdb search --title`
-- `metadata hydrate`
 
 Low-level CloudKit zone, record, change, settings, and schema-check commands
 are diagnostics. Keep them out of the normal user command tree unless a future
@@ -69,5 +68,10 @@ CloudKit records do not contain rich TMDb metadata such as localized titles,
 overviews, posters for normal TMDb items, runtime, credits, or season detail.
 Hydration should be explicit and optional.
 
-Initial depth names can remain `none`, `summary`, `details`, and `full`, but the
-exact fields should be finalized alongside the first implemented metadata path.
+The CLI decision is to keep metadata on library commands instead of exposing a
+separate top-level hydration pass. Bare `--metadata` should request the default
+summary level, while explicit `none`, `summary`, `details`, and `full` values
+should control the TMDb depth as implemented. `none` means no TMDb request.
+
+Exact field contents for each level should be finalized alongside the first
+implemented metadata path.
