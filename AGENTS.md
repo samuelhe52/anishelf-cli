@@ -39,5 +39,6 @@ the authority. Do not infer schema shape from this CLI alone.
 - Do not reintroduce persisted local configuration or credential namespaces.
 - Keep Keychain storage for user-scoped CloudKit web auth tokens and TMDb keys;
   do not add Keychain storage for CloudKit app auth.
+- Use `uv run ...` for development commands in this repo.
 - Commit messages should use concise `type: Subject` style, for example
   `feat: Add CloudKit login flow` or `fix: Tighten credential source handling`.

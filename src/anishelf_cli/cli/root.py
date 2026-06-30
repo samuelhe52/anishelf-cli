@@ -11,6 +11,7 @@ import typer
 from typer.core import TyperGroup
 
 from anishelf_cli.cli import groups
+from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cloudkit.api_token import (
     MissingCloudKitAPITokenError,
@@ -36,6 +37,7 @@ from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,
     delete_cloudkit_web_auth_token,
+    load_cloudkit_web_auth_token,
     store_cloudkit_web_auth_token,
 )
 
@@ -187,6 +189,11 @@ def login(
     redactor = SecretRedactor()
 
     try:
+        if load_cloudkit_web_auth_token() is not None:
+            emit_error(
+                "CloudKit auth is already configured. Run `ani auth logout` before logging in as another user."
+            )
+            raise typer.Exit(code=2)
         api_token = resolve_cloudkit_api_token()
         redactor.register(api_token.value, "cloudkit-api-token")
 
@@ -244,15 +251,25 @@ def logout(
     try:
         with cloudkit_web_auth_token_lock(lock_factory=whoami_lock_factory):
             delete_cloudkit_web_auth_token()
+        removed = LibraryCacheStore.remove_all_local_caches()
     except SecretStorageUnavailableError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
 
     if json_output_requested(ctx, json_output):
-        emit_json({"status": "logged-out"})
+        emit_json(
+            {
+                "status": "logged-out",
+                "cache": {
+                    "status": "cleared",
+                    "cache_files": removed["cache_files"],
+                    "lock_files": removed["lock_files"],
+                },
+            }
+        )
         return
 
-    typer.echo("Removed CloudKit web auth token.")
+    typer.echo("Removed CloudKit web auth token and cleared local library cache.")
 
 
 @auth_app.command("status", help="Show the current CloudKit authentication status.")

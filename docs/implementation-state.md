@@ -16,7 +16,8 @@ spec.
 - `auth status` and `auth refresh` call CloudKit `users/current` through
   `CloudKitExecutor`, including local locking around rolling web auth token
   use.
-- `auth logout` removes the stored CloudKit web auth token.
+- `auth logout` removes the stored CloudKit web auth token and clears all local
+  library cache files.
 - `config show` and `config set-tmdb-api-key` are implemented.
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
@@ -32,14 +33,14 @@ spec.
 - `library get`, `library list`, `library export`, and `library search --title`
   read from the initialized local cache and fail closed until init has been
   run.
-- `library search --title` searches the initialized local cache by title and
-  identity.
+- `library search --title` requires complete cached TMDb summary metadata and
+  fails explicitly when that metadata is unavailable or incomplete.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_summary`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `details`/`full` are
   reserved until detail cache behavior exists.
 - `library init` hydrates TMDb summary metadata for the full fetched library
-  when a TMDb key is available. Later `library sync` refreshes hydrate only
+  when a TMDb key is available. Later `library sync` refreshes hydrate all
   newly added entries automatically. Library read commands also support
   `--refresh-meta`, and `library get` supports `--live-meta`, for explicit
   summary refresh.

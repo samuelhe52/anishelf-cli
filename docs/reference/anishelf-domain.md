@@ -71,8 +71,10 @@ after confirmation.
 Tombstones are an internal sync concern and should not appear in public entry
 counts or library list/export output.
 
-`library search --title` searches the initialized local cache by title and
-identity. Use `tmdb search --title` for global TMDb discovery.
+`library search --title` depends on cached TMDb summary metadata. If that
+metadata is incomplete or unavailable, the command should fail explicitly and
+tell the user how to hydrate metadata first. Use `tmdb search --title` for
+global TMDb discovery.
 
 Low-level CloudKit zone, record, change, settings, and schema-check commands
 are diagnostics. Keep them out of the normal user command tree unless a future
@@ -104,5 +106,5 @@ first implemented metadata-enrichment path.
 
 `library init` should fetch the full library and hydrate TMDb summary metadata
 for every entry when a TMDb key is available. After that initialization pass,
-`library sync` should hydrate only newly added entries unless the user
-explicitly requests `--refresh-meta` or `--live-meta`.
+`library sync` should hydrate every newly added entry unless the user explicitly
+requests `--refresh-meta` or `--live-meta`.

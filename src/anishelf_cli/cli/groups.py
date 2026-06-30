@@ -65,7 +65,6 @@ tmdb_app = typer.Typer(
     rich_markup_mode=None,
 )
 library_lock_factory = None
-AUTO_METADATA_HYDRATION_TARGET_LIMIT = 8
 
 MetadataOption = Annotated[
     MetadataDepth | None,
@@ -631,6 +630,12 @@ def library_list(
     _reject_reserved_metadata_depth(metadata_depth)
     _validate_watch_status(watch_status)
     store = _library_store_for_read()
+    if sort is LibraryListSort.TITLE:
+        _require_complete_tmdb_summary_metadata(
+            store,
+            action="sort library entries by title",
+            hint="Run `ani library list --refresh-meta --metadata none` after configuring a TMDb API key.",
+        )
     entries = store.list_entries_filtered(
         include_tombstones=False,
         watch_status=watch_status,
@@ -684,6 +689,11 @@ def library_search(
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     store = _library_store_for_read()
+    _require_complete_tmdb_summary_metadata(
+        store,
+        action="search cached library entries by title",
+        hint="Run `ani library list --refresh-meta --metadata none` after configuring a TMDb API key.",
+    )
     entries = store.search_entries_by_title(title)
     metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
@@ -837,7 +847,6 @@ def _initialize_library_store(
                     store=store,
                     executor=executor,
                     tmdb_client=None,
-                    metadata_target_limit=AUTO_METADATA_HYDRATION_TARGET_LIMIT,
                 ).refresh()
             if tmdb_client is not None and refresh_result.metadata_targets:
                 metadata_result = _refresh_metadata_targets(
@@ -926,6 +935,25 @@ def _entries_for_metadata_depth(
     if metadata_depth is MetadataDepth.NONE:
         return entries
     return store.attach_metadata_summary(entries)
+
+
+def _require_complete_tmdb_summary_metadata(
+    store: LibraryCacheStore,
+    *,
+    action: str,
+    hint: str,
+) -> None:
+    status = store.metadata_summary_status()
+    if bool(status.get("ready")):
+        return
+    tracked = int(status.get("tracked_entries", 0))
+    hydrated = int(status.get("hydrated_entries", 0))
+    missing = int(status.get("missing_entries", 0))
+    emit_error(
+        f"Cannot {action} because TMDb summary metadata is incomplete "
+        f"({hydrated}/{tracked} hydrated, {missing} missing). {hint}"
+    )
+    raise typer.Exit(code=2)
 
 
 def _refresh_metadata_for_entries(

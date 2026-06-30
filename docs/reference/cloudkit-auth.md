@@ -25,6 +25,11 @@ The production-safe login path is browser sign-in followed by manual paste of
 the final HTTPS callback URL. The CLI extracts `ckWebAuthToken` from that URL and
 stores only the token in the OS secure credential store.
 
+Only one local CloudKit login is supported at a time. If a user is already
+logged in, `auth login` should fail until `auth logout` clears the stored token.
+`auth logout` should also clear all local library cache files so a later login
+cannot reuse another user's cache.
+
 Loopback callback capture is available for development-style flows that allow a
 localhost callback. It must validate loopback hosts and must not expose callback
 URLs in normal output.
