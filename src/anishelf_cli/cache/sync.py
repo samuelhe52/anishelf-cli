@@ -53,6 +53,7 @@ class LibraryCacheSync:
     store: LibraryCacheStore
     executor: CloudKitExecutor
     tmdb_client: TMDbSummaryClient | None = None
+    collect_metadata_targets: bool = True
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
     metadata_target_limit: int | None = None
     progress_callback: LibraryCacheProgressCallback | None = None
@@ -71,7 +72,11 @@ class LibraryCacheSync:
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
         pages = 0
         records = 0
-        metadata_targets = self.store.outdated_metadata_summary_targets()
+        metadata_targets = (
+            self.store.outdated_metadata_summary_targets()
+            if self.collect_metadata_targets
+            else []
+        )
         next_token: str | None = sync_token
         self._emit_progress("sync-started", rebuilt=False)
         while True:

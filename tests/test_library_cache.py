@@ -349,6 +349,55 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
     assert store.metadata_summary_status()["ready"] is True
 
 
+def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+
+    class FakeExecutor:
+        def fetch_zone_changes(
+            self,
+            *,
+            sync_token: str | None,
+            desired_record_types: list[str] | None = None,
+        ) -> ZoneChangesPage:
+            _ = desired_record_types
+            assert sync_token == "t1"
+            return ZoneChangesPage(records=[], sync_token="t2", more_coming=False)
+
+    def fail_outdated_scan(self) -> list[dict[str, Any]]:
+        raise AssertionError("outdated metadata scan should be skipped")
+
+    monkeypatch.setattr(
+        LibraryCacheStore,
+        "outdated_metadata_summary_targets",
+        fail_outdated_scan,
+    )
+
+    result = LibraryCacheSync(
+        store=store,
+        executor=FakeExecutor(),  # type: ignore[arg-type]
+        collect_metadata_targets=False,
+    ).refresh()
+
+    assert result.rebuilt is False
+    assert result.records == 0
+    assert result.metadata_requested == 0
+    assert result.metadata_targets == ()
+    assert store.read_sync_token() == "t2"
+
+
 def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
     tmp_path,
     monkeypatch,
@@ -1235,6 +1284,42 @@ def test_library_list_uses_configured_metadata_none_by_default(
         "source": None,
     }
     assert "metadata" not in payload["entries"][0]
+
+
+def test_library_list_title_sort_uses_cached_metadata_when_output_metadata_is_disabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[
+                _live_record("movie:55", "movie", 55),
+                _live_record("movie:66", "movie", 66),
+            ],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
+    store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "library", "list", "--sort", "title"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["metadata"] == {
+        "requested": "none",
+        "attached": False,
+        "source": None,
+    }
+    assert [entry["identity"] for entry in payload["entries"]] == ["movie:66", "movie:55"]
+    assert all("metadata" not in entry for entry in payload["entries"])
 
 
 def test_library_list_metadata_flag_overrides_configured_default(

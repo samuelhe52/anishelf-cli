@@ -436,10 +436,11 @@ def library_init(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    machine_output = json_output_requested(ctx, json_output)
     store, refresh_result = _initialize_library_store(
         require_missing_cache=True,
-        progress_callback=_emit_library_init_progress,
-        metadata_progress_enabled=True,
+        progress_callback=None if machine_output else _emit_library_init_progress,
+        metadata_progress_enabled=not machine_output,
     )
     payload = {
         "summary": {
@@ -460,7 +461,7 @@ def library_init(
             }
         }
     }
-    if json_output_requested(ctx, json_output):
+    if machine_output:
         emit_json(payload)
         return
     emit_human_blocks(
@@ -830,8 +831,12 @@ def library_list(
         sort=sort.value,
         limit=None if sort is LibraryListSort.TITLE else limit,
     )
-    entries = _entries_for_metadata_depth(store, entries, metadata_depth)
-    entries = _sort_entries_after_metadata(entries, sort)
+    sort_entries = _entries_for_metadata_depth(store, entries, metadata_depth)
+    if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
+        sort_entries = store.attach_metadata_summary(entries)
+    entries = _sort_entries_after_metadata(sort_entries, sort)
+    if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
+        entries = _strip_entry_metadata(entries)
     if sort is LibraryListSort.TITLE and limit is not None:
         entries = entries[:limit]
     payload = _library_entries_payload(entries, store, refresh_result)
@@ -1087,6 +1092,7 @@ def _initialize_library_store(
                     store=store,
                     executor=executor,
                     tmdb_client=None,
+                    collect_metadata_targets=tmdb_client is not None,
                     progress_callback=progress_callback,
                 ).refresh()
             if tmdb_client is not None and refresh_result.metadata_targets:
@@ -1321,6 +1327,15 @@ def _sort_entries_after_metadata(
             str(entry.get("identity") or ""),
         ),
     )
+
+
+def _strip_entry_metadata(entries: list[dict[str, object]]) -> list[dict[str, object]]:
+    stripped: list[dict[str, object]] = []
+    for entry in entries:
+        clone = dict(entry)
+        clone.pop("metadata", None)
+        stripped.append(clone)
+    return stripped
 
 
 def _library_list_filters_payload(
