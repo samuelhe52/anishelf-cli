@@ -785,7 +785,10 @@ def test_library_list_refreshes_cache_and_emits_clean_json(tmp_path, monkeypatch
     result = runner.invoke(app, ["--json", "library", "init"])
 
     assert result.exit_code == 0, result.output
-    assert result.stderr == ""
+    assert "[progress] Starting local library cache rebuild from CloudKit." in result.stderr
+    assert "[progress] Fetched page 1: 2 records (2 total)." in result.stderr
+    assert "api-secret-token" not in result.stderr
+    assert "web-secret-token" not in result.stderr
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["records"] == 2
     assert payload["summary"]["cache"]["mode"] == "updated"
@@ -1275,6 +1278,7 @@ def test_library_list_uses_configured_metadata_none_by_default(
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["--json", "library", "list"])
+    human = runner.invoke(app, ["library", "list"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1284,6 +1288,8 @@ def test_library_list_uses_configured_metadata_none_by_default(
         "source": None,
     }
     assert "metadata" not in payload["entries"][0]
+    assert human.exit_code == 0, human.output
+    assert "Alien" in human.stdout
 
 
 def test_library_list_title_sort_uses_cached_metadata_when_output_metadata_is_disabled(
@@ -1692,6 +1698,31 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
     assert without_metadata.exit_code == 0, without_metadata.output
     assert "metadata" not in json.loads(without_metadata.stdout)["entries"][0]
     assert fake_store.attach_calls == 1
+
+
+def test_library_search_human_uses_cached_titles_when_configured_metadata_default_is_none(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["library", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0, result.output
+    assert "Alien" in result.stdout
 
 
 def test_library_search_uses_configured_display_fields_for_human_output(

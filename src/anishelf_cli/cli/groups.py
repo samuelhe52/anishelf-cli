@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import sys
+from collections.abc import Callable
 from dataclasses import replace
 from enum import StrEnum
 from typing import Annotated
@@ -439,8 +439,8 @@ def library_init(
     machine_output = json_output_requested(ctx, json_output)
     store, refresh_result = _initialize_library_store(
         require_missing_cache=True,
-        progress_callback=None if machine_output else _emit_library_init_progress,
-        metadata_progress_enabled=not machine_output,
+        progress_callback=_emit_library_init_progress,
+        metadata_progress_enabled=True,
     )
     payload = {
         "summary": {
@@ -812,6 +812,7 @@ def library_list(
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
+    machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     _validate_watch_status(watch_status)
@@ -850,11 +851,11 @@ def library_list(
         sort=sort,
         limit=limit,
     )
-    if json_output_requested(ctx, json_output):
+    if machine_output:
         emit_json(payload)
         return
     _emit_library_list_human(
-        entries,
+        _entries_for_human_titles(store, entries),
         fields=_resolve_display_fields(fields, command_default=_LIBRARY_LIST_DEFAULT_FIELDS),
     )
 
@@ -878,6 +879,7 @@ def library_search(
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
+    machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     store, refresh_result = _library_read_store(sync=sync)
@@ -893,12 +895,12 @@ def library_search(
     payload["query"] = {
         "title": title,
     }
-    if json_output_requested(ctx, json_output):
+    if machine_output:
         emit_json(payload)
         return
     _emit_library_search_human(
         title,
-        entries,
+        _entries_for_human_titles(store, entries),
         fields=_resolve_display_fields(fields, command_default=_LIBRARY_SEARCH_DEFAULT_FIELDS),
     )
 
@@ -1336,6 +1338,13 @@ def _strip_entry_metadata(entries: list[dict[str, object]]) -> list[dict[str, ob
         clone.pop("metadata", None)
         stripped.append(clone)
     return stripped
+
+
+def _entries_for_human_titles(
+    store: LibraryCacheStore,
+    entries: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    return store.attach_metadata_summary(entries)
 
 
 def _library_list_filters_payload(
