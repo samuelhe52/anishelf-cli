@@ -25,7 +25,7 @@ from anishelf_cli.cloudkit.executor import (
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.secrets import SecretStorageUnavailableError, cloudkit_web_auth_token_secret
-from anishelf_cli.tmdb.client import TMDbRequestError
+from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 
 runner = CliRunner()
@@ -207,20 +207,10 @@ def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
 
     assert store.missing_metadata_summary_targets() == []
     assert store.outdated_metadata_summary_targets() == [
-        {
-            "entry_type": "movie",
-            "tmdb_id": 55,
-            "parent_series_id": None,
-            "season_number": None,
-        }
+        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
     ]
     assert store.incomplete_metadata_summary_targets() == [
-        {
-            "entry_type": "movie",
-            "tmdb_id": 55,
-            "parent_series_id": None,
-            "season_number": None,
-        }
+        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
     ]
     assert store.metadata_summary_status() == {
         "tracked_entries": 1,
@@ -376,7 +366,7 @@ def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled
             assert sync_token == "t1"
             return ZoneChangesPage(records=[], sync_token="t2", more_coming=False)
 
-    def fail_outdated_scan(self) -> list[dict[str, Any]]:
+    def fail_outdated_scan(self) -> list[TMDbSummaryIdentity]:
         raise AssertionError("outdated metadata scan should be skipped")
 
     monkeypatch.setattr(

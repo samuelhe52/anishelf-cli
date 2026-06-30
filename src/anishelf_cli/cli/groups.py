@@ -51,6 +51,7 @@ from anishelf_cli.secrets import (
 from anishelf_cli.tmdb.client import (
     TMDbClient,
     TMDbRequestError,
+    TMDbSummaryIdentity,
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
     TMDbTitleSearchResult,
@@ -1090,14 +1091,13 @@ def _initialize_library_store(
                     "No local library cache is available. Run `ani library init` first."
                 )
             tmdb_client = _tmdb_summary_client_or_none()
-            with store.locked():
-                refresh_result = LibraryCacheSync(
-                    store=store,
-                    executor=executor,
-                    tmdb_client=tmdb_client,
-                    collect_metadata_targets=tmdb_client is not None,
-                    progress_callback=progress_callback,
-                ).refresh()
+            refresh_result = LibraryCacheSync(
+                store=store,
+                executor=executor,
+                tmdb_client=tmdb_client,
+                collect_metadata_targets=tmdb_client is not None,
+                progress_callback=progress_callback,
+            ).refresh()
             return store, refresh_result
     except (
         CloudKitWhoamiError,
@@ -1214,7 +1214,7 @@ def _refresh_metadata_for_entries(
 def _refresh_metadata_targets(
     store: LibraryCacheStore,
     tmdb_client: TMDbClient,
-    targets: list[dict[str, object]],
+    targets: list[TMDbSummaryIdentity],
     *,
     emit_progress_updates: bool = False,
 ) -> dict[str, int]:

@@ -20,6 +20,7 @@ from anishelf_cli.library import (
     decode_library_entry_record,
     parse_library_identity,
 )
+from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 CACHE_SCHEMA_VERSION = "1"
 TMDB_LEGACY_SUMMARY_SOURCE_VERSION = "tmdbsummary.v1"
@@ -190,10 +191,10 @@ class LibraryCacheStore:
         page: ZoneChangesPage,
         *,
         staging: bool,
-    ) -> list[dict[str, Any]]:
+    ) -> list[TMDbSummaryIdentity]:
         table = "library_entries_stage" if staging else "library_entries"
         token_key = REBUILD_SYNC_TOKEN_META_KEY if staging else ZONE_SYNC_TOKEN_META_KEY
-        new_targets: list[dict[str, Any]] = []
+        new_targets: list[TMDbSummaryIdentity] = []
         with self._connect_initialized() as db:
             db.execute("BEGIN")
             try:
@@ -398,68 +399,47 @@ class LibraryCacheStore:
     def metadata_summary_targets_for_entries(
         self,
         entries: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        return _dedupe_summary_targets(
-            [
-                {
-                    "entry_type": entry["entry_type"],
-                    "tmdb_id": entry["tmdb_id"],
-                    "parent_series_id": entry.get("parent_series_id"),
-                    "season_number": entry.get("season_number"),
-                }
-                for entry in entries
-                if entry.get("kind") == "snapshot"
-            ]
-        )
+    ) -> list[TMDbSummaryIdentity]:
+        targets = [
+            _metadata_target_from_entry(entry)
+            for entry in entries
+            if entry.get("kind") == "snapshot"
+        ]
+        return _dedupe_summary_targets([target for target in targets if target is not None])
 
-    def missing_metadata_summary_targets(self) -> list[dict[str, Any]]:
+    def missing_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
         entries = self.list_entries(include_tombstones=False)
         if not entries:
             return []
         with self._connect_initialized() as db:
-            missing: list[dict[str, Any]] = []
+            missing: list[TMDbSummaryIdentity] = []
             for entry in entries:
-                target = {
-                    "entry_type": entry["entry_type"],
-                    "tmdb_id": entry["tmdb_id"],
-                    "parent_series_id": entry.get("parent_series_id"),
-                    "season_number": entry.get("season_number"),
-                }
-                if _metadata_summary_state(db, target) == "missing":
+                target = _metadata_target_from_entry(entry)
+                if target is not None and _metadata_summary_state(db, target) == "missing":
                     missing.append(target)
         return _dedupe_summary_targets(missing)
 
-    def outdated_metadata_summary_targets(self) -> list[dict[str, Any]]:
+    def outdated_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
         entries = self.list_entries(include_tombstones=False)
         if not entries:
             return []
         with self._connect_initialized() as db:
-            outdated: list[dict[str, Any]] = []
+            outdated: list[TMDbSummaryIdentity] = []
             for entry in entries:
-                target = {
-                    "entry_type": entry["entry_type"],
-                    "tmdb_id": entry["tmdb_id"],
-                    "parent_series_id": entry.get("parent_series_id"),
-                    "season_number": entry.get("season_number"),
-                }
-                if _metadata_summary_state(db, target) == "outdated":
+                target = _metadata_target_from_entry(entry)
+                if target is not None and _metadata_summary_state(db, target) == "outdated":
                     outdated.append(target)
         return _dedupe_summary_targets(outdated)
 
-    def incomplete_metadata_summary_targets(self) -> list[dict[str, Any]]:
+    def incomplete_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
         entries = self.list_entries(include_tombstones=False)
         if not entries:
             return []
         with self._connect_initialized() as db:
-            missing: list[dict[str, Any]] = []
+            missing: list[TMDbSummaryIdentity] = []
             for entry in entries:
-                target = {
-                    "entry_type": entry["entry_type"],
-                    "tmdb_id": entry["tmdb_id"],
-                    "parent_series_id": entry.get("parent_series_id"),
-                    "season_number": entry.get("season_number"),
-                }
-                if _metadata_summary_state(db, target) != "current":
+                target = _metadata_target_from_entry(entry)
+                if target is not None and _metadata_summary_state(db, target) != "current":
                     missing.append(target)
         return _dedupe_summary_targets(missing)
 
@@ -695,7 +675,7 @@ def _summary_target_from_record(
     db: sqlite3.Connection,
     table: str,
     record: dict[str, Any],
-) -> dict[str, Any] | None:
+) -> TMDbSummaryIdentity | None:
     if _record_deleted(record):
         return None
     decoded = decode_library_entry_record(record)
@@ -703,12 +683,7 @@ def _summary_target_from_record(
         return None
     if _entry_exists(db, table, str(decoded["identity"])):
         return None
-    return {
-        "entry_type": decoded["entry_type"],
-        "tmdb_id": decoded["tmdb_id"],
-        "parent_series_id": decoded.get("parent_series_id"),
-        "season_number": decoded.get("season_number"),
-    }
+    return _metadata_target_from_entry(decoded)
 
 
 def _entry_exists(db: sqlite3.Connection, table: str, identity: str) -> bool:
@@ -716,13 +691,13 @@ def _entry_exists(db: sqlite3.Connection, table: str, identity: str) -> bool:
     return row is not None
 
 
-def _metadata_summary_exists(db: sqlite3.Connection, target: dict[str, Any]) -> bool:
+def _metadata_summary_exists(db: sqlite3.Connection, target: TMDbSummaryIdentity) -> bool:
     row = db.execute(
         """
         SELECT 1 FROM tmdb_metadata_summary
         WHERE metadata_key = ? AND language = ''
         """,
-        (_metadata_key_from_entry(target),),
+        (_metadata_key_from_target(target),),
     ).fetchone()
     return row is not None
 
@@ -1112,7 +1087,7 @@ def _canonical_metadata_source_version(value: object) -> str | None:
 
 def _metadata_summary_state(
     db: sqlite3.Connection,
-    target: dict[str, Any],
+    target: TMDbSummaryIdentity,
 ) -> Literal["current", "missing", "outdated"]:
     row = db.execute(
         """
@@ -1120,7 +1095,7 @@ def _metadata_summary_state(
         FROM tmdb_metadata_summary
         WHERE metadata_key = ? AND language = ''
         """,
-        (_metadata_key_from_entry(target),),
+        (_metadata_key_from_target(target),),
     ).fetchone()
     if row is None:
         return "missing"
@@ -1184,11 +1159,11 @@ def _metadata_lookup_params(entries: list[dict[str, Any]]) -> list[Any]:
     return [_metadata_key_from_entry(entry) for entry in entries]
 
 
-def _dedupe_summary_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _dedupe_summary_targets(targets: list[TMDbSummaryIdentity]) -> list[TMDbSummaryIdentity]:
     seen: set[str] = set()
-    deduped: list[dict[str, Any]] = []
+    deduped: list[TMDbSummaryIdentity] = []
     for target in targets:
-        key = _metadata_key_from_entry(target)
+        key = _metadata_key_from_target(target)
         if key in seen:
             continue
         seen.add(key)
@@ -1210,6 +1185,29 @@ def _metadata_key_from_entry(entry: dict[str, Any]) -> str:
             raise LibraryCacheError("Season metadata is missing parent series context.")
         return f"season:{int(parent_series_id)}:{int(season_number)}:{tmdb_id}"
     return f"{entry_type}:{tmdb_id}"
+
+
+def _metadata_key_from_target(target: TMDbSummaryIdentity) -> str:
+    if target.entry_type == "season":
+        if target.parent_series_id is None or target.season_number is None:
+            raise LibraryCacheError("Season metadata is missing parent series context.")
+        return (
+            f"season:{target.parent_series_id}:{target.season_number}:{target.tmdb_id}"
+        )
+    return f"{target.entry_type}:{target.tmdb_id}"
+
+
+def _metadata_target_from_entry(entry: dict[str, Any]) -> TMDbSummaryIdentity | None:
+    entry_type = _optional_string(entry.get("entry_type"))
+    tmdb_id = _metadata_optional_int(entry.get("tmdb_id"))
+    if entry_type is None or tmdb_id is None:
+        return None
+    return TMDbSummaryIdentity(
+        entry_type=entry_type,
+        tmdb_id=tmdb_id,
+        parent_series_id=_metadata_optional_int(entry.get("parent_series_id")),
+        season_number=_metadata_optional_int(entry.get("season_number")),
+    )
 
 
 def _optional_string(value: object) -> str | None:
