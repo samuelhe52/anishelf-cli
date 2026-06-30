@@ -140,10 +140,94 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
     attached = store.attach_metadata_summary([raw_entry])[0]
     assert attached["metadata"]["name"] == "Alien"
     assert attached["metadata"]["poster_path"] == "/poster.jpg"
+    assert attached["metadata"]["genres"] == [{"id": 878, "name": "Science Fiction"}]
+    assert attached["metadata"]["runtime_minutes"] == 117
+    assert attached["metadata"]["vote_average"] == 8.2
 
     with sqlite3.connect(store.path) as db:
         decoded_json = db.execute("SELECT decoded_json FROM library_entries").fetchone()[0]
         assert "Alien" not in decoded_json
+
+
+def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    _insert_legacy_v1_metadata_summary(
+        store,
+        metadata_key="movie:55",
+        entry_type="movie",
+        tmdb_id=55,
+    )
+
+    attached = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
+
+    assert attached["status"] is None
+    assert attached["genres"] == []
+    assert attached["runtime_minutes"] is None
+    assert attached["season_count"] is None
+    assert attached["episode_count"] is None
+    assert attached["vote_average"] is None
+    assert attached["vote_count"] is None
+    assert attached["popularity"] is None
+
+
+def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    _insert_legacy_v1_metadata_summary(
+        store,
+        metadata_key="movie:55",
+        entry_type="movie",
+        tmdb_id=55,
+    )
+
+    assert store.missing_metadata_summary_targets() == []
+    assert store.outdated_metadata_summary_targets() == [
+        {
+            "entry_type": "movie",
+            "tmdb_id": 55,
+            "parent_series_id": None,
+            "season_number": None,
+        }
+    ]
+    assert store.incomplete_metadata_summary_targets() == [
+        {
+            "entry_type": "movie",
+            "tmdb_id": 55,
+            "parent_series_id": None,
+            "season_number": None,
+        }
+    ]
+    assert store.metadata_summary_status() == {
+        "tracked_entries": 1,
+        "hydrated_entries": 0,
+        "missing_entries": 1,
+        "ready": False,
+    }
 
 
 def test_cache_sync_hydrates_tmdb_summary_for_new_entries_only(
@@ -203,6 +287,66 @@ def test_cache_sync_hydrates_tmdb_summary_for_new_entries_only(
     assert second.metadata_requested == 1
     assert second.metadata_hydrated == 1
     assert tmdb.targets == [("movie", 55), ("series", 22)]
+
+
+def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    _insert_legacy_v1_metadata_summary(
+        store,
+        metadata_key="movie:55",
+        entry_type="movie",
+        tmdb_id=55,
+    )
+
+    class FakeExecutor:
+        def fetch_zone_changes(
+            self,
+            *,
+            sync_token: str | None,
+            desired_record_types: list[str] | None = None,
+        ) -> ZoneChangesPage:
+            _ = desired_record_types
+            assert sync_token == "t1"
+            return ZoneChangesPage(records=[], sync_token="t2", more_coming=False)
+
+    class FakeTMDb:
+        def __init__(self) -> None:
+            self.targets: list[tuple[str, int]] = []
+
+        def fetch_summary(self, identity) -> dict[str, Any]:
+            self.targets.append((identity.entry_type, identity.tmdb_id))
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
+
+    tmdb = FakeTMDb()
+
+    result = LibraryCacheSync(
+        store=store,
+        executor=FakeExecutor(),  # type: ignore[arg-type]
+        tmdb_client=tmdb,
+    ).refresh()
+
+    assert result.rebuilt is False
+    assert result.records == 0
+    assert result.metadata_requested == 1
+    assert result.metadata_hydrated == 1
+    assert tmdb.targets == [("movie", 55)]
+    refreshed = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
+    assert refreshed["source_version"] == "tmdbsummary.v2"
+    assert refreshed["runtime_minutes"] == 117
+    assert store.metadata_summary_status()["ready"] is True
 
 
 def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
@@ -1176,6 +1320,36 @@ def test_library_refresh_meta_updates_full_library_cache(
     assert refreshed["metadata"]["name"] == "Alien"
 
 
+def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+
+    summary = _metadata_summary("movie", 55, name="Alien")
+    summary["source_version"] = "tmdb.http.summary.v2"
+    store.upsert_metadata_summary(summary)
+
+    attached = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
+    assert attached["source_version"] == "tmdbsummary.v2"
+    with sqlite3.connect(store.path) as db:
+        stored = db.execute(
+            "SELECT source_version FROM tmdb_metadata_summary WHERE metadata_key = ?",
+            ("movie:55",),
+        ).fetchone()
+    assert stored[0] == "tmdbsummary.v2"
+
+
 def test_library_export_attaches_cached_metadata_by_default(
     tmp_path,
     monkeypatch,
@@ -1328,9 +1502,98 @@ def _metadata_summary(
         "logo_path": None,
         "original_language_code": "en",
         "on_air_date": "1979-05-25",
+        "status": "Released" if entry_type == "movie" else "Returning Series",
+        "genres": [{"id": 878, "name": "Science Fiction"}],
+        "runtime_minutes": 117 if entry_type == "movie" else None,
+        "season_count": 3 if entry_type == "series" else None,
+        "episode_count": 22 if entry_type == "series" else 10 if entry_type == "season" else None,
+        "vote_average": 8.2,
+        "vote_count": 15432,
+        "popularity": 44.5,
         "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
         "source_version": "test",
     }
+
+
+def _insert_legacy_v1_metadata_summary(
+    store: LibraryCacheStore,
+    *,
+    metadata_key: str,
+    entry_type: str,
+    tmdb_id: int,
+) -> None:
+    with sqlite3.connect(store.path) as db:
+        db.execute(
+            """
+            INSERT INTO tmdb_metadata_summary (
+                metadata_key,
+                entry_type,
+                tmdb_id,
+                parent_series_id,
+                season_number,
+                language,
+                name,
+                name_translations_json,
+                original_name,
+                overview,
+                overview_translations_json,
+                poster_path,
+                backdrop_path,
+                logo_path,
+                original_language_code,
+                on_air_date,
+                link_to_details,
+                fetched_at,
+                source_version,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                metadata_key,
+                entry_type,
+                tmdb_id,
+                None,
+                None,
+                "",
+                "Alien",
+                "{}",
+                "Alien",
+                "Legacy overview.",
+                "{}",
+                "/poster.jpg",
+                "/backdrop.jpg",
+                None,
+                "en",
+                "1979-05-25",
+                f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+                "2026-06-30T00:00:00Z",
+                "tmdbsummary.v1",
+                json.dumps(
+                    {
+                        "entry_type": entry_type,
+                        "tmdb_id": tmdb_id,
+                        "language": None,
+                        "name": "Alien",
+                        "name_translations": {},
+                        "original_name": "Alien",
+                        "overview": "Legacy overview.",
+                        "overview_translations": {},
+                        "poster_path": "/poster.jpg",
+                        "backdrop_path": "/backdrop.jpg",
+                        "logo_path": None,
+                        "original_language_code": "en",
+                        "on_air_date": "1979-05-25",
+                        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+                        "fetched_at": "2026-06-30T00:00:00Z",
+                        "source_version": "tmdbsummary.v1",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        db.commit()
 
 
 def _live_record(

@@ -63,6 +63,63 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
 
 
+def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/3/tv/22":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 22,
+                    "name": "Alien Nation",
+                    "original_name": "Alien Nation",
+                    "overview": "A sci-fi police series.",
+                    "first_air_date": "1989-09-18",
+                    "poster_path": "/series.jpg",
+                    "backdrop_path": "/series-backdrop.jpg",
+                    "original_language": "en",
+                    "status": "Ended",
+                    "genres": [{"id": 18, "name": "Drama"}],
+                    "number_of_seasons": 1,
+                    "number_of_episodes": 22,
+                    "vote_average": 7.4,
+                    "vote_count": 120,
+                    "popularity": 8.8,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": 33,
+                "name": "Season 1",
+                "overview": "The first season.",
+                "air_date": "1989-09-18",
+                "poster_path": "/season.jpg",
+                "episodes": [{"id": 1}, {"id": 2}, {"id": 3}],
+                "vote_average": 7.1,
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", client=client)
+
+    series_summary = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="series", tmdb_id=22))
+    season_summary = tmdb.fetch_summary(
+        TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22, season_number=1)
+    )
+
+    assert series_summary["season_count"] == 1
+    assert series_summary["episode_count"] == 22
+    assert series_summary["runtime_minutes"] is None
+    assert series_summary["genres"] == [{"id": 18, "name": "Drama"}]
+    assert season_summary["season_count"] is None
+    assert season_summary["episode_count"] == 3
+    assert season_summary["link_to_details"] == "https://www.themoviedb.org/tv/22/season/1"
+    assert [request.url.path for request in requests] == ["/3/tv/22", "/3/tv/22/season/1"]
+
+
 def test_tmdb_client_searches_movie_and_tv_titles() -> None:
     requests: list[httpx.Request] = []
 

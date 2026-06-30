@@ -22,7 +22,8 @@ from anishelf_cli.library import (
 )
 
 CACHE_SCHEMA_VERSION = "1"
-TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v1"
+TMDB_LEGACY_SUMMARY_SOURCE_VERSION = "tmdbsummary.v1"
+TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v2"
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
 REBUILD_SYNC_TOKEN_META_KEY = "rebuild_sync_token"
 
@@ -424,7 +425,41 @@ class LibraryCacheStore:
                     "parent_series_id": entry.get("parent_series_id"),
                     "season_number": entry.get("season_number"),
                 }
-                if not _metadata_summary_exists(db, target):
+                if _metadata_summary_state(db, target) == "missing":
+                    missing.append(target)
+        return _dedupe_summary_targets(missing)
+
+    def outdated_metadata_summary_targets(self) -> list[dict[str, Any]]:
+        entries = self.list_entries(include_tombstones=False)
+        if not entries:
+            return []
+        with self._connect_initialized() as db:
+            outdated: list[dict[str, Any]] = []
+            for entry in entries:
+                target = {
+                    "entry_type": entry["entry_type"],
+                    "tmdb_id": entry["tmdb_id"],
+                    "parent_series_id": entry.get("parent_series_id"),
+                    "season_number": entry.get("season_number"),
+                }
+                if _metadata_summary_state(db, target) == "outdated":
+                    outdated.append(target)
+        return _dedupe_summary_targets(outdated)
+
+    def incomplete_metadata_summary_targets(self) -> list[dict[str, Any]]:
+        entries = self.list_entries(include_tombstones=False)
+        if not entries:
+            return []
+        with self._connect_initialized() as db:
+            missing: list[dict[str, Any]] = []
+            for entry in entries:
+                target = {
+                    "entry_type": entry["entry_type"],
+                    "tmdb_id": entry["tmdb_id"],
+                    "parent_series_id": entry.get("parent_series_id"),
+                    "season_number": entry.get("season_number"),
+                }
+                if _metadata_summary_state(db, target) != "current":
                     missing.append(target)
         return _dedupe_summary_targets(missing)
 
@@ -439,7 +474,7 @@ class LibraryCacheStore:
             }
 
         tracked = self.metadata_summary_targets_for_entries(entries)
-        missing = self.missing_metadata_summary_targets()
+        missing = self.incomplete_metadata_summary_targets()
         tracked_count = len(tracked)
         missing_count = len(missing)
         return {
@@ -882,11 +917,11 @@ def _metadata_row(row: sqlite3.Row) -> dict[str, Any]:
     value = json.loads(str(row["metadata_json"]))
     if not isinstance(value, dict):
         raise LibraryCacheError("Cached TMDb metadata summary is corrupt.")
-    return value
+    return _normalized_metadata_summary(value)
 
 
 def _upsert_metadata_summary(db: sqlite3.Connection, summary: dict[str, Any]) -> None:
-    metadata = dict(summary)
+    metadata = _normalized_metadata_summary(summary, for_storage=True)
     metadata.setdefault("fetched_at", _now_iso())
     metadata.setdefault("source_version", TMDB_SUMMARY_SOURCE_VERSION)
     db.execute(
@@ -1007,11 +1042,138 @@ def _metadata_json(summary: dict[str, Any]) -> str:
         "logo_path": summary.get("logo_path"),
         "original_language_code": summary.get("original_language_code"),
         "on_air_date": summary.get("on_air_date"),
+        "status": summary.get("status"),
+        "genres": summary.get("genres") or [],
+        "runtime_minutes": summary.get("runtime_minutes"),
+        "season_count": summary.get("season_count"),
+        "episode_count": summary.get("episode_count"),
+        "vote_average": summary.get("vote_average"),
+        "vote_count": summary.get("vote_count"),
+        "popularity": summary.get("popularity"),
         "link_to_details": summary.get("link_to_details"),
         "fetched_at": summary["fetched_at"],
         "source_version": summary["source_version"],
     }
     return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
+
+
+def _normalized_metadata_summary(
+    summary: dict[str, Any],
+    *,
+    for_storage: bool = False,
+) -> dict[str, Any]:
+    source_version = (
+        TMDB_SUMMARY_SOURCE_VERSION
+        if for_storage
+        else _canonical_metadata_source_version(summary.get("source_version"))
+    )
+    if source_version is None:
+        source_version = TMDB_SUMMARY_SOURCE_VERSION
+    return {
+        "entry_type": str(summary["entry_type"]),
+        "tmdb_id": int(summary["tmdb_id"]),
+        "parent_series_id": _metadata_optional_int(summary.get("parent_series_id")),
+        "season_number": _metadata_optional_int(summary.get("season_number")),
+        "language": _optional_string(summary.get("language")),
+        "name": _optional_string(summary.get("name")),
+        "name_translations": _metadata_translation_map(summary.get("name_translations")),
+        "original_name": _optional_string(summary.get("original_name")),
+        "overview": _optional_string(summary.get("overview")),
+        "overview_translations": _metadata_translation_map(summary.get("overview_translations")),
+        "poster_path": _optional_string(summary.get("poster_path")),
+        "backdrop_path": _optional_string(summary.get("backdrop_path")),
+        "logo_path": _optional_string(summary.get("logo_path")),
+        "original_language_code": _optional_string(summary.get("original_language_code")),
+        "on_air_date": _optional_string(summary.get("on_air_date")),
+        "status": _optional_string(summary.get("status")),
+        "genres": _metadata_genres(summary.get("genres")),
+        "runtime_minutes": _metadata_optional_int(summary.get("runtime_minutes")),
+        "season_count": _metadata_optional_int(summary.get("season_count")),
+        "episode_count": _metadata_optional_int(summary.get("episode_count")),
+        "vote_average": _metadata_optional_float(summary.get("vote_average")),
+        "vote_count": _metadata_optional_int(summary.get("vote_count")),
+        "popularity": _metadata_optional_float(summary.get("popularity")),
+        "link_to_details": _optional_string(summary.get("link_to_details")),
+        "fetched_at": _optional_string(summary.get("fetched_at")) or _now_iso(),
+        "source_version": source_version,
+    }
+
+
+def _canonical_metadata_source_version(value: object) -> str | None:
+    source_version = _optional_string(value)
+    if source_version is None:
+        return None
+    if source_version in {TMDB_SUMMARY_SOURCE_VERSION, "tmdb.http.summary.v2"}:
+        return TMDB_SUMMARY_SOURCE_VERSION
+    if source_version in {TMDB_LEGACY_SUMMARY_SOURCE_VERSION, "tmdb.http.summary.v1"}:
+        return TMDB_LEGACY_SUMMARY_SOURCE_VERSION
+    return source_version
+
+
+def _metadata_summary_state(
+    db: sqlite3.Connection,
+    target: dict[str, Any],
+) -> Literal["current", "missing", "outdated"]:
+    row = db.execute(
+        """
+        SELECT source_version
+        FROM tmdb_metadata_summary
+        WHERE metadata_key = ? AND language = ''
+        """,
+        (_metadata_key_from_entry(target),),
+    ).fetchone()
+    if row is None:
+        return "missing"
+    source_version = _canonical_metadata_source_version(row["source_version"])
+    if source_version == TMDB_SUMMARY_SOURCE_VERSION:
+        return "current"
+    return "outdated"
+
+
+def _metadata_translation_map(value: object) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+
+    translations: dict[str, str] = {}
+    for key, item in value.items():
+        if not isinstance(key, str):
+            continue
+        text = _optional_string(item)
+        if text is not None:
+            translations[key] = text
+    return translations
+
+
+def _metadata_genres(value: object) -> list[dict[str, int | str]]:
+    if not isinstance(value, list):
+        return []
+
+    genres: list[dict[str, int | str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        genre_id = _metadata_optional_int(item.get("id"))
+        name = _optional_string(item.get("name"))
+        if genre_id is None or name is None:
+            continue
+        genres.append({"id": genre_id, "name": name})
+    return genres
+
+
+def _metadata_optional_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return int(value)
+    return None
+
+
+def _metadata_optional_float(value: object) -> float | None:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    if isinstance(value, str):
+        return float(value)
+    return None
 
 
 def _placeholders(values: set[int] | list[str] | list[dict[str, Any]]) -> str:

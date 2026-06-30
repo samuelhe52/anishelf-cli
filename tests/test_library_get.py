@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -108,6 +109,30 @@ def test_library_status_reports_metadata_ready_when_summary_is_cached(
         "hydrated_entries": 1,
         "missing_entries": 0,
         "ready": True,
+    }
+
+
+def test_library_status_treats_legacy_v1_summary_as_incomplete(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    _insert_legacy_v1_metadata_summary(
+        store,
+        metadata_key="movie:55",
+        entry_type="movie",
+        tmdb_id=55,
+    )
+
+    result = runner.invoke(app, ["--json", "library", "status"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["active"]["metadata"] == {
+        "tracked_entries": 1,
+        "hydrated_entries": 0,
+        "missing_entries": 1,
+        "ready": False,
     }
 
 
@@ -408,6 +433,10 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     payload = json.loads(result.stdout)
     assert requested == [("movie", 55)]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "Alien"
+    assert payload["items"][0]["entry"]["metadata"]["genres"] == [
+        {"id": 878, "name": "Science Fiction"}
+    ]
+    assert payload["items"][0]["entry"]["metadata"]["runtime_minutes"] == 117
     other_entry = store.attach_metadata_summary(
         store.get_entries_by_identity(["series:22"]).values()
     )[0]
@@ -680,9 +709,98 @@ def _metadata_summary(entry_type: str, tmdb_id: int, *, name: str) -> dict[str, 
         "logo_path": None,
         "original_language_code": "en",
         "on_air_date": "1979-05-25",
+        "status": "Released" if entry_type == "movie" else "Returning Series",
+        "genres": [{"id": 878, "name": "Science Fiction"}],
+        "runtime_minutes": 117 if entry_type == "movie" else None,
+        "season_count": 3 if entry_type == "series" else None,
+        "episode_count": 22 if entry_type == "series" else None,
+        "vote_average": 8.2,
+        "vote_count": 15432,
+        "popularity": 44.5,
         "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
         "source_version": "test",
     }
+
+
+def _insert_legacy_v1_metadata_summary(
+    store: LibraryCacheStore,
+    *,
+    metadata_key: str,
+    entry_type: str,
+    tmdb_id: int,
+) -> None:
+    with sqlite3.connect(store.path) as db:
+        db.execute(
+            """
+            INSERT INTO tmdb_metadata_summary (
+                metadata_key,
+                entry_type,
+                tmdb_id,
+                parent_series_id,
+                season_number,
+                language,
+                name,
+                name_translations_json,
+                original_name,
+                overview,
+                overview_translations_json,
+                poster_path,
+                backdrop_path,
+                logo_path,
+                original_language_code,
+                on_air_date,
+                link_to_details,
+                fetched_at,
+                source_version,
+                metadata_json
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                metadata_key,
+                entry_type,
+                tmdb_id,
+                None,
+                None,
+                "",
+                "Alien",
+                "{}",
+                "Alien",
+                "Legacy overview.",
+                "{}",
+                "/poster.jpg",
+                "/backdrop.jpg",
+                None,
+                "en",
+                "1979-05-25",
+                f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+                "2026-06-30T00:00:00Z",
+                "tmdbsummary.v1",
+                json.dumps(
+                    {
+                        "entry_type": entry_type,
+                        "tmdb_id": tmdb_id,
+                        "language": None,
+                        "name": "Alien",
+                        "name_translations": {},
+                        "original_name": "Alien",
+                        "overview": "Legacy overview.",
+                        "overview_translations": {},
+                        "poster_path": "/poster.jpg",
+                        "backdrop_path": "/backdrop.jpg",
+                        "logo_path": None,
+                        "original_language_code": "en",
+                        "on_air_date": "1979-05-25",
+                        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+                        "fetched_at": "2026-06-30T00:00:00Z",
+                        "source_version": "tmdbsummary.v1",
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                ),
+            ),
+        )
+        db.commit()
 
 
 def _store_with_cloudkit_token(token: str) -> MemorySecretStore:

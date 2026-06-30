@@ -54,7 +54,7 @@ class LibraryCacheSync:
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
         pages = 0
         records = 0
-        metadata_targets: list[dict[str, Any]] = []
+        metadata_targets = self.store.outdated_metadata_summary_targets()
         next_token: str | None = sync_token
         while True:
             page = self.executor.fetch_zone_changes(

@@ -216,8 +216,16 @@ def _summary_payload(identity: TMDbSummaryIdentity, payload: dict[str, Any]) -> 
         "logo_path": None,
         "original_language_code": _optional_string(payload.get("original_language")),
         "on_air_date": on_air_date,
+        "status": _optional_string(payload.get("status")),
+        "genres": _genres(payload.get("genres")),
+        "runtime_minutes": _runtime_minutes(identity.entry_type, payload),
+        "season_count": _season_count(identity.entry_type, payload),
+        "episode_count": _episode_count(identity.entry_type, payload),
+        "vote_average": _optional_number(payload.get("vote_average")),
+        "vote_count": _optional_int(payload.get("vote_count")),
+        "popularity": _optional_number(payload.get("popularity")),
         "link_to_details": _details_link(identity),
-        "source_version": "tmdb.http.summary.v1",
+        "source_version": "tmdb.http.summary.v2",
     }
 
 
@@ -234,6 +242,65 @@ def _details_link(identity: TMDbSummaryIdentity) -> str:
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
+
+def _optional_int(value: object) -> int | None:
+    if isinstance(value, int) and not isinstance(value, bool):
+        return value
+    return None
+
+
+def _optional_number(value: object) -> float | None:
+    if isinstance(value, int | float) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def _genres(value: object) -> list[dict[str, int | str]]:
+    if not isinstance(value, list):
+        return []
+
+    genres: list[dict[str, int | str]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        genre_id = _optional_int(item.get("id"))
+        name = _optional_string(item.get("name"))
+        if genre_id is None or name is None:
+            continue
+        genres.append({"id": genre_id, "name": name})
+    return genres
+
+
+def _runtime_minutes(entry_type: str, payload: dict[str, Any]) -> int | None:
+    if entry_type != "movie":
+        return None
+    runtime = _optional_int(payload.get("runtime"))
+    if runtime is None or runtime <= 0:
+        return None
+    return runtime
+
+
+def _season_count(entry_type: str, payload: dict[str, Any]) -> int | None:
+    if entry_type != "series":
+        return None
+    count = _optional_int(payload.get("number_of_seasons"))
+    if count is None or count < 0:
+        return None
+    return count
+
+
+def _episode_count(entry_type: str, payload: dict[str, Any]) -> int | None:
+    if entry_type == "series":
+        count = _optional_int(payload.get("number_of_episodes"))
+        if count is None or count < 0:
+            return None
+        return count
+    if entry_type == "season":
+        episodes = payload.get("episodes")
+        if not isinstance(episodes, list):
+            return None
+        return len([episode for episode in episodes if isinstance(episode, dict)])
+    return None
 
 
 def _retryable_status(status_code: int) -> bool:
