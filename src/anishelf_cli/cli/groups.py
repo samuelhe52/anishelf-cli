@@ -319,7 +319,7 @@ def config_set_defaults(
         emit_json(payload)
         return
 
-    display_fields = payload["defaults"]["library"]["display_fields"]
+    display_fields = library_defaults.display_fields
     emit_human_blocks(
         [
             HumanSection(

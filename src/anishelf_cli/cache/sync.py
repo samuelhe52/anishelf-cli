@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Protocol
+from typing import Any, Protocol
 
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
