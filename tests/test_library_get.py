@@ -597,6 +597,111 @@ def test_library_init_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -
     assert "https://callback.example/done" not in combined
 
 
+def test_library_init_emits_stderr_progress_without_touching_json_stdout(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = _store_with_cloudkit_token("web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    records = [
+        _live_record("movie:55", "movie", 55),
+        _live_record("movie:66", "movie", 66),
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={
+                "zones": [
+                    {
+                        "records": records,
+                        "syncToken": "t1",
+                        "moreComing": False,
+                    }
+                ]
+            },
+        )
+
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> dict[str, Any]:
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name=f"Movie {identity.tmdb_id}")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+    monkeypatch.setattr(groups, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(app, ["--json", "library", "init"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["cache"]["records"] == 2
+    assert "[progress] Starting local library cache rebuild from CloudKit." in result.stderr
+    assert "[progress] Fetched page 1: 2 records (2 total)." in result.stderr
+    assert "[progress] Hydrating TMDb summary metadata for 2 entries." in result.stderr
+    assert "[progress] TMDb summary metadata 1/2 complete (0 errors)." in result.stderr
+    assert "[progress] TMDb summary metadata 2/2 complete (0 errors)." in result.stderr
+    assert "tmdb-secret-token" not in result.stderr
+    assert "api-secret-token" not in result.stderr
+
+
+def test_library_init_verbose_cloudkit_logs_are_redacted(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = _store_with_cloudkit_token("web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={
+                "zones": [
+                    {
+                        "records": [_live_record("movie:55", "movie", 55)],
+                        "syncToken": "t1",
+                        "moreComing": False,
+                    }
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["--verbose", "--json", "library", "init"])
+
+    assert result.exit_code == 0, result.output
+    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in result.stderr
+    assert "[verbose] CloudKit request -> POST https://api.apple-cloudkit.com/database/1/" in result.stderr
+    assert "[verbose] CloudKit response <- HTTP 200 GET" in result.stderr
+    assert "[verbose] CloudKit payload <- HTTP 200" in result.stderr
+    assert "api-secret-token" not in result.stderr
+    assert "web-secret-token" not in result.stderr
+    assert "ckWebAuthToken=web-secret-token" not in result.stderr
+    assert "<redacted:ckAPIToken>" in result.stderr or "<redacted:sensitive-url>" in result.stderr
+
+
 def test_library_tombstone_decodes_from_identity_fields_and_deleted_at() -> None:
     decoded = decode_library_entry_record(
         _tombstone_record("season:22:3:33", "season", 33, parent_series_id=22, season_number=3)

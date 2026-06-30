@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Protocol
 
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
@@ -32,6 +33,21 @@ class TMDbSummaryClient(Protocol):
     def fetch_summary(self, identity: TMDbSummaryIdentity) -> dict[str, Any]: ...
 
 
+@dataclass(frozen=True, slots=True)
+class LibraryCacheProgress:
+    phase: str
+    rebuilt: bool | None = None
+    page: int | None = None
+    records_in_page: int | None = None
+    records_total: int | None = None
+    metadata_requested: int | None = None
+    metadata_completed: int | None = None
+    metadata_errors: int | None = None
+
+
+type LibraryCacheProgressCallback = Callable[[LibraryCacheProgress], None]
+
+
 @dataclass(slots=True)
 class LibraryCacheSync:
     store: LibraryCacheStore
@@ -39,6 +55,7 @@ class LibraryCacheSync:
     tmdb_client: TMDbSummaryClient | None = None
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
     metadata_target_limit: int | None = None
+    progress_callback: LibraryCacheProgressCallback | None = None
 
     def refresh(self) -> LibraryCacheRefreshResult:
         self.store.initialize()
@@ -56,6 +73,7 @@ class LibraryCacheSync:
         records = 0
         metadata_targets = self.store.outdated_metadata_summary_targets()
         next_token: str | None = sync_token
+        self._emit_progress("sync-started", rebuilt=False)
         while True:
             page = self.executor.fetch_zone_changes(
                 sync_token=next_token,
@@ -66,6 +84,13 @@ class LibraryCacheSync:
             )
             pages += 1
             records += len(page.records)
+            self._emit_progress(
+                "page-fetched",
+                rebuilt=False,
+                page=pages,
+                records_in_page=len(page.records),
+                records_total=records,
+            )
             next_token = page.sync_token
             if not page.more_coming:
                 targets_to_hydrate = self._metadata_targets_to_hydrate(
@@ -89,6 +114,7 @@ class LibraryCacheSync:
         records = 0
         metadata_targets: list[dict[str, Any]] = []
         next_token: str | None = None
+        self._emit_progress("rebuild-started", rebuilt=True)
         while True:
             page = self.executor.fetch_zone_changes(
                 sync_token=next_token,
@@ -99,6 +125,13 @@ class LibraryCacheSync:
             )
             pages += 1
             records += len(page.records)
+            self._emit_progress(
+                "page-fetched",
+                rebuilt=True,
+                page=pages,
+                records_in_page=len(page.records),
+                records_total=records,
+            )
             next_token = page.sync_token
             if not page.more_coming:
                 self.store.finish_rebuild()
@@ -134,13 +167,50 @@ class LibraryCacheSync:
         if self.tmdb_client is None:
             return 0, 0
 
+        self._emit_progress("metadata-started", metadata_requested=len(targets))
         summaries, errors = fetch_metadata_summaries(
             self.tmdb_client,
             targets,
             max_workers=self.metadata_workers,
+            progress_callback=self._metadata_progress,
         )
         self.store.upsert_metadata_summaries(summaries)
         return len(summaries), errors
+
+    def _metadata_progress(self, completed: int, errors: int, requested: int) -> None:
+        self._emit_progress(
+            "metadata-progress",
+            metadata_requested=requested,
+            metadata_completed=completed,
+            metadata_errors=errors,
+        )
+
+    def _emit_progress(
+        self,
+        phase: str,
+        *,
+        rebuilt: bool | None = None,
+        page: int | None = None,
+        records_in_page: int | None = None,
+        records_total: int | None = None,
+        metadata_requested: int | None = None,
+        metadata_completed: int | None = None,
+        metadata_errors: int | None = None,
+    ) -> None:
+        if self.progress_callback is None:
+            return
+        self.progress_callback(
+            LibraryCacheProgress(
+                phase=phase,
+                rebuilt=rebuilt,
+                page=page,
+                records_in_page=records_in_page,
+                records_total=records_total,
+                metadata_requested=metadata_requested,
+                metadata_completed=metadata_completed,
+                metadata_errors=metadata_errors,
+            )
+        )
 
 
 def fetch_metadata_summaries(
@@ -148,6 +218,7 @@ def fetch_metadata_summaries(
     targets: list[dict[str, Any]],
     *,
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
+    progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
     if not targets:
         return [], 0
@@ -166,6 +237,8 @@ def fetch_metadata_summaries(
                 summaries.append(future.result())
             except TMDbRequestError:
                 errors += 1
+            if progress_callback is not None:
+                progress_callback(len(summaries) + errors, errors, len(targets))
 
     return summaries, errors
 

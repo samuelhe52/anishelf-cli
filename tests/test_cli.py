@@ -15,11 +15,13 @@ from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import (
+    TMDbClient,
     TMDbRequestError,
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
     TMDbTitleSearchResult,
 )
+from anishelf_cli.tmdb.tokens import TMDbAPIToken
 
 runner = CliRunner()
 
@@ -64,6 +66,7 @@ def test_root_help_mentions_global_options() -> None:
     assert result.exit_code == 0
     assert "--profile" not in result.stdout
     assert "--json" in result.stdout
+    assert "--verbose" in result.stdout
     assert "--metadata-depth" not in result.stdout
     assert "--anishelf-source" not in result.stdout
 
@@ -343,6 +346,70 @@ def test_config_show_accepts_command_level_json() -> None:
     payload = json.loads(result.stdout)
     assert payload["cloudkit"]["app_auth_source"] == "env"
     assert "api-secret-token" not in result.stdout
+
+
+def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+    monkeypatch.setattr(groups, "default_secret_store", lambda: None)
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(groups, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client))
+
+    result = runner.invoke(
+        app,
+        ["--verbose", "--json", "tmdb", "search", "--title", "Alien", "--type", "movie"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert requests != []
+    assert '"total": 1' in result.stdout
+    assert "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in result.stderr
+    assert "[verbose] TMDb response <- HTTP 200 GET" in result.stderr
+    assert "tmdb-secret-token" not in result.stderr
+    assert "api_key=tmdb-secret-token" not in result.stderr
+    assert "<redacted:sensitive-url>" in result.stderr or "<redacted:api_key>" in result.stderr
+
+
+def test_verbose_flag_resets_across_multiple_invocations(monkeypatch) -> None:
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+    monkeypatch.setattr(groups, "default_secret_store", lambda: None)
+
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
+        )
+    )
+    monkeypatch.setattr(groups, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client))
+
+    verbose_result = runner.invoke(
+        app,
+        ["--verbose", "--json", "tmdb", "search", "--title", "Alien", "--type", "movie"],
+    )
+    plain_result = runner.invoke(
+        app,
+        ["--json", "tmdb", "search", "--title", "Alien", "--type", "movie"],
+    )
+
+    assert verbose_result.exit_code == 0, verbose_result.output
+    assert plain_result.exit_code == 0, plain_result.output
+    assert "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in (
+        verbose_result.stderr
+    )
+    assert plain_result.stderr == ""
 
 
 def test_config_show_human_output_uses_readable_sections() -> None:

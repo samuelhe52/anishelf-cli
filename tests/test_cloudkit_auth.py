@@ -160,6 +160,67 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     assert opened == []
 
 
+def test_manual_paste_login_verbose_non_json_error_redacts_secrets(monkeypatch) -> None:
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    store = MemorySecretStore()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            502,
+            content=b"<html>bad gateway</html>",
+            request=request,
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["--verbose", "auth", "login"], input="\n")
+
+    assert result.exit_code == 2
+    assert store.values == {}
+    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
+        result.stderr
+    )
+    assert "[verbose] CloudKit response <- HTTP 502 GET" in result.stderr
+    assert "non-json" in result.stderr
+    assert "CloudKit login initiation returned a non-JSON response" in result.stderr
+    assert "api-secret-token" not in result.stdout + result.stderr
+    assert "ckAPIToken=api-secret-token" not in result.stdout + result.stderr
+    assert "<redacted:ckAPIToken>" in result.stderr or "<redacted:sensitive-url>" in result.stderr
+
+
+def test_manual_paste_login_verbose_transport_error_redacts_secrets(monkeypatch) -> None:
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    store = MemorySecretStore()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(
+            "upstream rejected ckAPIToken=api-secret-token",
+            request=request,
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    result = runner.invoke(app, ["--verbose", "auth", "login"], input="\n")
+
+    assert result.exit_code == 2
+    assert store.values == {}
+    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
+        result.stderr
+    )
+    assert "[verbose] CloudKit transport error <- GET https://api.apple-cloudkit.com/database/1/" in (
+        result.stderr
+    )
+    assert "ConnectError" in result.stderr
+    assert "CloudKit login initiation request failed" in result.stderr
+    assert "api-secret-token" not in result.stdout + result.stderr
+    assert "ckAPIToken=api-secret-token" not in result.stdout + result.stderr
+    assert "<redacted:ckAPIToken>" in result.stderr or "<redacted:sensitive-url>" in result.stderr
+
+
 def test_read_callback_url_supports_long_piped_input() -> None:
     token = "a" * 8192
     callback_url = f"https://callback.example/done?ckWebAuthToken={token}"

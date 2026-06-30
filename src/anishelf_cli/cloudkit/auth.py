@@ -12,6 +12,8 @@ import httpx
 
 from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
+from anishelf_cli.core.output import emit_verbose
+from anishelf_cli.core.redaction import SecretRedactor
 
 APPLE_CLOUDKIT_API_BASE_URL = "https://api.apple-cloudkit.com"
 CK_WEB_AUTH_TOKEN_QUERY_KEY = "ckWebAuthToken"
@@ -89,18 +91,36 @@ def initiate_login(
     client: httpx.Client,
 ) -> LoginInitiation:
     endpoint_url = database_endpoint_url("users/current")
+    redactor = SecretRedactor()
+    redactor.register(api_token.value, "cloudkit-api-token")
+    emit_verbose(
+        f"CloudKit request -> GET {endpoint_url} params={json.dumps({'ckAPIToken': api_token.value}, sort_keys=True)}",
+        redactor=redactor,
+    )
     try:
         response = client.get(endpoint_url, params={"ckAPIToken": api_token.value})
     except httpx.HTTPError as exc:
+        emit_verbose(
+            f"CloudKit transport error <- GET {endpoint_url}: {exc.__class__.__name__}: {exc}",
+            redactor=redactor,
+        )
         raise CloudKitLoginInitiationError("CloudKit login initiation request failed") from exc
 
     try:
         payload = response.json()
     except json.JSONDecodeError as exc:
+        emit_verbose(
+            f"CloudKit response <- HTTP {response.status_code} GET {response.request.url} non-json",
+            redactor=redactor,
+        )
         raise CloudKitLoginInitiationError(
             "CloudKit login initiation returned a non-JSON response"
         ) from exc
 
+    emit_verbose(
+        _cloudkit_login_response_log(response, payload),
+        redactor=redactor,
+    )
     if not isinstance(payload, dict):
         raise CloudKitLoginInitiationError(
             "CloudKit login initiation returned an unexpected response"
@@ -142,6 +162,19 @@ def extract_web_auth_token(callback_url: str, *, allow_loopback_http: bool = Fal
     if not tokens or not tokens[0]:
         raise MalformedCallbackURLError("CloudKit callback URL is missing ckWebAuthToken")
     return tokens[0]
+
+
+def _cloudkit_login_response_log(response: httpx.Response, payload: object) -> str:
+    parts = [f"CloudKit response <- HTTP {response.status_code} GET {response.request.url}"]
+    if isinstance(payload, dict):
+        if code := payload.get("serverErrorCode"):
+            parts.append(f"serverErrorCode={code}")
+        if reason := payload.get("reason"):
+            parts.append(f"reason={reason}")
+        parts.append(f"keys={sorted(payload.keys())}")
+    else:
+        parts.append(f"payload_type={type(payload).__name__}")
+    return " ".join(parts)
 
 
 def successor_web_auth_token(payload: dict[str, Any]) -> str | None:

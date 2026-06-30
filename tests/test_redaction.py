@@ -26,3 +26,19 @@ def test_redacts_callback_urls_even_without_registered_secret() -> None:
     assert "def456" not in output
     assert "https://example.com/callback" not in output
     assert output == "paste <redacted:sensitive-url>"
+
+
+def test_redacts_sensitive_json_fields_and_fragment_tokens() -> None:
+    text = (
+        '{"api_key":"7024c3b1daa8c5ce9eaa87c13219b012","token":"secret"} '
+        "https://example.com/callback#ckWebAuthToken=abc123"
+    )
+
+    output = redact_text(text)
+
+    assert "7024c3b1daa8c5ce9eaa87c13219b012" not in output
+    assert "secret" not in output
+    assert "abc123" not in output
+    assert '"api_key":"<redacted:api_key>"' in output
+    assert '"token":"<redacted:token>"' in output
+    assert "<redacted:sensitive-url>" in output

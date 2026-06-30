@@ -36,9 +36,20 @@ class HumanTable:
 
 type HumanBlock = HumanSection | HumanTable
 
+_VERBOSE_OUTPUT_ENABLED = False
+
 
 def console(stderr: bool = False) -> Console:
     return Console(stderr=stderr)
+
+
+def set_verbose_output(enabled: bool) -> None:
+    global _VERBOSE_OUTPUT_ENABLED
+    _VERBOSE_OUTPUT_ENABLED = enabled
+
+
+def verbose_output_enabled() -> bool:
+    return _VERBOSE_OUTPUT_ENABLED
 
 
 def emit_json(payload: dict[str, Any]) -> None:
@@ -143,3 +154,15 @@ def emit_placeholder(state: AppState, area: str) -> None:
 def emit_error(message: str, *, redactor: SecretRedactor | None = None) -> None:
     output = redactor.redact(message) if redactor else message
     console(stderr=True).print(f"[red]{output}[/red]")
+
+
+def emit_progress(message: str, *, redactor: SecretRedactor | None = None) -> None:
+    output = redactor.redact(message) if redactor else message
+    typer.echo(f"[progress] {output}", err=True)
+
+
+def emit_verbose(message: str, *, redactor: SecretRedactor | None = None) -> None:
+    if not _VERBOSE_OUTPUT_ENABLED:
+        return
+    output = redactor.redact(message) if redactor else message
+    typer.echo(f"[verbose] {output}", err=True)

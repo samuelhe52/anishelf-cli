@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
+
+from anishelf_cli.core.output import emit_verbose
+from anishelf_cli.core.redaction import SecretRedactor
 
 
 class TMDbRequestError(RuntimeError):
@@ -64,6 +68,11 @@ class TMDbClient:
     max_attempts: int = 3
     client: httpx.Client = field(default_factory=httpx.Client, repr=False)
 
+    def _redactor(self) -> SecretRedactor:
+        redactor = SecretRedactor()
+        redactor.register(self.api_key, "tmdb-api-key")
+        return redactor
+
     def search_title(self, title: str) -> TMDbTitleSearchResult:
         return self.search_titles(TMDbTitleSearchQuery(title=title))
 
@@ -114,20 +123,38 @@ class TMDbClient:
     def _get_with_retries(self, path: str, params: dict[str, str]) -> httpx.Response:
         attempts = max(1, self.max_attempts)
         last_error: Exception | None = None
+        url = f"https://api.themoviedb.org/3/{path}"
+        redactor = self._redactor()
         for attempt in range(1, attempts + 1):
+            emit_verbose(
+                f"TMDb request -> GET {url} params={json.dumps(params, sort_keys=True)} attempt={attempt}/{attempts}",
+                redactor=redactor,
+            )
             try:
                 response = self.client.get(
-                    f"https://api.themoviedb.org/3/{path}",
+                    url,
                     params=params,
                     headers={"Accept": "application/json"},
                     timeout=self.timeout_seconds,
                 )
+                emit_verbose(
+                    f"TMDb response <- HTTP {response.status_code} GET {response.request.url}",
+                    redactor=redactor,
+                )
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
+                emit_verbose(
+                    f"TMDb HTTP error <- HTTP {exc.response.status_code} GET {exc.request.url}",
+                    redactor=redactor,
+                )
                 if not _retryable_status(exc.response.status_code) or attempt == attempts:
                     raise
                 last_error = exc
             except httpx.TransportError as exc:
+                emit_verbose(
+                    f"TMDb transport error <- GET {url}: {exc.__class__.__name__}: {exc}",
+                    redactor=redactor,
+                )
                 if attempt == attempts:
                     raise
                 last_error = exc

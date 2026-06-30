@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ from filelock import FileLock
 from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.auth import database_endpoint_url, successor_web_auth_token
+from anishelf_cli.core.output import emit_verbose
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
@@ -259,14 +261,31 @@ class CloudKitExecutor:
         }
         if params:
             request_params.update(params)
+        endpoint_url = database_endpoint_url(operation_subpath)
+        message = (
+            f"CloudKit request -> {method.upper()} {endpoint_url} "
+            f"params={json.dumps(request_params, sort_keys=True)}"
+        )
+        if json_payload is not None:
+            message += f" json={json.dumps(json_payload, sort_keys=True)}"
+        emit_verbose(message, redactor=redactor)
         try:
-            return self.client.request(
+            response = self.client.request(
                 method,
-                database_endpoint_url(operation_subpath),
+                endpoint_url,
                 params=request_params,
                 json=json_payload,
             )
+            emit_verbose(
+                f"CloudKit response <- HTTP {response.status_code} {method.upper()} {response.request.url}",
+                redactor=redactor,
+            )
+            return response
         except httpx.HTTPError as exc:
+            emit_verbose(
+                f"CloudKit transport error <- {method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc}",
+                redactor=redactor,
+            )
             raise CloudKitRequestFailedError(
                 f"{error_context} failed.",
                 redactor=redactor,
@@ -299,6 +318,10 @@ class CloudKitExecutor:
                 message,
                 redactor=redactor,
             )
+        emit_verbose(
+            _cloudkit_payload_log(response, payload),
+            redactor=redactor,
+        )
         return payload
 
     def _store_successor_web_auth_token(
@@ -434,6 +457,25 @@ def _cloudkit_failure_message(
     if reason := _optional_string(payload.get("reason")):
         details.append(reason)
     return f"{prefix} ({': '.join(details)})."
+
+
+def _cloudkit_payload_log(response: httpx.Response, payload: dict[str, Any]) -> str:
+    parts = [f"CloudKit payload <- HTTP {response.status_code} {response.request.method} {response.request.url}"]
+    if code := _optional_string(payload.get("serverErrorCode")):
+        parts.append(f"serverErrorCode={code}")
+    if reason := _optional_string(payload.get("reason")):
+        parts.append(f"reason={reason}")
+    zones = payload.get("zones")
+    if isinstance(zones, list) and len(zones) == 1 and isinstance(zones[0], dict):
+        zone = zones[0]
+        records = zone.get("records")
+        if isinstance(records, list):
+            parts.append(f"records={len(records)}")
+        if "moreComing" in zone:
+            parts.append(f"moreComing={bool(zone.get('moreComing'))}")
+    else:
+        parts.append(f"keys={sorted(payload.keys())}")
+    return " ".join(parts)
 
 
 def _safe_lock_name(value: str) -> str:

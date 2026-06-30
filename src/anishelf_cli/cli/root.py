@@ -30,7 +30,7 @@ from anishelf_cli.cloudkit.executor import (
     CurrentUser,
     cloudkit_web_auth_token_lock,
 )
-from anishelf_cli.core.output import emit_error, emit_json
+from anishelf_cli.core.output import emit_error, emit_json, set_verbose_output
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
 from anishelf_cli.secrets import (
@@ -99,9 +99,18 @@ def root_callback(
         bool,
         typer.Option("--json", help="Emit machine-readable JSON when supported."),
     ] = False,
+    verbose: Annotated[
+        bool,
+        typer.Option(
+            "--verbose",
+            help="Emit redacted network diagnostics to stderr.",
+        ),
+    ] = False,
 ) -> None:
+    set_verbose_output(verbose)
     ctx.obj = AppState(
         json_output=json_output,
+        verbose=verbose,
     )
 
 
