@@ -317,7 +317,12 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert payload["cloudkit"]["app_auth_source"] == "env"
     assert payload["cloudkit"]["app_auth_version"] is None
     assert payload["tmdb"]["api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
+    assert payload["library"]["defaults"] == {
+        "metadata": "summary",
+        "display_fields": None,
+    }
     assert "config_dir" in payload["paths"]
+    assert "config_file" in payload["paths"]
     assert "cache_dir" in payload["paths"]
     assert "data_dir" in payload["paths"]
     assert "profile" not in payload
@@ -345,14 +350,23 @@ def test_config_show_human_output_uses_readable_sections() -> None:
 
     assert result.exit_code == 0
     assert "CloudKit\n" in result.stdout
-    assert "  Container     iCloud.com.samuelhe.MyAnimeList\n" in result.stdout
-    assert "  App auth      env\n" in result.stdout
+    assert "  Container" in result.stdout
+    assert "iCloud.com.samuelhe.MyAnimeList" in result.stdout
+    assert "  App auth" in result.stdout
+    assert "env" in result.stdout
     assert "\nCallback\n" in result.stdout
-    assert "  Strategy      manual-paste\n" in result.stdout
+    assert "  Strategy" in result.stdout
+    assert "manual-paste" in result.stdout
     assert "\nTMDb\n" in result.stdout
-    assert "  API key envs  ANI_TMDB_API_KEY, TMDB_API_KEY\n" in result.stdout
+    assert "  API key envs" in result.stdout
+    assert "ANI_TMDB_API_KEY, TMDB_API_KEY" in result.stdout
+    assert "\nLibrary\n" in result.stdout
+    assert "  Metadata" in result.stdout
+    assert "  Display fields" in result.stdout
+    assert "built-in" in result.stdout
     assert "\nPaths\n" in result.stdout
-    assert "  Config        " in result.stdout
+    assert "  Config" in result.stdout
+    assert "  Config file" in result.stdout
     assert "api" not in result.stdout
 
 
@@ -424,6 +438,198 @@ def test_config_show_does_not_persist_profile_json(tmp_path, monkeypatch) -> Non
     assert "env_file" not in payload
     assert "anishelf_source" not in payload
     assert not (tmp_path / "config" / "profiles").exists()
+    assert not (tmp_path / "config" / "config.toml").exists()
+
+
+def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "config",
+            "set-defaults",
+            "--metadata",
+            "none",
+            "--fields",
+            "title,identity,saved",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "stored"
+    assert payload["defaults"]["library"] == {
+        "metadata": "none",
+        "display_fields": ["title", "identity", "saved"],
+    }
+    config_file = tmp_path / "config" / "config.toml"
+    assert payload["path"] == str(config_file)
+    assert config_file.read_text() == (
+        "[library]\n"
+        'metadata = "none"\n'
+        'display_fields = ["title", "identity", "saved"]\n'
+    )
+
+
+def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        "[library]\n"
+        'metadata = "none"\n'
+        'display_fields = ["title", "identity"]\n'
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-defaults", "--fields", "default"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["defaults"]["library"] == {
+        "metadata": "none",
+        "display_fields": None,
+    }
+    assert (tmp_path / "config" / "config.toml").read_text() == (
+        "[library]\n"
+        'metadata = "none"\n'
+    )
+
+
+def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        "[library]\n"
+        'metadata = "none"\n'
+        'display_fields = ["title", "saved"]\n'
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "show"],
+        env={"ANI_CLOUDKIT_API_TOKEN": "api-secret-token"},
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["library"]["defaults"] == {
+        "metadata": "none",
+        "display_fields": ["title", "saved"],
+    }
+
+
+def test_config_set_defaults_rejects_reserved_metadata_level(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        ["config", "set-defaults", "--metadata", "details"],
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    stderr = " ".join(result.stderr.split())
+    assert "reserved until TMDb detail metadata caching exists" in stderr
+
+
+def test_config_set_defaults_rejects_invalid_display_field(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        ["config", "set-defaults", "--fields", "title,bogus"],
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Invalid display field 'bogus'" in result.stderr
+
+
+def test_config_show_rejects_unknown_top_level_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('unexpected = "value"\n')
+
+    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Unsupported top-level config key(s)" in result.stderr
+    assert "'unexpected'" in result.stderr
+
+
+def test_config_show_rejects_unknown_library_key(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        "[library]\n"
+        'metadata = "none"\n'
+        "auto_sync = true\n"
+    )
+
+    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Unsupported library defaults key(s)" in result.stderr
+    assert "'auto_sync'" in result.stderr
+
+
+def test_config_show_rejects_malformed_library_shape(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('library = "bad"\n')
+
+    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "must be a TOML table" in result.stderr
+
+
+def test_config_set_defaults_can_recover_from_malformed_config_with_replacements(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    config_file = tmp_path / "config" / "config.toml"
+    config_file.write_text('library = "bad"\n')
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-defaults", "--metadata", "none"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["defaults"]["library"] == {
+        "metadata": "none",
+        "display_fields": None,
+    }
+    assert config_file.read_text() == (
+        "[library]\n"
+        'metadata = "none"\n'
+    )
+
+
+def test_config_set_defaults_still_fails_on_broken_config_without_replacements(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('library = "bad"\n')
+
+    result = runner.invoke(app, ["config", "set-defaults"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "must be a TOML table" in result.stderr
 
 
 def test_config_set_tmdb_api_key_stores_without_echoing_secret(monkeypatch) -> None:

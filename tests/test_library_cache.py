@@ -1206,6 +1206,64 @@ def test_library_list_attaches_cached_metadata_by_default_and_none_suppresses_it
     assert "movie:55" in human.stdout
 
 
+def test_library_list_uses_configured_metadata_none_by_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "library", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["metadata"] == {
+        "requested": "none",
+        "attached": False,
+        "source": None,
+    }
+    assert "metadata" not in payload["entries"][0]
+
+
+def test_library_list_metadata_flag_overrides_configured_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "summary"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["metadata"]["requested"] == "summary"
+    assert payload["entries"][0]["metadata"]["name"] == "Alien"
+
+
 def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
     store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
@@ -1269,6 +1327,85 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     assert payload["filters"]["hidden"] is True
     assert payload["filters"]["sort"] == "title"
     assert [entry["identity"] for entry in payload["entries"]] == ["movie:66"]
+
+
+def test_library_list_uses_configured_display_fields_for_human_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        '[library]\ndisplay_fields = ["title", "saved"]\n'
+    )
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["library", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Title" in result.stdout
+    assert "Saved" in result.stdout
+    assert "Identity" not in result.stdout
+    assert "Status" not in result.stdout
+
+
+def test_library_list_fields_flag_overrides_configured_display_fields(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        '[library]\ndisplay_fields = ["title", "saved"]\n'
+    )
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["library", "list", "--fields", "identity,status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Identity" in result.stdout
+    assert "Status" in result.stdout
+    assert "Saved" not in result.stdout
+
+
+def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+
+    result = runner.invoke(app, ["--json", "library", "list", "--fields", "title"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "--fields only applies to human table output." in result.stderr
 
 
 def test_library_refresh_meta_updates_full_library_cache(
@@ -1375,6 +1512,43 @@ def test_library_export_attaches_cached_metadata_by_default(
     assert payload["entries"][0]["metadata"]["name"] == "Cowboy Bebop"
 
 
+def test_library_export_does_not_sync_from_config_by_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        "[library]\n"
+        'metadata = "summary"\n'
+    )
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("series:22", "series", 22)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    requests: list[httpx.Request] = []
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: requests.append(request) or httpx.Response(500)
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "export"])
+
+    assert result.exit_code == 0, result.output
+    assert requests == []
+
+
 def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
     fake_store = _fake_search_store()
     monkeypatch.setattr(groups, "_library_store_for_read", lambda: fake_store)
@@ -1435,7 +1609,37 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
     assert fake_store.attach_calls == 1
 
 
+def test_library_search_uses_configured_display_fields_for_human_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        '[library]\ndisplay_fields = ["identity", "status"]\n'
+    )
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["library", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0, result.output
+    assert "Identity" in result.stdout
+    assert "Status" in result.stdout
+    assert "Title" not in result.stdout
+
+
 def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
 

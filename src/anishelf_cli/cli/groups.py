@@ -89,6 +89,46 @@ MetadataOption = Annotated[
         show_default=False,
     ),
 ]
+FieldListOption = Annotated[
+    str | None,
+    typer.Option(
+        "--fields",
+        help=(
+            "Comma-separated human table fields. Use default to use the built-in "
+            "fields for this invocation."
+        ),
+        show_default=False,
+    ),
+]
+
+_LIBRARY_LIST_DEFAULT_FIELDS = (
+    "title",
+    "identity",
+    "type",
+    "status",
+    "score",
+    "favorite",
+    "display",
+    "saved",
+)
+_LIBRARY_SEARCH_DEFAULT_FIELDS = (
+    "title",
+    "identity",
+    "type",
+    "status",
+    "score",
+    "saved",
+)
+_DISPLAY_FIELD_COLUMNS = {
+    "title": HumanTableColumn("title", "Title"),
+    "identity": HumanTableColumn("identity", "Identity"),
+    "type": HumanTableColumn("type", "Type"),
+    "status": HumanTableColumn("status", "Status"),
+    "score": HumanTableColumn("score", "Score", "right"),
+    "favorite": HumanTableColumn("favorite", "Fav"),
+    "display": HumanTableColumn("display", "Display"),
+    "saved": HumanTableColumn("saved", "Saved"),
+}
 
 
 def _make_http_client() -> httpx.Client:
@@ -97,6 +137,7 @@ def _make_http_client() -> httpx.Client:
 
 def _config_payload() -> dict[str, object]:
     api_token = resolve_cloudkit_api_token()
+    defaults = _user_defaults_or_exit().library_read
     return {
         "cloudkit": {
             "container": config.DEFAULT_CONTAINER,
@@ -111,8 +152,17 @@ def _config_payload() -> dict[str, object]:
         "tmdb": {
             "api_key_envs": list(config.DEFAULT_TMDB_API_KEY_ENVS),
         },
+        "library": {
+            "defaults": {
+                "metadata": defaults.metadata.value,
+                "display_fields": list(defaults.display_fields)
+                if defaults.display_fields is not None
+                else None,
+            }
+        },
         "paths": {
             "config_dir": str(config.config_dir()),
+            "config_file": str(config.user_config_file()),
             "cache_dir": str(config.cache_dir()),
             "data_dir": str(config.data_dir()),
         },
@@ -134,18 +184,29 @@ def config_show(
     cloudkit = payload["cloudkit"]
     callback = payload["callback"]
     tmdb = payload["tmdb"]
+    library = payload["library"]
     paths = payload["paths"]
     if not (
         isinstance(cloudkit, dict)
         and isinstance(callback, dict)
         and isinstance(tmdb, dict)
+        and isinstance(library, dict)
         and isinstance(paths, dict)
     ):
         raise RuntimeError("config payload was not initialized correctly")
+    library_defaults = library.get("defaults")
+    if not isinstance(library_defaults, dict):
+        raise RuntimeError("library defaults payload was not initialized correctly")
 
     app_auth = str(cloudkit["app_auth_source"])
     if cloudkit["app_auth_version"]:
         app_auth += f", version {cloudkit['app_auth_version']}"
+    display_fields = library_defaults["display_fields"]
+    display_fields_label = (
+        "built-in"
+        if display_fields is None
+        else ", ".join(str(field) for field in display_fields)
+    )
 
     emit_human_blocks(
         [
@@ -167,13 +228,110 @@ def config_show(
                 (("API key envs", ", ".join(config.DEFAULT_TMDB_API_KEY_ENVS)),),
             ),
             HumanSection(
+                "Library",
+                (
+                    ("Metadata", library_defaults["metadata"]),
+                    ("Display fields", display_fields_label),
+                ),
+            ),
+            HumanSection(
                 "Paths",
                 (
                     ("Config", paths["config_dir"]),
+                    ("Config file", paths["config_file"]),
                     ("Cache", paths["cache_dir"]),
                     ("Data", paths["data_dir"]),
                 ),
             ),
+        ]
+    )
+
+
+@config_app.command("set-defaults", help="Store minimal user defaults for library read commands.")
+def config_set_defaults(
+    ctx: typer.Context,
+    metadata: Annotated[
+        MetadataDepth | None,
+        typer.Option(
+            "--metadata",
+            help="Default metadata level for library read commands.",
+            show_default=False,
+        ),
+    ] = None,
+    fields: FieldListOption = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    has_replacements = metadata is not None or fields is not None
+    try:
+        defaults = config.load_user_defaults()
+    except config.UserConfigError as exc:
+        if not has_replacements:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+        defaults = config.UserDefaults()
+    library_defaults = defaults.library_read
+
+    if metadata is not None:
+        try:
+            metadata = config.resolve_configured_metadata_depth(metadata.value)
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+        library_defaults = replace(library_defaults, metadata=metadata)
+
+    if fields is not None:
+        if fields.strip().lower() == "default":
+            display_fields = None
+        else:
+            try:
+                display_fields = config.normalize_library_display_fields(fields)
+            except config.UserConfigError as exc:
+                emit_error(str(exc))
+                raise typer.Exit(code=2) from exc
+        library_defaults = replace(library_defaults, display_fields=display_fields)
+
+    defaults = config.UserDefaults(library_read=library_defaults)
+    try:
+        path = config.save_user_defaults(defaults)
+    except config.UserConfigError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    payload = {
+        "status": "stored",
+        "defaults": {
+            "library": {
+                "metadata": library_defaults.metadata.value,
+                "display_fields": list(library_defaults.display_fields)
+                if library_defaults.display_fields is not None
+                else None,
+            }
+        },
+        "path": str(path),
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+
+    display_fields = payload["defaults"]["library"]["display_fields"]
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library defaults",
+                (
+                    ("Metadata", library_defaults.metadata.value),
+                    (
+                        "Display fields",
+                        "built-in"
+                        if display_fields is None
+                        else ", ".join(str(field) for field in display_fields),
+                    ),
+                    ("Config file", str(path)),
+                ),
+            )
         ]
     )
 
@@ -224,12 +382,12 @@ def library_get(
     identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
     metadata: MetadataOption = None,
     sync: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--sync",
+            "--sync/--no-sync",
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
-    ] = False,
+    ] = None,
     live_meta: Annotated[
         bool,
         typer.Option(
@@ -606,12 +764,13 @@ def library_list(
     ctx: typer.Context,
     metadata: MetadataOption = None,
     sync: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--sync",
+            "--sync/--no-sync",
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
-    ] = False,
+    ] = None,
+    fields: FieldListOption = None,
     watch_status: Annotated[
         str | None,
         typer.Option("--watch-status", help="Filter by watch status."),
@@ -644,6 +803,7 @@ def library_list(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    _reject_fields_with_json(ctx, json_output, fields)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     _validate_watch_status(watch_status)
@@ -681,7 +841,10 @@ def library_list(
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
-    _emit_library_list_human(entries)
+    _emit_library_list_human(
+        entries,
+        fields=_resolve_display_fields(fields, command_default=_LIBRARY_LIST_DEFAULT_FIELDS),
+    )
 
 
 @library_app.command("search", help="Search cached library entries by title.")
@@ -690,17 +853,19 @@ def library_search(
     title: Annotated[str, typer.Option("--title")],
     metadata: MetadataOption = None,
     sync: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--sync",
+            "--sync/--no-sync",
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
-    ] = False,
+    ] = None,
+    fields: FieldListOption = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    _reject_fields_with_json(ctx, json_output, fields)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     store, refresh_result = _library_read_store(sync=sync)
@@ -719,7 +884,11 @@ def library_search(
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
-    _emit_library_search_human(title, entries)
+    _emit_library_search_human(
+        title,
+        entries,
+        fields=_resolve_display_fields(fields, command_default=_LIBRARY_SEARCH_DEFAULT_FIELDS),
+    )
 
 
 @library_app.command("export", help="Export cached AniShelf library entries.")
@@ -727,12 +896,12 @@ def library_export(
     ctx: typer.Context,
     metadata: MetadataOption = None,
     sync: Annotated[
-        bool,
+        bool | None,
         typer.Option(
-            "--sync",
+            "--sync/--no-sync",
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
-    ] = False,
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -800,9 +969,9 @@ def library_refresh_meta(
 
 def _library_read_store(
     *,
-    sync: bool,
+    sync: bool | None,
 ) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult | None]:
-    if sync:
+    if _sync_requested(sync):
         store, refresh_result = _initialize_library_store(require_existing_cache=True)
         return store, refresh_result
     return _library_store_for_read(), None
@@ -969,7 +1138,15 @@ def _library_entries_payload(
 
 
 def _metadata_depth(value: MetadataDepth | None) -> MetadataDepth:
-    return value or MetadataDepth.SUMMARY
+    if value is not None:
+        return value
+    return _user_defaults_or_exit().library_read.metadata
+
+
+def _sync_requested(value: bool | None) -> bool:
+    if value is not None:
+        return value
+    return False
 
 
 def _reject_reserved_metadata_depth(metadata_depth: MetadataDepth) -> None:
@@ -1106,11 +1283,11 @@ def _human_library_row(entry: dict[str, object]) -> dict[str, object]:
     return {
         "title": _metadata_name(_entry_metadata(entry)) or entry.get("identity"),
         "identity": entry.get("identity"),
-        "entry_type": entry.get("entry_type"),
-        "watch_status": entry.get("watch_status"),
+        "type": entry.get("entry_type"),
+        "status": entry.get("watch_status"),
         "score": entry.get("score"),
         "favorite": entry.get("favorite"),
-        "on_display": entry.get("on_display"),
+        "display": entry.get("on_display"),
         "saved": _compact_date(entry.get("date_saved")),
     }
 
@@ -1149,22 +1326,17 @@ def _truncate_text(value: object, *, limit: int) -> object:
     return value[: limit - 1].rstrip() + "..."
 
 
-def _emit_library_list_human(entries: list[dict[str, object]]) -> None:
+def _emit_library_list_human(
+    entries: list[dict[str, object]],
+    *,
+    fields: tuple[str, ...],
+) -> None:
     rows = [_human_library_row(entry) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(
                 "Library entries",
-                (
-                    HumanTableColumn("title", "Title"),
-                    HumanTableColumn("identity", "Identity"),
-                    HumanTableColumn("entry_type", "Type"),
-                    HumanTableColumn("watch_status", "Status"),
-                    HumanTableColumn("score", "Score", "right"),
-                    HumanTableColumn("favorite", "Fav"),
-                    HumanTableColumn("on_display", "Display"),
-                    HumanTableColumn("saved", "Saved"),
-                ),
+                _columns_for_display_fields(fields),
                 rows,
                 empty_message="No cached library entries.",
             )
@@ -1172,25 +1344,66 @@ def _emit_library_list_human(entries: list[dict[str, object]]) -> None:
     )
 
 
-def _emit_library_search_human(title: str, entries: list[dict[str, object]]) -> None:
+def _emit_library_search_human(
+    title: str,
+    entries: list[dict[str, object]],
+    *,
+    fields: tuple[str, ...],
+) -> None:
     rows = [_human_library_row(entry) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(
                 f"Library search: {title}",
-                (
-                    HumanTableColumn("title", "Title"),
-                    HumanTableColumn("identity", "Identity"),
-                    HumanTableColumn("entry_type", "Type"),
-                    HumanTableColumn("watch_status", "Status"),
-                    HumanTableColumn("score", "Score", "right"),
-                    HumanTableColumn("saved", "Saved"),
-                ),
+                _columns_for_display_fields(fields),
                 rows,
                 empty_message="No cached library entries matched the title search.",
             )
         ]
     )
+
+
+def _columns_for_display_fields(fields: tuple[str, ...]) -> tuple[HumanTableColumn, ...]:
+    return tuple(_DISPLAY_FIELD_COLUMNS[field] for field in fields)
+
+
+def _resolve_display_fields(
+    value: str | None,
+    *,
+    command_default: tuple[str, ...],
+) -> tuple[str, ...]:
+    if value is not None:
+        if value.strip().lower() == "default":
+            return command_default
+        try:
+            return config.normalize_library_display_fields(value)
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+
+    configured = _user_defaults_or_exit().library_read.display_fields
+    if configured is not None:
+        return configured
+    return command_default
+
+
+def _reject_fields_with_json(
+    ctx: typer.Context,
+    json_output: bool,
+    fields: str | None,
+) -> None:
+    if fields is None or not json_output_requested(ctx, json_output):
+        return
+    emit_error("--fields only applies to human table output.")
+    raise typer.Exit(code=2)
+
+
+def _user_defaults_or_exit() -> config.UserDefaults:
+    try:
+        return config.load_user_defaults()
+    except config.UserConfigError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
 
 
 def _emit_library_export_human(payload: dict[str, object]) -> None:

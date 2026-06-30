@@ -392,6 +392,34 @@ def test_library_get_sync_refreshes_cache_before_lookup(
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
 
 
+def test_library_get_does_not_sync_from_config_by_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        "[library]\n"
+        'metadata = "summary"\n'
+    )
+    requests: list[httpx.Request] = []
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: requests.append(request) or httpx.Response(500)
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert requests == []
+
 def test_library_get_live_meta_refreshes_only_requested_entries(
     tmp_path,
     monkeypatch,
@@ -690,6 +718,7 @@ def _install_cached_entry(
 
 
 def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache"))
     monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
 
