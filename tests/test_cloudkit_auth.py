@@ -21,8 +21,23 @@ from anishelf_cli.cloudkit.auth import (
     initiate_login,
     successor_web_auth_token,
 )
+from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 
 runner = CliRunner()
+
+
+class MemorySecretStore:
+    def __init__(self) -> None:
+        self.values: dict[tuple[str, str], str] = {}
+
+    def get_password(self, service: str, account: str) -> str | None:
+        return self.values.get((service, account))
+
+    def set_password(self, service: str, account: str, password: str) -> None:
+        self.values[(service, account)] = password
+
+    def delete_password(self, service: str, account: str) -> None:
+        self.values.pop((service, account), None)
 
 
 def test_login_initiation_calls_private_current_user_with_api_token_only() -> None:
@@ -74,8 +89,9 @@ def test_login_http_client_supports_socks_proxy_env(monkeypatch) -> None:
 
 def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    stored: list[str] = []
-    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -98,7 +114,9 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     )
 
     assert result.exit_code == 0, result.output
-    assert stored == ["web-secret-token"]
+    assert store.values == {
+        (descriptor.service, descriptor.account): "web-secret-token"
+    }
     assert json.loads(result.stdout)["status"] == "logged-in"
     combined = result.stdout + result.stderr
     assert "api-secret-token" not in combined
@@ -109,10 +127,11 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
 
 def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
-    stored: list[str] = []
-    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -135,7 +154,9 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert stored == ["web-secret-token"]
+    assert store.values == {
+        (descriptor.service, descriptor.account): "web-secret-token"
+    }
     assert opened == []
 
 
@@ -150,8 +171,8 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    stored: list[str] = []
-    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
+    store = MemorySecretStore()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -174,7 +195,7 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
     )
 
     assert result.exit_code == 2
-    assert stored == []
+    assert store.values == {}
     combined = result.stdout + result.stderr
     assert "api-secret-token" not in combined
     assert "web-secret-token" not in combined
@@ -224,9 +245,9 @@ def test_loopback_capture_reports_listener_setup_failure_cleanly() -> None:
 
 def test_loopback_login_timeout_does_not_store_partial_token(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    store = MemorySecretStore()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
     monkeypatch.setattr(root.webbrowser, "open", lambda url: True)
-    stored: list[str] = []
-    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -261,7 +282,7 @@ def test_loopback_login_timeout_does_not_store_partial_token(monkeypatch) -> Non
     )
 
     assert result.exit_code == 3
-    assert stored == []
+    assert store.values == {}
     assert "Timed out waiting for CloudKit loopback callback" in result.stderr
     assert "api-secret-token" not in result.stdout + result.stderr
 
@@ -270,10 +291,10 @@ def test_loopback_login_rejects_non_loopback_host_without_side_effects(
     monkeypatch,
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    store = MemorySecretStore()
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
-    stored: list[str] = []
-    monkeypatch.setattr(root, "store_cloudkit_web_auth_token", stored.append)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -304,7 +325,7 @@ def test_loopback_login_rejects_non_loopback_host_without_side_effects(
 
     assert result.exit_code == 2
     assert opened == []
-    assert stored == []
+    assert store.values == {}
     combined = result.stdout + result.stderr
     assert "loopback IP address" in combined
     assert "api-secret-token" not in combined

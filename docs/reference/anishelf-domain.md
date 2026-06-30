@@ -55,16 +55,17 @@ include:
 - `library status`
 - `library clear-cache`
 - `library refresh-meta`
-- `library get <identity...> [--live-meta] [--metadata[=none|summary|details|full]]`
-- `library list [--metadata[=none|summary|details|full]]`
-- `library search --title` with optional `--metadata`
-- `library export` with optional `--metadata`
+- `library get <identity...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
+- `library list [--sync] [--metadata[=none|summary|details|full]]`
+- `library search --title` with optional `--sync` and `--metadata`
+- `library export` with optional `--sync` and `--metadata`
 - `tmdb search --title`
 
 `library init` is the explicit bootstrap entry point for the local cache.
 `library sync` is the explicit refresh entry point after bootstrap. Other
 library read commands require an initialized cache and should fail closed until
-init has been run.
+init has been run. `--sync` on a library read command should perform that same
+refresh step explicitly before reading from the local cache.
 `library status` should report whether the local cache is initialized and which
 cached scopes exist, including TMDb summary metadata readiness.
 `library clear-cache` should explicitly clear all local library cache files

@@ -313,6 +313,60 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     assert requests == []
 
 
+def test_library_get_sync_refreshes_cache_before_lookup(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    initialized_store.initialize()
+    initialized_store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+    requests: list[httpx.Request] = []
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={
+                "zones": [
+                    {
+                        "records": [_live_record("series:22", "series", 22)],
+                        "syncToken": "t2",
+                        "moreComing": False,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "get", "series:22", "--sync"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
+    assert payload["items"][0]["entry"]["identity"] == "series:22"
+    assert any(request.url.path.endswith("/changes/zone") for request in requests)
+
+
 def test_library_get_live_meta_refreshes_only_requested_entries(
     tmp_path,
     monkeypatch,

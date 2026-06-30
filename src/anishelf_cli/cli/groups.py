@@ -31,7 +31,6 @@ from anishelf_cli.core.output import (
     emit_json,
     emit_placeholder,
 )
-from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.library import (
     LibraryRecordDecodeError,
     has_any_found_item,
@@ -212,6 +211,13 @@ def library_get(
     ctx: typer.Context,
     identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
     metadata: MetadataOption = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help="Sync the initialized local library cache from CloudKit before reading.",
+        ),
+    ] = False,
     live_meta: Annotated[
         bool,
         typer.Option(
@@ -229,7 +235,7 @@ def library_get(
     lookup_record_names = valid_lookup_record_names(identities)
     cached_entries: dict[str, dict[str, object]] = {}
     if lookup_record_names:
-        store = _library_store_for_read()
+        store, _ = _library_read_store(sync=sync)
         cached_entries = store.get_entries_by_identity(lookup_record_names)
         if live_meta:
             _refresh_metadata_for_entries(store, list(cached_entries.values()))
@@ -587,6 +593,13 @@ def _optional_human_text(value: object) -> object:
 def library_list(
     ctx: typer.Context,
     metadata: MetadataOption = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help="Sync the initialized local library cache from CloudKit before reading.",
+        ),
+    ] = False,
     watch_status: Annotated[
         str | None,
         typer.Option("--watch-status", help="Filter by watch status."),
@@ -622,7 +635,7 @@ def library_list(
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     _validate_watch_status(watch_status)
-    store = _library_store_for_read()
+    store, refresh_result = _library_read_store(sync=sync)
     if sort is LibraryListSort.TITLE:
         _require_complete_tmdb_summary_metadata(
             store,
@@ -642,7 +655,7 @@ def library_list(
     entries = _sort_entries_after_metadata(entries, sort)
     if sort is LibraryListSort.TITLE and limit is not None:
         entries = entries[:limit]
-    payload = _library_entries_payload(entries, store, None)
+    payload = _library_entries_payload(entries, store, refresh_result)
     metadata_payload = _metadata_payload(metadata_depth)
     payload["metadata"] = metadata_payload
     payload["filters"] = _library_list_filters_payload(
@@ -664,6 +677,13 @@ def library_search(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title")],
     metadata: MetadataOption = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help="Sync the initialized local library cache from CloudKit before reading.",
+        ),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -671,7 +691,7 @@ def library_search(
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
-    store = _library_store_for_read()
+    store, refresh_result = _library_read_store(sync=sync)
     _require_complete_tmdb_summary_metadata(
         store,
         action="search cached library entries by title",
@@ -679,7 +699,7 @@ def library_search(
     )
     entries = store.search_entries_by_title(title)
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
-    payload = _library_entries_payload(entries, store, None)
+    payload = _library_entries_payload(entries, store, refresh_result)
     payload["metadata"] = _metadata_payload(metadata_depth)
     payload["query"] = {
         "title": title,
@@ -694,6 +714,13 @@ def library_search(
 def library_export(
     ctx: typer.Context,
     metadata: MetadataOption = None,
+    sync: Annotated[
+        bool,
+        typer.Option(
+            "--sync",
+            help="Sync the initialized local library cache from CloudKit before reading.",
+        ),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -701,10 +728,10 @@ def library_export(
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
-    store = _library_store_for_read()
+    store, refresh_result = _library_read_store(sync=sync)
     entries = store.list_entries(include_tombstones=False)
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
-    payload = _library_entries_payload(entries, store, None)
+    payload = _library_entries_payload(entries, store, refresh_result)
     payload["metadata"] = _metadata_payload(metadata_depth)
     if json_output_requested(ctx, json_output):
         emit_json(payload)
@@ -759,6 +786,16 @@ def library_refresh_meta(
     )
 
 
+def _library_read_store(
+    *,
+    sync: bool,
+) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult | None]:
+    if sync:
+        store, refresh_result = _initialize_library_store(require_existing_cache=True)
+        return store, refresh_result
+    return _library_store_for_read(), None
+
+
 def _library_store_for_read() -> LibraryCacheStore:
     try:
         store = LibraryCacheStore.find_default_scope()
@@ -769,9 +806,7 @@ def _library_store_for_read() -> LibraryCacheStore:
                     "No local library cache entries are available. Run `ani library init` first."
                 )
             return store
-    except (
-        LibraryCacheError,
-    ) as exc:
+    except LibraryCacheError as exc:
         emit_error(str(exc), redactor=getattr(exc, "redactor", None))
         raise typer.Exit(code=2) from exc
 

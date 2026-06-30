@@ -168,10 +168,11 @@ def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
     assert payload["summary"]["entries"] == 0
 
 
-def test_library_list_help_does_not_mention_refresh_meta_flag() -> None:
+def test_library_list_help_mentions_sync_and_not_refresh_meta_flag() -> None:
     result = runner.invoke(app, ["library", "list", "--help"])
 
     assert result.exit_code == 0
+    assert "--sync" in result.stdout
     assert "--refresh-meta" not in result.stdout
 
 
@@ -188,6 +189,29 @@ def test_library_refresh_meta_help_mentions_json() -> None:
 
     assert result.exit_code == 0
     assert "--json" in result.stdout
+
+
+def test_library_get_help_mentions_sync() -> None:
+    result = runner.invoke(app, ["library", "get", "--help"])
+
+    assert result.exit_code == 0
+    assert "--sync" in result.stdout
+
+
+def test_library_search_help_mentions_sync() -> None:
+    result = runner.invoke(app, ["library", "search", "--help"])
+
+    assert result.exit_code == 0
+    assert "--sync" in result.stdout
+
+
+def test_library_export_help_mentions_sync() -> None:
+    result = runner.invoke(app, ["library", "export", "--help"])
+
+    assert result.exit_code == 0
+    assert "--sync" in result.stdout
+
+
 def test_library_init_help_mentions_json() -> None:
     result = runner.invoke(app, ["library", "init", "--help"])
 
@@ -214,6 +238,15 @@ def test_library_clear_cache_help_mentions_confirmation_bypass() -> None:
 
     assert result.exit_code == 0
     assert "--yes" in result.stdout
+
+
+def test_auth_logout_help_mentions_cache_clear() -> None:
+    result = runner.invoke(app, ["auth", "logout", "--help"])
+
+    assert result.exit_code == 0
+    assert "clear local library cache files" in result.stdout
+
+
 def test_unknown_command_error_uses_plain_formatting() -> None:
     result = runner.invoke(app, ["auth", "loggg"])
 
@@ -438,26 +471,41 @@ def test_auth_commands_are_not_top_level() -> None:
 
 
 def test_logout_deletes_web_auth_token(monkeypatch) -> None:
-    deleted = False
-
-    def delete_token() -> None:
-        nonlocal deleted
-        deleted = True
-
-    monkeypatch.setattr(root, "delete_cloudkit_web_auth_token", delete_token)
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(
+        root.LibraryCacheStore,
+        "remove_all_local_caches",
+        classmethod(lambda cls: {"cache_files": 2, "lock_files": 1}),
+    )
 
     result = runner.invoke(app, ["--json", "auth", "logout"])
 
     assert result.exit_code == 0
-    assert deleted is True
-    assert json.loads(result.stdout) == {"status": "logged-out"}
+    assert store.get_password(descriptor.service, descriptor.account) is None
+    assert json.loads(result.stdout) == {
+        "status": "logged-out",
+        "cache": {
+            "status": "cleared",
+            "cache_files": 2,
+            "lock_files": 1,
+        },
+    }
 
 
 def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> None:
     events: list[str] = []
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    original_delete_password = store.delete_password
 
-    def delete_token() -> None:
+    def delete_password(service: str, account: str) -> None:
         events.append("delete-token")
+        original_delete_password(service, account)
 
     @contextmanager
     def recording_lock(path: Path) -> Iterator[None]:
@@ -468,14 +516,26 @@ def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> Non
         finally:
             events.append("exit-lock")
 
-    monkeypatch.setattr(root, "delete_cloudkit_web_auth_token", delete_token)
+    store.delete_password = delete_password  # type: ignore[method-assign]
     monkeypatch.setattr(root, "whoami_lock_factory", lambda path: recording_lock(path))
+    monkeypatch.setattr(
+        root.LibraryCacheStore,
+        "remove_all_local_caches",
+        classmethod(lambda cls: {"cache_files": 0, "lock_files": 0}),
+    )
 
     result = runner.invoke(app, ["--json", "auth", "logout"])
 
     assert result.exit_code == 0
     assert events == ["enter-lock", "delete-token", "exit-lock"]
-    assert json.loads(result.stdout) == {"status": "logged-out"}
+    assert json.loads(result.stdout) == {
+        "status": "logged-out",
+        "cache": {
+            "status": "cleared",
+            "cache_files": 0,
+            "lock_files": 0,
+        },
+    }
 
 
 def test_whoami_success_json_uses_authenticated_current_user(monkeypatch) -> None:

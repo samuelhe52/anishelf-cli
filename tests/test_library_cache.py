@@ -930,6 +930,61 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
     assert requests == []
 
 
+def test_library_list_sync_refreshes_cache_before_reading(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    initialized_store.initialize()
+    initialized_store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+    requests: list[httpx.Request] = []
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={
+                "zones": [
+                    {
+                        "records": [_live_record("series:22", "series", 22)],
+                        "syncToken": "t2",
+                        "moreComing": False,
+                    }
+                ]
+            },
+        )
+
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "list", "--sync"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["cache"]["mode"] == "updated"
+    assert payload["summary"]["cache"]["records"] == 1
+    assert any(request.url.path.endswith("/changes/zone") for request in requests)
+    assert {entry["identity"] for entry in payload["entries"]} == {"movie:55", "series:22"}
+
+
 def test_library_export_reads_existing_cache_without_cloudkit_update(
     tmp_path,
     monkeypatch,
@@ -1046,6 +1101,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     )
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
 
     result = runner.invoke(
         app,
@@ -1167,6 +1223,14 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         scope = LibraryCacheScope.default_for_user("_user")
         attach_calls = 0
 
+        def metadata_summary_status(self) -> dict[str, Any]:
+            return {
+                "tracked_entries": 1,
+                "hydrated_entries": 1,
+                "missing_entries": 0,
+                "ready": True,
+            }
+
         def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
             assert title == "Alien"
             return [{"identity": "movie:55", "kind": "snapshot", "entry_type": "movie"}]
@@ -1217,6 +1281,14 @@ def _fake_search_store() -> object:
     class FakeStore:
         search_title_arg: str | None = None
         scope = LibraryCacheScope.default_for_user("_user")
+
+        def metadata_summary_status(self) -> dict[str, Any]:
+            return {
+                "tracked_entries": 3,
+                "hydrated_entries": 3,
+                "missing_entries": 0,
+                "ready": True,
+            }
 
         def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
             self.search_title_arg = title

@@ -10,8 +10,8 @@ import httpx
 import typer
 from typer.core import TyperGroup
 
-from anishelf_cli.cli import groups
 from anishelf_cli.cache.store import LibraryCacheStore
+from anishelf_cli.cli import groups
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cloudkit.api_token import (
     MissingCloudKitAPITokenError,
@@ -187,11 +187,13 @@ def login(
 ) -> None:
     strategy = callback_strategy or CallbackStrategy.MANUAL_PASTE
     redactor = SecretRedactor()
+    secret_store = default_secret_store()
 
     try:
-        if load_cloudkit_web_auth_token() is not None:
+        if load_cloudkit_web_auth_token(secret_store) is not None:
             emit_error(
-                "CloudKit auth is already configured. Run `ani auth logout` before logging in as another user."
+                "CloudKit auth is already configured. "
+                "Run `ani auth logout` before logging in as another user."
             )
             raise typer.Exit(code=2)
         api_token = resolve_cloudkit_api_token()
@@ -216,7 +218,7 @@ def login(
             web_auth_token = extract_web_auth_token(callback_url_value)
 
         redactor.register(web_auth_token, "cloudkit-web-auth-token")
-        store_cloudkit_web_auth_token(web_auth_token)
+        store_cloudkit_web_auth_token(web_auth_token, secret_store)
     except (
         CloudKitAuthError,
         MissingCloudKitAPITokenError,
@@ -240,7 +242,10 @@ def login(
     typer.echo("Logged in to CloudKit.")
 
 
-@auth_app.command("logout", help="Remove the stored CloudKit web auth token.")
+@auth_app.command(
+    "logout",
+    help="Remove the stored CloudKit web auth token and clear local library cache files.",
+)
 def logout(
     ctx: typer.Context,
     json_output: Annotated[
@@ -248,9 +253,10 @@ def logout(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    secret_store = default_secret_store()
     try:
         with cloudkit_web_auth_token_lock(lock_factory=whoami_lock_factory):
-            delete_cloudkit_web_auth_token()
+            delete_cloudkit_web_auth_token(secret_store)
         removed = LibraryCacheStore.remove_all_local_caches()
     except SecretStorageUnavailableError as exc:
         typer.echo(str(exc), err=True)

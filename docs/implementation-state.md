@@ -32,7 +32,8 @@ spec.
   confirmation.
 - `library get`, `library list`, `library export`, and `library search --title`
   read from the initialized local cache and fail closed until init has been
-  run.
+  run. These read commands also support `--sync` for an explicit CloudKit
+  refresh before serving results.
 - `library search --title` requires complete cached TMDb summary metadata and
   fails explicitly when that metadata is unavailable or incomplete.
 - The SQLite cache keeps CloudKit-derived library state separate from
