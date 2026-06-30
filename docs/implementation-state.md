@@ -8,7 +8,8 @@ spec.
 
 - Python `>=3.13` package managed with `uv`; console script is `ani`.
 - Typer command tree is in `src/anishelf_cli/cli/`.
-- Implemented command groups are mostly `auth` and `config`.
+- Implemented command groups are `auth`, `config`, and the first library read
+  surfaces.
 - `auth login` starts CloudKit web auth, supports manual callback paste and an
   optional loopback callback strategy, and stores the user web auth token in
   Keychain via `keyring`.
@@ -22,17 +23,23 @@ spec.
 - Secret redaction exists for known token values and sensitive URL query keys.
 - Human output uses shared `core.output` blocks: sections for detail views and
   aligned tables for collections.
-- Domain command groups exist for library and TMDb. Library metadata enrichment
-  is planned as a command-local `--metadata` option, and most of that surface
-  still returns placeholders.
+- `library get` does direct CloudKit record lookup for explicit semantic
+  identities.
+- `library list`, `library export`, and `library search --title` read from a
+  rebuildable SQLite cache of `LibraryEntry` records. They refresh CloudKit
+  `changes/zone` before reading unless `--offline` is passed where supported.
+- `library search --title` uses the configured TMDb API key to search movie and
+  TV titles, intersects those IDs with cached movie/series entries, and includes
+  seasons whose parent series matched.
+- Library metadata depth parsing exists as command-local `--metadata`, but
+  deeper metadata hydration remains mostly inert.
 - Low-level CloudKit diagnostics, settings, and schema checks are not
   user-facing command groups.
-- The cache module is only initial scaffolding.
+- `library changes` and top-level `tmdb search` are still placeholders.
 
 ## Near-Term Direction
 
-- Keep the CLI read-only while filling in the first useful library inspection
-  path.
+- Keep the CLI read-only while expanding library inspection and export depth.
 - Route real CloudKit requests through the executor instead of adding one-off
   request code in commands.
 - Keep JSON stdout clean and write progress, warnings, and diagnostics to
@@ -41,7 +48,8 @@ spec.
   status and errors without box-heavy decorative formatting.
 - Reuse the shared human-output blocks for command output before adding custom
   formatting.
-- Add only the cache shape needed by the first implemented library commands.
+- Keep the cache rebuildable and scoped by CloudKit container, environment,
+  database, zone, and authenticated user.
 - Treat schema drift checks as maintainer tooling rather than public CLI UX.
 - Keep TMDb enrichment optional and attached to library reads/exports through
   `--metadata`, including an explicit `none` level so CloudKit user-state
@@ -49,9 +57,7 @@ spec.
 
 ## Decisions Still Open
 
-- First stable JSON envelope for decoded library records and exports.
-- Exact command grammar for batch inputs and partial failures.
-- Which library operations need persistent cache before direct reads become too
-  slow or request-heavy.
+- Exact command grammar for filters, stdin/file batch inputs, and partial
+  failures.
 - Metadata cache invalidation rule for TMDb summaries and details.
 - Whether low-level CloudKit diagnostics need a separate dev-only entry point.

@@ -2,6 +2,7 @@ import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 from typer.testing import CliRunner
@@ -29,6 +30,19 @@ class MemorySecretStore:
 
     def delete_password(self, service: str, account: str) -> None:
         self.values.pop((service, account), None)
+
+
+def _fake_store() -> object:
+    return SimpleNamespace(
+        scope=SimpleNamespace(
+            container="iCloud.com.samuelhe.MyAnimeList",
+            environment="production",
+            database="private",
+            zone="AniShelfLibrary",
+            user_record_name="_test_user",
+        ),
+        list_entries=lambda *, include_tombstones=False: [],
+    )
 
 
 def test_root_help_mentions_global_options() -> None:
@@ -116,31 +130,34 @@ def test_normalize_metadata_args_preserves_none_level() -> None:
     ]
 
 
-def test_library_placeholder_accepts_bare_metadata_flag() -> None:
+def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+
     result = runner.invoke(app, ["--json", "library", "list", "--metadata"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["area"] == "library list"
-    assert payload["status"] == "not-implemented"
+    assert payload["summary"]["entries"] == 0
 
 
-def test_library_placeholder_accepts_explicit_metadata_level() -> None:
+def test_library_list_accepts_explicit_metadata_level(monkeypatch) -> None:
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "full"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["area"] == "library list"
-    assert payload["status"] == "not-implemented"
+    assert payload["summary"]["entries"] == 0
 
 
-def test_library_placeholder_accepts_none_metadata_level() -> None:
+def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "none"])
 
-    assert result.exit_code == 1
+    assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["area"] == "library list"
-    assert payload["status"] == "not-implemented"
+    assert payload["summary"]["entries"] == 0
 
 
 def test_unknown_command_error_uses_plain_formatting() -> None:

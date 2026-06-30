@@ -7,17 +7,32 @@ import httpx
 import typer
 
 from anishelf_cli import config
+from anishelf_cli.cache.store import (
+    LibraryCacheError,
+    LibraryCacheNotAvailableError,
+    LibraryCacheScope,
+    LibraryCacheStore,
+)
+from anishelf_cli.cache.sync import LibraryCacheRefreshResult, LibraryCacheSync
 from anishelf_cli.cli.common import json_output_requested, state_from_context
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
 from anishelf_cli.core.output import (
     HumanSection,
+    HumanTable,
+    HumanTableColumn,
     emit_error,
     emit_human_blocks,
     emit_json,
     emit_placeholder,
 )
-from anishelf_cli.library import has_any_found_item, library_get_envelope, valid_lookup_record_names
+from anishelf_cli.core.redaction import SecretRedactor
+from anishelf_cli.library import (
+    LibraryRecordDecodeError,
+    has_any_found_item,
+    library_get_envelope,
+    valid_lookup_record_names,
+)
 from anishelf_cli.models import CallbackStrategy, MetadataDepth
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
@@ -25,6 +40,8 @@ from anishelf_cli.secrets import (
     set_secret,
     tmdb_api_key_secret,
 )
+from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
+from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 config_app = typer.Typer(
     help="Configuration commands.",
@@ -337,32 +354,228 @@ def _optional_human_text(value: object) -> object:
     return value
 
 
-@library_app.command("list")
+@library_app.command("list", help="List cached AniShelf library entries.")
 def library_list(
     ctx: typer.Context,
     metadata: MetadataOption = None,
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Read the existing local cache without refreshing."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
     _ = metadata
-    emit_placeholder(state_from_context(ctx), "library list")
+    store, refresh_result = _library_store_for_read(offline=offline)
+    entries = store.list_entries(include_tombstones=False)
+    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones=False)
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+    _emit_library_list_human(entries)
 
 
-@library_app.command("search")
+@library_app.command("search", help="Search cached library entries by TMDb title search.")
 def library_search(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title")],
     metadata: MetadataOption = None,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
-    _ = title, metadata
-    emit_placeholder(state_from_context(ctx), "library search")
+    _ = metadata
+    store, refresh_result = _library_store_for_read(offline=False)
+    try:
+        tmdb_token = resolve_tmdb_api_token(default_secret_store())
+        search_result = TMDbClient(tmdb_token.value).search_title(title)
+    except MissingTMDbAPITokenError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+    except (SecretStorageUnavailableError, TMDbRequestError) as exc:
+        redactor = SecretRedactor()
+        if "tmdb_token" in locals():
+            redactor.register(tmdb_token.value, "tmdb-api-key")
+        emit_error(str(exc), redactor=redactor)
+        raise typer.Exit(code=2) from exc
+
+    entries = store.search_cached_entries(
+        movie_ids=search_result.movie_ids,
+        series_ids=search_result.series_ids,
+    )
+    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones=False)
+    payload["query"] = {
+        "title": title,
+        "tmdb_movie_ids": sorted(search_result.movie_ids),
+        "tmdb_series_ids": sorted(search_result.series_ids),
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+    _emit_library_search_human(title, entries)
 
 
-@library_app.command("export")
+@library_app.command("export", help="Export cached AniShelf library entries.")
 def library_export(
     ctx: typer.Context,
     metadata: MetadataOption = None,
+    offline: Annotated[
+        bool,
+        typer.Option("--offline", help="Read the existing local cache without refreshing."),
+    ] = False,
+    include_tombstones: Annotated[
+        bool,
+        typer.Option("--include-tombstones", help="Include locally cached tombstone rows."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
     _ = metadata
-    emit_placeholder(state_from_context(ctx), "library export")
+    store, refresh_result = _library_store_for_read(offline=offline)
+    entries = store.list_entries(include_tombstones=include_tombstones)
+    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones)
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+    _emit_library_export_human(payload)
+
+
+def _library_store_for_read(
+    *,
+    offline: bool,
+) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult | None]:
+    try:
+        if offline:
+            store = LibraryCacheStore.find_default_scope()
+            with store.locked():
+                store.initialize()
+                if not store.has_entries():
+                    raise LibraryCacheNotAvailableError(
+                        "No local library cache entries are available. "
+                        "Run without --offline to refresh first."
+                    )
+                return store, None
+
+        api_token = resolve_cloudkit_api_token()
+        with _make_http_client() as client:
+            executor = CloudKitExecutor(
+                client=client,
+                api_token_resolver=lambda: api_token,
+                secret_store=default_secret_store(),
+                lock_factory=library_lock_factory,
+            )
+            current_user = executor.get_current_user()
+            store = LibraryCacheStore.for_scope(
+                LibraryCacheScope.default_for_user(current_user.user_record_name)
+            )
+            with store.locked():
+                refresh_result = LibraryCacheSync(store=store, executor=executor).refresh()
+            return store, refresh_result
+    except (
+        CloudKitWhoamiError,
+        MissingCloudKitAPITokenError,
+        LibraryCacheError,
+        LibraryRecordDecodeError,
+        SecretStorageUnavailableError,
+    ) as exc:
+        emit_error(str(exc), redactor=getattr(exc, "redactor", None))
+        raise typer.Exit(code=2) from exc
+
+
+def _library_entries_payload(
+    entries: list[dict[str, object]],
+    store: LibraryCacheStore,
+    refresh_result: LibraryCacheRefreshResult | None,
+    include_tombstones: bool,
+) -> dict[str, object]:
+    tombstones = sum(1 for entry in entries if entry.get("kind") != "snapshot")
+    return {
+        "summary": {
+            "entries": len(entries),
+            "tombstones": tombstones,
+            "include_tombstones": include_tombstones,
+            "cache": {
+                "mode": "offline" if refresh_result is None else "refreshed",
+                "rebuilt": None if refresh_result is None else refresh_result.rebuilt,
+                "pages": None if refresh_result is None else refresh_result.pages,
+                "records": None if refresh_result is None else refresh_result.records,
+                "container": store.scope.container,
+                "environment": store.scope.environment,
+                "database": store.scope.database,
+                "zone": store.scope.zone,
+                "user_record_name": store.scope.user_record_name,
+            },
+        },
+        "entries": entries,
+    }
+
+
+def _emit_library_list_human(entries: list[dict[str, object]]) -> None:
+    emit_human_blocks(
+        [
+            HumanTable(
+                "Library entries",
+                (
+                    HumanTableColumn("identity", "Identity"),
+                    HumanTableColumn("entry_type", "Type"),
+                    HumanTableColumn("watch_status", "Status"),
+                    HumanTableColumn("score", "Score", "right"),
+                    HumanTableColumn("favorite", "Fav"),
+                    HumanTableColumn("on_display", "Display"),
+                    HumanTableColumn("date_saved", "Saved"),
+                ),
+                entries,
+                empty_message="No cached library entries.",
+            )
+        ]
+    )
+
+
+def _emit_library_search_human(title: str, entries: list[dict[str, object]]) -> None:
+    emit_human_blocks(
+        [
+            HumanTable(
+                f"Library search: {title}",
+                (
+                    HumanTableColumn("identity", "Identity"),
+                    HumanTableColumn("entry_type", "Type"),
+                    HumanTableColumn("watch_status", "Status"),
+                    HumanTableColumn("score", "Score", "right"),
+                    HumanTableColumn("date_saved", "Saved"),
+                ),
+                entries,
+                empty_message="No cached library entries matched the TMDb title search.",
+            )
+        ]
+    )
+
+
+def _emit_library_export_human(payload: dict[str, object]) -> None:
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        raise RuntimeError("library export payload was not initialized correctly")
+    cache = summary.get("cache")
+    if not isinstance(cache, dict):
+        raise RuntimeError("library export cache payload was not initialized correctly")
+
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library export",
+                (
+                    ("Entries", summary.get("entries")),
+                    ("Tombstones", summary.get("tombstones")),
+                    ("Cache", cache.get("mode")),
+                    ("User", cache.get("user_record_name")),
+                ),
+            )
+        ]
+    )
 
 
 @library_app.command("changes")

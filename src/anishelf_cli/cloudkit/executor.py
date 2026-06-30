@@ -60,6 +60,13 @@ class CurrentUser:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ZoneChangesPage:
+    records: list[dict[str, Any]]
+    sync_token: str
+    more_coming: bool
+
+
 class CloudKitWhoamiError(RuntimeError):
     def __init__(self, message: str, *, redactor: SecretRedactor | None = None) -> None:
         super().__init__(message)
@@ -79,6 +86,10 @@ class CloudKitRequestFailedError(CloudKitWhoamiError):
 
 
 class CloudKitUnexpectedResponseError(CloudKitWhoamiError):
+    pass
+
+
+class CloudKitChangeTokenExpiredError(CloudKitWhoamiError):
     pass
 
 
@@ -118,6 +129,36 @@ class CloudKitExecutor:
             response_description="CloudKit library lookup",
         )
 
+    def fetch_zone_changes(
+        self,
+        *,
+        sync_token: str | None,
+        zone_name: str = ANI_SHELF_LIBRARY_ZONE_NAME,
+        results_limit: int = 400,
+        desired_record_types: list[str] | None = None,
+    ) -> ZoneChangesPage:
+        zone_request: dict[str, Any] = {
+            "zoneID": {"zoneName": zone_name},
+        }
+        if sync_token:
+            zone_request["syncToken"] = sync_token
+
+        request_payload: dict[str, Any] = {
+            "zones": [zone_request],
+            "resultsLimit": results_limit,
+        }
+        if desired_record_types:
+            request_payload["desiredRecordTypes"] = desired_record_types
+
+        payload = self.authenticated_request(
+            "POST",
+            "changes/zone",
+            json_payload=request_payload,
+            error_context="CloudKit zone changes request",
+            response_description="CloudKit zone changes",
+        )
+        return _zone_changes_page_from_payload(payload, SecretRedactor())
+
     def authenticated_request(
         self,
         method: str,
@@ -153,6 +194,12 @@ class CloudKitExecutor:
                 self._clear_web_auth_token_after_auth_failure(redactor)
                 raise CloudKitAuthenticationFailedError(
                     "CloudKit authentication failed. Cleared stored login; run `ani auth login`.",
+                    redactor=redactor,
+                )
+
+            if _is_change_token_expired_payload(response, payload):
+                raise CloudKitChangeTokenExpiredError(
+                    _cloudkit_failure_message(f"{error_context} failed", response, payload),
                     redactor=redactor,
                 )
 
@@ -297,6 +344,50 @@ def _current_user_from_payload(
     )
 
 
+def _zone_changes_page_from_payload(
+    payload: dict[str, Any],
+    redactor: SecretRedactor,
+) -> ZoneChangesPage:
+    zones = payload.get("zones")
+    if not isinstance(zones, list) or len(zones) != 1 or not isinstance(zones[0], dict):
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit zone changes response did not include one zone result.",
+            redactor=redactor,
+        )
+
+    zone_result = zones[0]
+    if code := _optional_string(zone_result.get("serverErrorCode")):
+        message = _zone_error_message(code, zone_result)
+        if _is_change_token_expired_code(code):
+            raise CloudKitChangeTokenExpiredError(message, redactor=redactor)
+        raise CloudKitRequestFailedError(message, redactor=redactor)
+
+    records = zone_result.get("records")
+    if not isinstance(records, list):
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit zone changes response did not include records.",
+            redactor=redactor,
+        )
+    if not all(isinstance(record, dict) for record in records):
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit zone changes response included an invalid record.",
+            redactor=redactor,
+        )
+
+    sync_token = _optional_string(zone_result.get("syncToken"))
+    if not sync_token:
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit zone changes response did not include syncToken.",
+            redactor=redactor,
+        )
+
+    return ZoneChangesPage(
+        records=records,
+        sync_token=sync_token,
+        more_coming=bool(zone_result.get("moreComing")),
+    )
+
+
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
@@ -305,6 +396,13 @@ def _is_authentication_failure(response: httpx.Response, payload: dict[str, Any]
     _ = response
     code = payload.get("serverErrorCode")
     return isinstance(code, str) and code in AUTH_FAILURE_CODES
+
+
+def _is_change_token_expired_payload(response: httpx.Response, payload: dict[str, Any]) -> bool:
+    if not response.is_error:
+        return False
+    code = payload.get("serverErrorCode")
+    return isinstance(code, str) and _is_change_token_expired_code(code)
 
 
 def cloudkit_web_auth_token_lock_path(profile_id: str = DEFAULT_PROFILE_ID) -> Path:
@@ -341,3 +439,19 @@ def _cloudkit_failure_message(
 def _safe_lock_name(value: str) -> str:
     safe = "".join(char if char.isalnum() or char in ("-", "_", ".") else "_" for char in value)
     return safe or DEFAULT_PROFILE_ID
+
+
+def _zone_error_message(code: str, zone_result: dict[str, Any]) -> str:
+    details = [code]
+    if reason := _optional_string(zone_result.get("reason")):
+        details.append(reason)
+    return f"CloudKit zone changes request failed ({': '.join(details)})."
+
+
+def _is_change_token_expired_code(code: str) -> bool:
+    normalized = code.upper().replace("-", "_")
+    return normalized in {
+        "CHANGE_TOKEN_EXPIRED",
+        "SERVER_CHANGE_TOKEN_EXPIRED",
+        "CKERROR_CHANGE_TOKEN_EXPIRED",
+    }

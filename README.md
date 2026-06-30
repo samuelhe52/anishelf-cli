@@ -4,7 +4,11 @@ Read-only AniShelf library inspection CLI.
 
 ## Status
 
-The command surface exists, but most commands are still placeholders while the implementation is completed in small vertical slices.
+The CLI implements CloudKit auth, effective configuration display, direct
+library entry lookup, and cached library list/search/export. Some surfaces, such
+as low-level diagnostics, metadata hydration depth, `library changes`, and
+top-level `tmdb search`, are still placeholders while implementation continues
+in small vertical slices.
 
 ## Tooling
 
@@ -52,7 +56,25 @@ uv run ani library get movie:55 --json | jq '.items[] | {identity, score: .entry
 uv run ani library get movie:55 --json | jq '.items[] | select(.status == "error")'
 ```
 
-Library commands will also carry optional TMDb enrichment through `--metadata`
-instead of a separate top-level metadata command. Bare `--metadata` selects the
-default summary level; explicit levels use `none`, `summary`, `details`, or
-`full`. `none` means no TMDb request.
+`library list` and `library export` read from a rebuildable SQLite cache. By
+default they refresh the authenticated user's CloudKit zone changes first; use
+`--offline` to read the existing cache without network access.
+
+```bash
+uv run ani library list --json | jq '.entries[] | {identity, watch_status}'
+uv run ani library export --offline --json | jq '.summary.cache.mode'
+uv run ani library export --include-tombstones --json | jq '.entries[] | select(.kind != "snapshot")'
+```
+
+`library search --title` refreshes the cache, searches TMDb movie and TV titles
+with the configured API key, intersects the returned TMDb IDs with cached
+movie/series entries, and includes seasons whose parent series matched.
+
+```bash
+uv run ani library search --title "Alien" --json | jq '.entries[].identity'
+```
+
+Library commands accept optional `--metadata` parsing for future TMDb enrichment.
+Bare `--metadata` selects the default summary level; explicit levels use `none`,
+`summary`, `details`, or `full`. Full metadata hydration is still mostly inert in
+the current implementation.
