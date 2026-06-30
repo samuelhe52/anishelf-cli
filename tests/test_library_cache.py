@@ -24,7 +24,7 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError
-from anishelf_cli.secrets import cloudkit_web_auth_token_secret
+from anishelf_cli.secrets import SecretStorageUnavailableError, cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import TMDbRequestError
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 
@@ -1017,6 +1017,43 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
     cached_entries = initialized_store.list_entries()
     assert {entry["identity"] for entry in cached_entries} == {"series:22", "movie:55"}
+
+
+def test_library_init_reports_tmdb_secure_storage_failure(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(200, json={"userRecordName": "_user"})
+                if request.url.path.endswith("/users/current")
+                else httpx.Response(500)
+            )
+        ),
+    )
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: (_ for _ in ()).throw(
+            SecretStorageUnavailableError("Secure credential backend is unavailable")
+        ),
+    )
+
+    result = runner.invoke(app, ["library", "init"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Secure credential backend is unavailable" in result.stderr
+    assert "TMDb API key is not configured." not in result.stderr
 
 
 def test_library_list_refresh_decode_error_exits_cleanly_in_json_mode(

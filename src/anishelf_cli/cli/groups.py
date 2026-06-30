@@ -1281,7 +1281,7 @@ def _metadata_payload(metadata_depth: MetadataDepth) -> dict[str, object]:
 def _tmdb_summary_client_or_none() -> TMDbClient | None:
     try:
         tmdb_token = resolve_tmdb_api_token(default_secret_store())
-    except (MissingTMDbAPITokenError, SecretStorageUnavailableError):
+    except MissingTMDbAPITokenError:
         return None
     return TMDbClient(tmdb_token.value)
 
