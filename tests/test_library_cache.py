@@ -1019,6 +1019,81 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     assert {entry["identity"] for entry in cached_entries} == {"series:22", "movie:55"}
 
 
+def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    initialized_store.initialize()
+    initialized_store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(groups, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={
+                "zones": [
+                    {
+                        "records": [_live_record("series:22", "series", 22)],
+                        "syncToken": "t2",
+                        "moreComing": False,
+                    }
+                ]
+            },
+        )
+
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> dict[str, Any]:
+            assert identity.entry_type == "series"
+            assert identity.tmdb_id == 22
+            return _metadata_summary("series", 22, name="Alien Nation")
+
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(groups, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(app, ["--json", "library", "sync"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["cache"]["records"] == 1
+    assert payload["summary"]["cache"]["metadata_requested"] == 1
+    assert payload["summary"]["cache"]["metadata_hydrated"] == 1
+    assert payload["summary"]["cache"]["metadata_errors"] == 0
+    assert "[progress] Starting local library cache sync from CloudKit." in result.stderr
+    assert "[progress] Fetched page 1: 1 records (1 total)." in result.stderr
+    assert "[progress] Hydrating TMDb summary metadata for 1 entries." in result.stderr
+    assert "[progress] TMDb summary metadata 1/1 complete (0 errors)." in result.stderr
+    refreshed = initialized_store.attach_metadata_summary(initialized_store.list_entries())
+    series = next(entry for entry in refreshed if entry["identity"] == "series:22")
+    assert series["metadata"]["name"] == "Alien Nation"
+
+
 def test_library_init_reports_tmdb_secure_storage_failure(
     tmp_path,
     monkeypatch,

@@ -439,8 +439,7 @@ def library_init(
     machine_output = json_output_requested(ctx, json_output)
     store, refresh_result = _initialize_library_store(
         require_missing_cache=True,
-        progress_callback=_emit_library_init_progress,
-        metadata_progress_enabled=True,
+        progress_callback=_emit_library_cache_progress,
     )
     payload = {
         "summary": {
@@ -490,7 +489,10 @@ def library_sync(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    store, refresh_result = _initialize_library_store(require_existing_cache=True)
+    store, refresh_result = _initialize_library_store(
+        require_existing_cache=True,
+        progress_callback=_emit_library_cache_progress,
+    )
     payload = {
         "summary": {
             "cache": {
@@ -1063,7 +1065,6 @@ def _initialize_library_store(
     require_missing_cache: bool = False,
     require_existing_cache: bool = False,
     progress_callback: Callable[[LibraryCacheProgress], None] | None = None,
-    metadata_progress_enabled: bool = False,
 ) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult]:
     try:
         api_token = resolve_cloudkit_api_token()
@@ -1093,25 +1094,10 @@ def _initialize_library_store(
                 refresh_result = LibraryCacheSync(
                     store=store,
                     executor=executor,
-                    tmdb_client=None,
+                    tmdb_client=tmdb_client,
                     collect_metadata_targets=tmdb_client is not None,
                     progress_callback=progress_callback,
                 ).refresh()
-            if tmdb_client is not None and refresh_result.metadata_targets:
-                metadata_result = _refresh_metadata_targets(
-                    store,
-                    tmdb_client,
-                    list(refresh_result.metadata_targets),
-                    emit_progress_updates=metadata_progress_enabled,
-                )
-                refresh_result = replace(
-                    refresh_result,
-                    metadata_requested=metadata_result["requested"],
-                    metadata_hydrated=metadata_result["hydrated"],
-                    metadata_errors=metadata_result["errors"],
-                )
-            elif metadata_progress_enabled and refresh_result.metadata_targets:
-                emit_progress("TMDb summary metadata skipped; no API key configured.")
             return store, refresh_result
     except (
         CloudKitWhoamiError,
@@ -1295,7 +1281,7 @@ def _tmdb_summary_client_or_exit() -> TMDbClient:
     return TMDbClient(tmdb_token.value)
 
 
-def _emit_library_init_progress(progress: LibraryCacheProgress) -> None:
+def _emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
     if progress.phase == "rebuild-started":
         emit_progress("Starting local library cache rebuild from CloudKit.")
         return
@@ -1311,8 +1297,19 @@ def _emit_library_init_progress(progress: LibraryCacheProgress) -> None:
         return
     if progress.phase == "metadata-started":
         emit_progress(
-            "Preparing TMDb summary metadata hydration "
+            "Hydrating TMDb summary metadata "
             f"for {progress.metadata_requested or 0} entries."
+        )
+        return
+    if (
+        progress.phase == "metadata-progress"
+        and progress.metadata_requested is not None
+        and progress.metadata_completed is not None
+    ):
+        emit_progress(
+            "TMDb summary metadata "
+            f"{progress.metadata_completed}/{progress.metadata_requested} complete "
+            f"({progress.metadata_errors or 0} errors)."
         )
 
 

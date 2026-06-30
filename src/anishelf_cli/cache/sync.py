@@ -57,6 +57,12 @@ class LibraryCacheSync:
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
     metadata_target_limit: int | None = None
     progress_callback: LibraryCacheProgressCallback | None = None
+    _last_emitted_metadata_completed: int = field(
+        init=False,
+        default=0,
+        repr=False,
+        compare=False,
+    )
 
     def refresh(self) -> LibraryCacheRefreshResult:
         self.store.initialize()
@@ -169,9 +175,10 @@ class LibraryCacheSync:
         return deduped[: self.metadata_target_limit]
 
     def _hydrate_metadata_targets(self, targets: list[dict[str, Any]]) -> tuple[int, int]:
-        if self.tmdb_client is None:
+        if not targets or self.tmdb_client is None:
             return 0, 0
 
+        self._last_emitted_metadata_completed = 0
         self._emit_progress("metadata-started", metadata_requested=len(targets))
         summaries, errors = fetch_metadata_summaries(
             self.tmdb_client,
@@ -183,6 +190,14 @@ class LibraryCacheSync:
         return len(summaries), errors
 
     def _metadata_progress(self, completed: int, errors: int, requested: int) -> None:
+        should_emit = (
+            completed == requested
+            or completed == 1
+            or completed - self._last_emitted_metadata_completed >= 25
+        )
+        if not should_emit:
+            return
+        self._last_emitted_metadata_completed = completed
         self._emit_progress(
             "metadata-progress",
             metadata_requested=requested,
