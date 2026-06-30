@@ -11,8 +11,10 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
+from anishelf_cli.cache.store import LibraryCacheScope, LibraryCacheStore
 from anishelf_cli.cli import groups
 from anishelf_cli.cli.root import app
+from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
@@ -40,7 +42,145 @@ def null_lock(path: Path) -> Iterator[None]:
     yield
 
 
-def test_library_get_success_json_looks_up_records_in_library_zone(monkeypatch) -> None:
+def test_library_get_requires_init_before_lookup(tmp_path, monkeypatch) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Run `ani library init` first" in result.stderr
+
+
+def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["--json", "library", "status"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["initialized"] is False
+    assert payload["summary"]["scope_count"] == 0
+    assert payload["active"]["scope"] is None
+    assert payload["active"]["entries"] == 0
+    assert payload["active"]["has_sync_token"] is False
+    assert payload["active"]["metadata"] == {
+        "tracked_entries": 0,
+        "hydrated_entries": 0,
+        "missing_entries": 0,
+        "ready": False,
+    }
+
+
+def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "library", "status"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["initialized"] is True
+    assert payload["summary"]["scope_count"] == 1
+    assert payload["active"]["entries"] == 1
+    assert payload["active"]["has_sync_token"] is True
+    assert payload["active"]["scope"]["user_record_name"] == "_user"
+    assert payload["active"]["metadata"] == {
+        "tracked_entries": 1,
+        "hydrated_entries": 0,
+        "missing_entries": 1,
+        "ready": False,
+    }
+
+
+def test_library_status_reports_metadata_ready_when_summary_is_cached(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "library", "status"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["active"]["metadata"] == {
+        "tracked_entries": 1,
+        "hydrated_entries": 1,
+        "missing_entries": 0,
+        "ready": True,
+    }
+
+
+def test_library_status_human_output_uses_empty_partial_complete_metadata_states(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+
+    empty = runner.invoke(app, ["library", "status"])
+    assert empty.exit_code == 0, empty.output
+    assert "  Metadata           empty\n" in empty.stdout
+
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    still_empty = runner.invoke(app, ["library", "status"])
+    assert still_empty.exit_code == 0, still_empty.output
+    assert "  Metadata           empty\n" in still_empty.stdout
+
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:66", "movie", 66)],
+            sync_token="t2",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    partial = runner.invoke(app, ["library", "status"])
+    assert partial.exit_code == 0, partial.output
+    assert "  Metadata           partial\n" in partial.stdout
+
+    store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Aliens"))
+    complete = runner.invoke(app, ["library", "status"])
+    assert complete.exit_code == 0, complete.output
+    assert "  Metadata           complete\n" in complete.stdout
+
+
+def test_library_clear_cache_requires_confirmation(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["library", "clear-cache"], input="n\n")
+
+    assert result.exit_code == 1
+    assert "Aborted local library cache clear." in result.stderr
+    assert LibraryCacheStore.find_default_scope().has_entries() is True
+
+
+def test_library_clear_cache_yes_removes_all_local_cache_files(tmp_path, monkeypatch) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.lock_path.parent.mkdir(parents=True, exist_ok=True)
+    store.lock_path.write_text("locked")
+
+    result = runner.invoke(app, ["--json", "library", "clear-cache", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "cleared"
+    assert payload["removed"]["cache_files"] == 1
+    assert payload["removed"]["lock_files"] == 1
+    assert not store.path.exists()
+    assert not store.lock_path.exists()
+
+
+def test_library_clear_cache_prompt_can_confirm(tmp_path, monkeypatch) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "library", "clear-cache"], input="y\n")
+
+    assert result.exit_code == 0, result.output
+    assert not store.path.exists()
+
+
+def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
     store = _store_with_cloudkit_token("old-web-secret-token")
     requests: list[httpx.Request] = []
 
@@ -50,16 +190,26 @@ def test_library_get_success_json_looks_up_records_in_library_zone(monkeypatch) 
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
         return httpx.Response(
             200,
             json={
-                "webAuthToken": "new-web-secret-token",
-                "records": [_live_record("movie:55", "movie", 55)],
+                "zones": [
+                    {
+                        "records": [_live_record("movie:55", "movie", 55)],
+                        "syncToken": "t1",
+                        "moreComing": False,
+                    }
+                ],
             },
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+
+    init_result = runner.invoke(app, ["--json", "library", "init"])
+    assert init_result.exit_code == 0, init_result.output
 
     result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
 
@@ -84,27 +234,28 @@ def test_library_get_success_json_looks_up_records_in_library_zone(monkeypatch) 
         }
     ]
 
-    request = requests[0]
-    assert request.method == "POST"
-    assert request.url.path.endswith(
-        "/database/1/iCloud.com.samuelhe.MyAnimeList/production/private/records/lookup"
+    change_request = next(
+        request for request in requests if request.url.path.endswith("/changes/zone")
     )
-    assert request.url.params["ckAPIToken"] == "api-secret-token"
-    assert request.url.params["ckWebAuthToken"] == "old-web-secret-token"
-    assert json.loads(request.content) == {
-        "records": [{"recordName": "movie:55"}],
-        "zoneID": {"zoneName": "AniShelfLibrary"},
+    assert change_request.method == "POST"
+    assert change_request.url.params["ckAPIToken"] == "api-secret-token"
+    assert change_request.url.params["ckWebAuthToken"] == "old-web-secret-token"
+    assert json.loads(change_request.content) == {
+        "desiredRecordTypes": ["LibraryEntry"],
+        "resultsLimit": 400,
+        "zones": [{"zoneID": {"zoneName": "AniShelfLibrary"}}],
     }
+    assert not any(request.url.path.endswith("/records/lookup") for request in requests)
     descriptor = cloudkit_web_auth_token_secret()
-    assert store.get_password(descriptor.service, descriptor.account) == "new-web-secret-token"
+    assert store.get_password(descriptor.service, descriptor.account) == "old-web-secret-token"
     combined = result.stdout + result.stderr
     assert "api-secret-token" not in combined
     assert "old-web-secret-token" not in combined
     assert "new-web-secret-token" not in combined
 
 
-def test_library_get_accepts_command_level_json_after_subcommand(monkeypatch) -> None:
-    _install_lookup(monkeypatch, {"records": [_live_record("movie:55", "movie", 55)]})
+def test_library_get_accepts_command_level_json_after_subcommand(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
     result = runner.invoke(app, ["library", "get", "--json", "movie:55"])
 
@@ -114,8 +265,8 @@ def test_library_get_accepts_command_level_json_after_subcommand(monkeypatch) ->
     assert payload["items"][0]["entry"]["identity"] == "movie:55"
 
 
-def test_library_get_accepts_command_level_json_after_identity(monkeypatch) -> None:
-    _install_lookup(monkeypatch, {"records": [_live_record("movie:55", "movie", 55)]})
+def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
     result = runner.invoke(app, ["library", "get", "movie:55", "--json"])
 
@@ -125,37 +276,67 @@ def test_library_get_accepts_command_level_json_after_identity(monkeypatch) -> N
     assert payload["items"][0]["entry"]["identity"] == "movie:55"
 
 
-def test_library_get_human_output_uses_entry_sections_not_a_table(monkeypatch) -> None:
-    _install_lookup(monkeypatch, {"records": [_live_record("movie:55", "movie", 55)]})
+def test_library_get_reads_existing_cache(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
+    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+
+
+def test_library_get_uses_existing_cache_without_cloudkit_requests(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    requests: list[httpx.Request] = []
+    monkeypatch.setattr(
+        groups,
+        "_make_http_client",
+        lambda: httpx.Client(
+            transport=httpx.MockTransport(
+                lambda request: requests.append(request) or httpx.Response(500)
+            )
+        ),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
+    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert requests == []
+
+
+def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monkeypatch) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["library", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     assert "Library entries\n" in result.stdout
+    assert "Alien\n" in result.stdout
     assert "movie:55\n" in result.stdout
     assert "  Identity  Status" not in result.stdout
     assert "  Watch status      watched\n" in result.stdout
     assert "  Score             4\n" in result.stdout
     assert "  Favorite          yes\n" in result.stdout
-    assert "  Date saved        2026-05-01T00:00:00Z\n" in result.stdout
+    assert "  Date saved        2026-05-01\n" in result.stdout
     assert "  Custom poster     /current/custom.jpg\n" in result.stdout
     assert "  Episode progress  S1:E12 (2026-05-08T00:00:00Z)\n" in result.stdout
     assert "  Notes             Round trip\n" in result.stdout
 
 
-def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(monkeypatch) -> None:
-    _install_lookup(
-        monkeypatch,
-        {
-            "records": [
-                {
-                    "recordName": "movie:404",
-                    "serverErrorCode": "NOT_FOUND",
-                    "reason": "Record not found.",
-                }
-            ]
-        },
-    )
+def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
     result = runner.invoke(app, ["--json", "library", "get", "movie:404"])
 
@@ -166,7 +347,7 @@ def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(monke
         {
             "identity": "movie:404",
             "status": "error",
-            "error": {"code": "not_found", "message": "Record not found."},
+            "error": {"code": "not_found", "message": "Library entry not found."},
         }
     ]
 
@@ -194,19 +375,8 @@ def test_library_get_invalid_identity_is_item_error_without_network(monkeypatch)
     assert payload["items"][0]["error"]["code"] == "invalid_identity"
 
 
-def test_library_get_partial_batch_preserves_caller_order(monkeypatch) -> None:
-    _install_lookup(
-        monkeypatch,
-        {
-            "records": [
-                _live_record("series:22", "series", 22),
-                {
-                    "recordName": "season:22:3:33",
-                    "serverErrorCode": "NOT_FOUND",
-                },
-            ]
-        },
-    )
+def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch) -> None:
+    _install_cached_entry(tmp_path, monkeypatch, _live_record("series:22", "series", 22))
 
     result = runner.invoke(
         app,
@@ -231,7 +401,7 @@ def test_library_get_partial_batch_preserves_caller_order(monkeypatch) -> None:
     assert [item["status"] for item in payload["items"]] == ["error", "found", "error"]
 
 
-def test_library_get_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -> None:
+def test_library_init_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -> None:
     store = _store_with_cloudkit_token("bad-web-secret-token")
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(groups, "default_secret_store", lambda: store)
@@ -255,7 +425,7 @@ def test_library_get_redacts_tokens_from_cloudkit_request_errors(monkeypatch) ->
     )
     monkeypatch.setattr(groups, "_make_http_client", lambda: client)
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "library", "init"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -283,6 +453,30 @@ def test_library_tombstone_decodes_from_identity_fields_and_deleted_at() -> None
         "season_number": 3,
         "deleted_at": "2026-05-12T00:00:00Z",
     }
+
+
+def test_library_get_tombstone_identity_is_treated_as_not_found(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _install_cached_entry(
+        tmp_path,
+        monkeypatch,
+        _tombstone_record("season:22:3:33", "season", 33, parent_series_id=22, season_number=3),
+    )
+
+    result = runner.invoke(app, ["--json", "library", "get", "season:22:3:33"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
+    assert payload["items"] == [
+        {
+            "identity": "season:22:3:33",
+            "status": "error",
+            "error": {"code": "not_found", "message": "Library entry not found."},
+        }
+    ]
 
 
 def test_library_decoder_rejects_future_schema_versions() -> None:
@@ -346,6 +540,47 @@ def _install_lookup(
     )
     monkeypatch.setattr(groups, "_make_http_client", lambda: client)
     return store
+
+
+def _install_cached_entry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    record: dict[str, Any],
+) -> LibraryCacheStore:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(records=[record], sync_token="t1", more_coming=False),
+        staging=False,
+    )
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda: store)
+    return store
+
+
+def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache"))
+    monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
+
+
+def _metadata_summary(entry_type: str, tmdb_id: int, *, name: str) -> dict[str, Any]:
+    return {
+        "entry_type": entry_type,
+        "tmdb_id": tmdb_id,
+        "language": None,
+        "name": name,
+        "name_translations": {},
+        "original_name": name,
+        "overview": f"{name} overview.",
+        "overview_translations": {},
+        "poster_path": "/poster.jpg",
+        "backdrop_path": "/backdrop.jpg",
+        "logo_path": None,
+        "original_language_code": "en",
+        "on_air_date": "1979-05-25",
+        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+        "source_version": "test",
+    }
 
 
 def _store_with_cloudkit_token(token: str) -> MemorySecretStore:

@@ -1,5 +1,6 @@
 from anishelf_cli.library.envelope import (
     has_any_found_item,
+    library_get_cache_envelope,
     library_get_envelope,
     valid_lookup_record_names,
 )
@@ -23,6 +24,7 @@ __all__ = [
     "LibraryRecordDecodeError",
     "decode_library_entry_record",
     "has_any_found_item",
+    "library_get_cache_envelope",
     "library_get_envelope",
     "parse_library_identity",
     "valid_lookup_record_names",

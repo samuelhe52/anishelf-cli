@@ -33,6 +33,10 @@ class MemorySecretStore:
 
 
 def _fake_store() -> object:
+    def list_entries_filtered(**kwargs: object) -> list[object]:
+        _ = kwargs
+        return []
+
     return SimpleNamespace(
         scope=SimpleNamespace(
             container="iCloud.com.samuelhe.MyAnimeList",
@@ -42,6 +46,9 @@ def _fake_store() -> object:
             user_record_name="_test_user",
         ),
         list_entries=lambda *, include_tombstones=False: [],
+        list_entries_filtered=list_entries_filtered,
+        search_entries_by_title=lambda title: [],
+        attach_metadata_summary=lambda entries: entries,
     )
 
 
@@ -92,6 +99,7 @@ def test_library_get_help_mentions_metadata_option() -> None:
 
     assert result.exit_code == 0
     assert "--metadata" in result.stdout
+    assert "--live-meta" in result.stdout
     assert "none" in result.stdout
     assert "summary" in result.stdout
     assert "details" in result.stdout
@@ -131,7 +139,7 @@ def test_normalize_metadata_args_preserves_none_level() -> None:
 
 
 def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata"])
 
@@ -140,24 +148,59 @@ def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
     assert payload["summary"]["entries"] == 0
 
 
-def test_library_list_accepts_explicit_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+def test_library_list_rejects_reserved_metadata_level(monkeypatch) -> None:
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "full"])
 
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["summary"]["entries"] == 0
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "reserved until TMDb detail metadata caching exists" in result.stderr
 
 
 def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda *, offline: (_fake_store(), None))
+    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "none"])
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["summary"]["entries"] == 0
+
+
+def test_library_list_help_mentions_refresh_meta_flag() -> None:
+    result = runner.invoke(app, ["library", "list", "--help"])
+
+    assert result.exit_code == 0
+    assert "--refresh-meta" in result.stdout
+
+
+def test_library_init_help_mentions_json() -> None:
+    result = runner.invoke(app, ["library", "init", "--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.stdout
+
+
+def test_library_sync_help_mentions_json() -> None:
+    result = runner.invoke(app, ["library", "sync", "--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.stdout
+
+
+def test_library_status_help_mentions_json() -> None:
+    result = runner.invoke(app, ["library", "status", "--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.stdout
+
+
+def test_library_clear_cache_help_mentions_confirmation_bypass() -> None:
+    result = runner.invoke(app, ["library", "clear-cache", "--help"])
+
+    assert result.exit_code == 0
+    assert "--yes" in result.stdout
 
 
 def test_unknown_command_error_uses_plain_formatting() -> None:

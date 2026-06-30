@@ -65,6 +65,34 @@ def library_get_envelope(
     }
 
 
+def library_get_cache_envelope(
+    identities: list[str],
+    cached_entries: dict[str, dict[str, Any]],
+) -> dict[str, Any]:
+    items: list[dict[str, Any]] = []
+    for raw_identity in identities:
+        try:
+            parse_library_identity(raw_identity)
+        except LibraryIdentityError as exc:
+            items.append(_error_item(raw_identity, "invalid_identity", str(exc)))
+            continue
+
+        entry = cached_entries.get(raw_identity)
+        if entry is None:
+            items.append(_error_item(raw_identity, "not_found", "Library entry not found."))
+        else:
+            items.append({"identity": raw_identity, "status": "found", "entry": entry})
+
+    return {
+        "items": items,
+        "summary": {
+            "requested": len(identities),
+            "found": sum(1 for item in items if item["status"] == "found"),
+            "errors": sum(1 for item in items if item["status"] == "error"),
+        },
+    }
+
+
 def valid_lookup_record_names(identities: list[str]) -> list[str]:
     valid: list[str] = []
     for identity in identities:

@@ -73,6 +73,7 @@ class AniTyperGroup(TyperGroup):
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
         return super().parse_args(ctx, _normalize_metadata_args(list(args)))
 
+
 app = typer.Typer(
     add_completion=False,
     cls=AniTyperGroup,

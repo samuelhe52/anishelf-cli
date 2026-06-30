@@ -23,16 +23,29 @@ spec.
 - Secret redaction exists for known token values and sensitive URL query keys.
 - Human output uses shared `core.output` blocks: sections for detail views and
   aligned tables for collections.
-- `library get` does direct CloudKit record lookup for explicit semantic
-  identities.
-- `library list`, `library export`, and `library search --title` read from a
-  rebuildable SQLite cache of `LibraryEntry` records. They refresh CloudKit
-  `changes/zone` before reading unless `--offline` is passed where supported.
-- `library search --title` uses the configured TMDb API key to search movie and
-  TV titles, intersects those IDs with cached movie/series entries, and includes
-  seasons whose parent series matched.
-- Library metadata depth parsing exists as command-local `--metadata`, but
-  deeper metadata hydration remains mostly inert.
+- `library init` initializes a rebuildable SQLite cache of `LibraryEntry`
+  records from CloudKit, and `library sync` refreshes that initialized cache.
+- `library status` reports local cache initialization state, and
+  TMDb summary metadata readiness, and
+  `library clear-cache` removes all local library cache files after explicit
+  confirmation.
+- `library get`, `library list`, `library export`, and `library search --title`
+  read from the initialized local cache and fail closed until init has been
+  run.
+- `library search --title` searches the initialized local cache by title and
+  identity.
+- The SQLite cache keeps CloudKit-derived library state separate from
+  `tmdb_metadata_summary`. Library reads attach cached summary metadata by
+  default, `--metadata none` suppresses attachment, and `details`/`full` are
+  reserved until detail cache behavior exists.
+- `library init` hydrates TMDb summary metadata for the full fetched library
+  when a TMDb key is available. Later `library sync` refreshes hydrate only
+  newly added entries automatically. Library read commands also support
+  `--refresh-meta`, and `library get` supports `--live-meta`, for explicit
+  summary refresh.
+- `library list` has first-pass ergonomic filters and ordering for common
+  questions: watch status, hidden/display state, favorites, saved/updated/title
+  sort, and result limits.
 - Low-level CloudKit diagnostics, settings, and schema checks are not
   user-facing command groups.
 - `library changes` and top-level `tmdb search` are still placeholders.
@@ -59,5 +72,5 @@ spec.
 
 - Exact command grammar for filters, stdin/file batch inputs, and partial
   failures.
-- Metadata cache invalidation rule for TMDb summaries and details.
+- Staleness and invalidation rules for TMDb summaries and details.
 - Whether low-level CloudKit diagnostics need a separate dev-only entry point.

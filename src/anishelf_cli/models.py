@@ -12,6 +12,12 @@ class MetadataDepth(StrEnum):
     FULL = "full"
 
 
+class LibraryListSort(StrEnum):
+    SAVED = "saved"
+    UPDATED = "updated"
+    TITLE = "title"
+
+
 class CallbackStrategy(StrEnum):
     MANUAL_PASTE = "manual-paste"
     LOOPBACK = "loopback"

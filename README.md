@@ -56,23 +56,36 @@ uv run ani library get movie:55 --json | jq '.items[] | {identity, score: .entry
 uv run ani library get movie:55 --json | jq '.items[] | select(.status == "error")'
 ```
 
-`library list` and `library export` read from a rebuildable SQLite cache. By
-default they refresh the authenticated user's CloudKit zone changes first; use
-`--offline` to read the existing cache without network access.
+Run `ani library init` once before using the read commands. Initialization
+fetches the full library into the local SQLite cache and hydrates TMDb summary
+metadata for every entry when a TMDb key is available. Later CloudKit refreshes
+use `ani library sync`.
 
 ```bash
+uv run ani library init --json | jq '.summary.cache.records'
+uv run ani library sync --json | jq '.summary.cache.records'
+uv run ani library status --json | jq '.summary'
 uv run ani library list --json | jq '.entries[] | {identity, watch_status}'
-uv run ani library export --offline --json | jq '.summary.cache.mode'
-uv run ani library export --include-tombstones --json | jq '.entries[] | select(.kind != "snapshot")'
+uv run ani library list --json | jq '.summary.cache.mode'
+uv run ani library export --json | jq '.entries[] | {identity, watch_status}'
 ```
 
-`library search --title` refreshes the cache, searches TMDb movie and TV titles
-with the configured API key, intersects the returned TMDb IDs with cached
-movie/series entries, and includes seasons whose parent series matched.
+Use `ani library clear-cache` to remove all local library cache files after an
+interactive confirmation. Pass `--yes` to skip the prompt.
+
+`ani library status` also reports TMDb summary metadata readiness for the local
+cache so you can see whether entries are fully hydrated.
+
+`library search --title` searches the initialized local cache by title and
+identity. Use `tmdb search` for global TMDb discovery.
 
 ```bash
 uv run ani library search --title "Alien" --json | jq '.entries[].identity'
 ```
+
+Use `--refresh-meta` on `library list`, `library search`, or `library export`
+to refetch TMDb summary metadata for the current result set. Use `--live-meta`
+on `library get` to refetch TMDb summary metadata for the requested entries.
 
 Library commands accept optional `--metadata` parsing for future TMDb enrichment.
 Bare `--metadata` selects the default summary level; explicit levels use `none`,

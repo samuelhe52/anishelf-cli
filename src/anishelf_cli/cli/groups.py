@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+from dataclasses import replace
 from typing import Annotated
 
 import httpx
@@ -13,7 +14,11 @@ from anishelf_cli.cache.store import (
     LibraryCacheScope,
     LibraryCacheStore,
 )
-from anishelf_cli.cache.sync import LibraryCacheRefreshResult, LibraryCacheSync
+from anishelf_cli.cache.sync import (
+    LibraryCacheRefreshResult,
+    LibraryCacheSync,
+    fetch_metadata_summaries,
+)
 from anishelf_cli.cli.common import json_output_requested, state_from_context
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
@@ -30,17 +35,18 @@ from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.library import (
     LibraryRecordDecodeError,
     has_any_found_item,
-    library_get_envelope,
+    library_get_cache_envelope,
     valid_lookup_record_names,
 )
-from anishelf_cli.models import CallbackStrategy, MetadataDepth
+from anishelf_cli.library.records import WATCH_STATUS_VALUES
+from anishelf_cli.models import CallbackStrategy, LibraryListSort, MetadataDepth
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,
     set_secret,
     tmdb_api_key_secret,
 )
-from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
+from anishelf_cli.tmdb.client import TMDbClient
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 config_app = typer.Typer(
@@ -59,6 +65,7 @@ tmdb_app = typer.Typer(
     rich_markup_mode=None,
 )
 library_lock_factory = None
+AUTO_METADATA_HYDRATION_TARGET_LIMIT = 8
 
 MetadataOption = Annotated[
     MetadataDepth | None,
@@ -206,30 +213,34 @@ def library_get(
     ctx: typer.Context,
     identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
     metadata: MetadataOption = None,
+    live_meta: Annotated[
+        bool,
+        typer.Option(
+            "--live-meta",
+            help="Fetch fresh TMDb summary metadata for the requested entries.",
+        ),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    _ = metadata
+    metadata_depth = _metadata_depth(metadata)
+    _reject_reserved_metadata_depth(metadata_depth)
     lookup_record_names = valid_lookup_record_names(identities)
-    lookup_payload: dict[str, object] | None = None
-
+    cached_entries: dict[str, dict[str, object]] = {}
     if lookup_record_names:
-        try:
-            api_token = resolve_cloudkit_api_token()
-            with _make_http_client() as client:
-                lookup_payload = CloudKitExecutor(
-                    client=client,
-                    api_token_resolver=lambda: api_token,
-                    secret_store=default_secret_store(),
-                    lock_factory=library_lock_factory,
-                ).lookup_records(lookup_record_names)
-        except (CloudKitWhoamiError, MissingCloudKitAPITokenError) as exc:
-            emit_error(str(exc), redactor=getattr(exc, "redactor", None))
-            raise typer.Exit(code=2) from exc
+        store = _library_store_for_read()
+        cached_entries = store.get_entries_by_identity(lookup_record_names)
+        if live_meta:
+            _refresh_metadata_for_entries(store, list(cached_entries.values()))
+        if metadata_depth is not MetadataDepth.NONE:
+            cached_entries = {
+                str(entry["identity"]): entry
+                for entry in store.attach_metadata_summary(list(cached_entries.values()))
+            }
 
-    envelope = library_get_envelope(identities, lookup_payload)
+    envelope = library_get_cache_envelope(identities, cached_entries)
     if json_output_requested(ctx, json_output):
         emit_json(envelope)
     else:
@@ -237,6 +248,217 @@ def library_get(
 
     if not has_any_found_item(envelope):
         raise typer.Exit(code=1)
+
+
+@library_app.command("init", help="Initialize the local library cache from CloudKit.")
+def library_init(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    store, refresh_result = _initialize_library_store(require_missing_cache=True)
+    payload = {
+        "summary": {
+            "cache": {
+                "mode": "updated",
+                "updated": True,
+                "rebuilt": refresh_result.rebuilt,
+                "pages": refresh_result.pages,
+                "records": refresh_result.records,
+                "metadata_requested": refresh_result.metadata_requested,
+                "metadata_hydrated": refresh_result.metadata_hydrated,
+                "metadata_errors": refresh_result.metadata_errors,
+                "container": store.scope.container,
+                "environment": store.scope.environment,
+                "database": store.scope.database,
+                "zone": store.scope.zone,
+                "user_record_name": store.scope.user_record_name,
+            }
+        }
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library init",
+                (
+                    ("Cache", "updated"),
+                    ("User", store.scope.user_record_name),
+                    ("Entries fetched", refresh_result.records),
+                    ("Pages", refresh_result.pages),
+                    ("Metadata requested", refresh_result.metadata_requested),
+                    ("Metadata hydrated", refresh_result.metadata_hydrated),
+                    ("Metadata errors", refresh_result.metadata_errors),
+                ),
+            )
+        ]
+    )
+
+
+@library_app.command("sync", help="Sync an initialized local library cache from CloudKit.")
+def library_sync(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    store, refresh_result = _initialize_library_store(require_existing_cache=True)
+    payload = {
+        "summary": {
+            "cache": {
+                "mode": "updated",
+                "updated": True,
+                "rebuilt": refresh_result.rebuilt,
+                "pages": refresh_result.pages,
+                "records": refresh_result.records,
+                "metadata_requested": refresh_result.metadata_requested,
+                "metadata_hydrated": refresh_result.metadata_hydrated,
+                "metadata_errors": refresh_result.metadata_errors,
+                "container": store.scope.container,
+                "environment": store.scope.environment,
+                "database": store.scope.database,
+                "zone": store.scope.zone,
+                "user_record_name": store.scope.user_record_name,
+            }
+        }
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library sync",
+                (
+                    ("Cache", "updated"),
+                    ("User", store.scope.user_record_name),
+                    ("Entries fetched", refresh_result.records),
+                    ("Pages", refresh_result.pages),
+                    ("Metadata requested", refresh_result.metadata_requested),
+                    ("Metadata hydrated", refresh_result.metadata_hydrated),
+                    ("Metadata errors", refresh_result.metadata_errors),
+                ),
+            )
+        ]
+    )
+
+
+@library_app.command("status", help="Show local library cache status.")
+def library_status(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    payload = _library_status_payload()
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+
+    summary = payload["summary"]
+    cache = payload["cache"]
+    active = payload["active"]
+    if not (
+        isinstance(summary, dict)
+        and isinstance(cache, dict)
+        and isinstance(active, dict)
+    ):
+        raise RuntimeError("library status payload was not initialized correctly")
+
+    active_scope = active.get("scope")
+    active_user = None
+    if isinstance(active_scope, dict):
+        active_user = active_scope.get("user_record_name")
+    metadata = active.get("metadata")
+    metadata_hydrated = None
+    metadata_missing = None
+    metadata_state = "empty"
+    if isinstance(metadata, dict):
+        metadata_hydrated = metadata.get("hydrated_entries")
+        metadata_missing = metadata.get("missing_entries")
+        if summary.get("initialized"):
+            if metadata.get("ready"):
+                metadata_state = "complete"
+            elif metadata_hydrated:
+                metadata_state = "partial"
+
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library cache",
+                (
+                    ("Initialized", "yes" if summary.get("initialized") else "no"),
+                    ("Entries", active.get("entries")),
+                    ("Sync token", "present" if active.get("has_sync_token") else "missing"),
+                    ("Metadata", metadata_state),
+                    ("Metadata hydrated", metadata_hydrated),
+                    ("Metadata missing", metadata_missing),
+                    ("Active user", active_user),
+                    ("Scope count", summary.get("scope_count")),
+                    ("Cache files", summary.get("cache_files")),
+                    ("Lock files", summary.get("lock_files")),
+                    ("Cache path", cache.get("path")),
+                    ("Lock path", cache.get("lock_path")),
+                ),
+            )
+        ]
+    )
+
+
+@library_app.command("clear-cache", help="Clear all local library cache files.")
+def library_clear_cache(
+    ctx: typer.Context,
+    yes: Annotated[
+        bool,
+        typer.Option("--yes", help="Skip the confirmation prompt."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    if not yes:
+        confirmed = typer.confirm(
+            "Delete all local library cache files for every cached user?",
+            default=False,
+        )
+        if not confirmed:
+            emit_error("Aborted local library cache clear.")
+            raise typer.Exit(code=1)
+
+    removed = LibraryCacheStore.remove_all_local_caches()
+    payload = {
+        "status": "cleared",
+        "removed": removed,
+        "paths": {
+            "cache_dir": str(LibraryCacheStore.library_cache_root()),
+            "lock_dir": str(LibraryCacheStore.library_lock_root()),
+        },
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library cache clear",
+                (
+                    ("Status", "cleared"),
+                    ("Cache files", removed["cache_files"]),
+                    ("Lock files", removed["lock_files"]),
+                    ("Cache dir", str(LibraryCacheStore.library_cache_root())),
+                    ("Lock dir", str(LibraryCacheStore.library_lock_root())),
+                ),
+            )
+        ]
+    )
 
 
 def _emit_library_get_human(envelope: dict[str, object]) -> None:
@@ -287,12 +509,15 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
     entry = item.get("entry")
     if not isinstance(entry, dict):
         return HumanSection(identity, (("Status", "decode-error"),))
+    metadata = _entry_metadata(entry)
+    title = _metadata_name(metadata)
 
     if entry.get("kind") == "tombstone":
         return HumanSection(
-            identity,
+            title or identity,
             (
                 ("Status", status),
+                ("Identity", identity),
                 ("Kind", entry.get("kind")),
                 ("Type", entry.get("entry_type")),
                 ("TMDb ID", entry.get("tmdb_id")),
@@ -304,9 +529,13 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
         )
 
     return HumanSection(
-        identity,
+        title or identity,
         (
             ("Status", status),
+            ("Identity", identity),
+            ("Title", title),
+            ("Original title", _metadata_original_name(metadata)),
+            ("Overview", _truncate_text(_metadata_field(metadata, "overview"), limit=220)),
             ("Kind", entry.get("kind")),
             ("Type", entry.get("entry_type")),
             ("TMDb ID", entry.get("tmdb_id")),
@@ -316,15 +545,16 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
             ("Score", entry.get("score")),
             ("Favorite", entry.get("favorite")),
             ("On display", entry.get("on_display")),
-            ("Date saved", entry.get("date_saved")),
+            ("Date saved", _compact_date(entry.get("date_saved"))),
             ("Date started", entry.get("date_started")),
             ("Date finished", entry.get("date_finished")),
             ("Date tracking", entry.get("is_date_tracking_enabled")),
+            ("Poster", _metadata_field(metadata, "poster_path")),
             ("Custom poster", entry.get("custom_poster_path")),
             ("Episode progress", _format_episode_progresses(entry.get("episode_progresses"))),
             ("Library updated", entry.get("library_updated_at")),
             ("Tracking updated", entry.get("tracking_updated_at")),
-            ("Notes", _optional_human_text(entry.get("notes"))),
+            ("Notes", _truncate_text(_optional_human_text(entry.get("notes")), limit=160)),
             ("Schema", entry.get("schema_version")),
         ),
     )
@@ -358,59 +588,112 @@ def _optional_human_text(value: object) -> object:
 def library_list(
     ctx: typer.Context,
     metadata: MetadataOption = None,
-    offline: Annotated[
+    refresh_meta: Annotated[
         bool,
-        typer.Option("--offline", help="Read the existing local cache without refreshing."),
+        typer.Option(
+            "--refresh-meta",
+            help="Refresh cached TMDb summary metadata for the current result set.",
+        ),
     ] = False,
+    watch_status: Annotated[
+        str | None,
+        typer.Option("--watch-status", help="Filter by watch status."),
+    ] = None,
+    hidden: Annotated[
+        bool,
+        typer.Option("--hidden", help="Show only entries hidden from display."),
+    ] = False,
+    favorite: Annotated[
+        bool,
+        typer.Option("--favorite", help="Show only favorite entries."),
+    ] = False,
+    on_display: Annotated[
+        bool | None,
+        typer.Option(
+            "--on-display/--not-on-display",
+            help="Filter by display visibility.",
+        ),
+    ] = None,
+    sort: Annotated[
+        LibraryListSort,
+        typer.Option("--sort", help="Sort by saved, updated, or title."),
+    ] = LibraryListSort.SAVED,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", min=1, help="Limit the number of entries returned."),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    _ = metadata
-    store, refresh_result = _library_store_for_read(offline=offline)
-    entries = store.list_entries(include_tombstones=False)
-    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones=False)
+    metadata_depth = _metadata_depth(metadata)
+    _reject_reserved_metadata_depth(metadata_depth)
+    _validate_watch_status(watch_status)
+    store = _library_store_for_read()
+    entries = store.list_entries_filtered(
+        include_tombstones=False,
+        watch_status=watch_status,
+        hidden=True if hidden else None,
+        favorite=True if favorite else None,
+        on_display=on_display,
+        sort=sort.value,
+        limit=None if sort is LibraryListSort.TITLE else limit,
+    )
+    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
+    entries = _entries_for_metadata_depth(store, entries, metadata_depth)
+    entries = _sort_entries_after_metadata(entries, sort)
+    if sort is LibraryListSort.TITLE and limit is not None:
+        entries = entries[:limit]
+    payload = _library_entries_payload(entries, store, None)
+    metadata_payload = _metadata_payload(metadata_depth)
+    if metadata_refresh_result is not None:
+        metadata_payload["refresh"] = metadata_refresh_result
+    payload["metadata"] = metadata_payload
+    payload["filters"] = _library_list_filters_payload(
+        watch_status=watch_status,
+        hidden=hidden,
+        favorite=favorite,
+        on_display=on_display,
+        sort=sort,
+        limit=limit,
+    )
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
     _emit_library_list_human(entries)
 
 
-@library_app.command("search", help="Search cached library entries by TMDb title search.")
+@library_app.command("search", help="Search cached library entries by title.")
 def library_search(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title")],
     metadata: MetadataOption = None,
+    refresh_meta: Annotated[
+        bool,
+        typer.Option(
+            "--refresh-meta",
+            help="Refresh cached TMDb summary metadata for matched entries.",
+        ),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    _ = metadata
-    store, refresh_result = _library_store_for_read(offline=False)
-    try:
-        tmdb_token = resolve_tmdb_api_token(default_secret_store())
-        search_result = TMDbClient(tmdb_token.value).search_title(title)
-    except MissingTMDbAPITokenError as exc:
-        emit_error(str(exc))
-        raise typer.Exit(code=2) from exc
-    except (SecretStorageUnavailableError, TMDbRequestError) as exc:
-        redactor = SecretRedactor()
-        if "tmdb_token" in locals():
-            redactor.register(tmdb_token.value, "tmdb-api-key")
-        emit_error(str(exc), redactor=redactor)
-        raise typer.Exit(code=2) from exc
-
-    entries = store.search_cached_entries(
-        movie_ids=search_result.movie_ids,
-        series_ids=search_result.series_ids,
-    )
-    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones=False)
+    metadata_depth = _metadata_depth(metadata)
+    _reject_reserved_metadata_depth(metadata_depth)
+    store = _library_store_for_read()
+    entries = store.search_entries_by_title(title)
+    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
+    entries = _entries_for_metadata_depth(store, entries, metadata_depth)
+    payload = _library_entries_payload(entries, store, None)
+    metadata_payload = _metadata_payload(metadata_depth)
+    if metadata_refresh_result is not None:
+        metadata_payload["refresh"] = metadata_refresh_result
+    payload["metadata"] = metadata_payload
     payload["query"] = {
         "title": title,
-        "tmdb_movie_ids": sorted(search_result.movie_ids),
-        "tmdb_series_ids": sorted(search_result.series_ids),
     }
     if json_output_requested(ctx, json_output):
         emit_json(payload)
@@ -422,45 +705,110 @@ def library_search(
 def library_export(
     ctx: typer.Context,
     metadata: MetadataOption = None,
-    offline: Annotated[
+    refresh_meta: Annotated[
         bool,
-        typer.Option("--offline", help="Read the existing local cache without refreshing."),
-    ] = False,
-    include_tombstones: Annotated[
-        bool,
-        typer.Option("--include-tombstones", help="Include locally cached tombstone rows."),
+        typer.Option(
+            "--refresh-meta",
+            help="Refresh cached TMDb summary metadata for exported entries.",
+        ),
     ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    _ = metadata
-    store, refresh_result = _library_store_for_read(offline=offline)
-    entries = store.list_entries(include_tombstones=include_tombstones)
-    payload = _library_entries_payload(entries, store, refresh_result, include_tombstones)
+    metadata_depth = _metadata_depth(metadata)
+    _reject_reserved_metadata_depth(metadata_depth)
+    store = _library_store_for_read()
+    entries = store.list_entries(include_tombstones=False)
+    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
+    entries = _entries_for_metadata_depth(store, entries, metadata_depth)
+    payload = _library_entries_payload(entries, store, None)
+    metadata_payload = _metadata_payload(metadata_depth)
+    if metadata_refresh_result is not None:
+        metadata_payload["refresh"] = metadata_refresh_result
+    payload["metadata"] = metadata_payload
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
     _emit_library_export_human(payload)
 
 
-def _library_store_for_read(
-    *,
-    offline: bool,
-) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult | None]:
+def _library_store_for_read() -> LibraryCacheStore:
     try:
-        if offline:
-            store = LibraryCacheStore.find_default_scope()
-            with store.locked():
-                store.initialize()
-                if not store.has_entries():
-                    raise LibraryCacheNotAvailableError(
-                        "No local library cache entries are available. "
-                        "Run without --offline to refresh first."
-                    )
-                return store, None
+        store = LibraryCacheStore.find_default_scope()
+        with store.locked():
+            store.initialize()
+            if not store.has_entries():
+                raise LibraryCacheNotAvailableError(
+                    "No local library cache entries are available. Run `ani library init` first."
+                )
+            return store
+    except (
+        LibraryCacheError,
+    ) as exc:
+        emit_error(str(exc), redactor=getattr(exc, "redactor", None))
+        raise typer.Exit(code=2) from exc
 
+
+def _library_status_payload() -> dict[str, object]:
+    scopes = LibraryCacheStore.existing_scopes()
+    cache_root = LibraryCacheStore.library_cache_root()
+    lock_root = LibraryCacheStore.library_lock_root()
+    cache_files = sorted(cache_root.glob("*.sqlite3")) if cache_root.exists() else []
+    lock_files = sorted(lock_root.glob("library-cache.*.lock")) if lock_root.exists() else []
+
+    active: dict[str, object] = {
+        "initialized": False,
+        "entries": 0,
+        "has_sync_token": False,
+        "scope": None,
+    }
+    try:
+        store = LibraryCacheStore.find_default_scope()
+    except LibraryCacheError:
+        store = None
+    if store is not None:
+        with store.locked():
+            store.initialize()
+            metadata_status = store.metadata_summary_status()
+            active = {
+                "initialized": store.has_entries(),
+                "entries": len(store.list_entries(include_tombstones=False)),
+                "has_sync_token": store.read_sync_token() is not None,
+                "scope": store.scope.key_payload(),
+                "metadata": metadata_status,
+            }
+    else:
+        active["metadata"] = {
+            "tracked_entries": 0,
+            "hydrated_entries": 0,
+            "missing_entries": 0,
+            "ready": False,
+        }
+
+    return {
+        "summary": {
+            "initialized": bool(active["initialized"]),
+            "scope_count": len(scopes),
+            "cache_files": len(cache_files),
+            "lock_files": len(lock_files),
+        },
+        "active": active,
+        "scopes": [scope.key_payload() for scope in scopes],
+        "cache": {
+            "path": str(cache_root),
+            "lock_path": str(lock_root),
+        },
+    }
+
+
+def _initialize_library_store(
+    *,
+    require_missing_cache: bool = False,
+    require_existing_cache: bool = False,
+) -> tuple[LibraryCacheStore, LibraryCacheRefreshResult]:
+    try:
         api_token = resolve_cloudkit_api_token()
         with _make_http_client() as client:
             executor = CloudKitExecutor(
@@ -473,8 +821,36 @@ def _library_store_for_read(
             store = LibraryCacheStore.for_scope(
                 LibraryCacheScope.default_for_user(current_user.user_record_name)
             )
+            store.initialize()
+            cache_has_entries = store.has_entries()
+            if require_missing_cache and cache_has_entries:
+                raise LibraryCacheError(
+                    "Local library cache already exists. Run `ani library sync` instead."
+                )
+            if require_existing_cache and not cache_has_entries:
+                raise LibraryCacheNotAvailableError(
+                    "No local library cache is available. Run `ani library init` first."
+                )
+            tmdb_client = _tmdb_summary_client_or_none()
             with store.locked():
-                refresh_result = LibraryCacheSync(store=store, executor=executor).refresh()
+                refresh_result = LibraryCacheSync(
+                    store=store,
+                    executor=executor,
+                    tmdb_client=None,
+                    metadata_target_limit=AUTO_METADATA_HYDRATION_TARGET_LIMIT,
+                ).refresh()
+            if tmdb_client is not None and refresh_result.metadata_targets:
+                metadata_result = _refresh_metadata_targets(
+                    store,
+                    tmdb_client,
+                    list(refresh_result.metadata_targets),
+                )
+                refresh_result = replace(
+                    refresh_result,
+                    metadata_requested=metadata_result["requested"],
+                    metadata_hydrated=metadata_result["hydrated"],
+                    metadata_errors=metadata_result["errors"],
+                )
             return store, refresh_result
     except (
         CloudKitWhoamiError,
@@ -491,19 +867,25 @@ def _library_entries_payload(
     entries: list[dict[str, object]],
     store: LibraryCacheStore,
     refresh_result: LibraryCacheRefreshResult | None,
-    include_tombstones: bool,
 ) -> dict[str, object]:
-    tombstones = sum(1 for entry in entries if entry.get("kind") != "snapshot")
     return {
         "summary": {
             "entries": len(entries),
-            "tombstones": tombstones,
-            "include_tombstones": include_tombstones,
             "cache": {
-                "mode": "offline" if refresh_result is None else "refreshed",
+                "mode": "cached" if refresh_result is None else "updated",
+                "updated": refresh_result is not None,
                 "rebuilt": None if refresh_result is None else refresh_result.rebuilt,
                 "pages": None if refresh_result is None else refresh_result.pages,
                 "records": None if refresh_result is None else refresh_result.records,
+                "metadata_requested": None
+                if refresh_result is None
+                else refresh_result.metadata_requested,
+                "metadata_hydrated": None
+                if refresh_result is None
+                else refresh_result.metadata_hydrated,
+                "metadata_errors": None
+                if refresh_result is None
+                else refresh_result.metadata_errors,
                 "container": store.scope.container,
                 "environment": store.scope.environment,
                 "database": store.scope.database,
@@ -515,21 +897,185 @@ def _library_entries_payload(
     }
 
 
+def _metadata_depth(value: MetadataDepth | None) -> MetadataDepth:
+    return value or MetadataDepth.SUMMARY
+
+
+def _reject_reserved_metadata_depth(metadata_depth: MetadataDepth) -> None:
+    if metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        emit_error(
+            f"--metadata {metadata_depth.value} is reserved until TMDb detail metadata "
+            "caching exists."
+        )
+        raise typer.Exit(code=2)
+
+
+def _validate_watch_status(watch_status: str | None) -> None:
+    if watch_status is None or watch_status in WATCH_STATUS_VALUES:
+        return
+    valid = ", ".join(sorted(WATCH_STATUS_VALUES))
+    emit_error(f"Invalid watch status {watch_status!r}. Expected one of: {valid}.")
+    raise typer.Exit(code=2)
+
+
+def _entries_for_metadata_depth(
+    store: LibraryCacheStore,
+    entries: list[dict[str, object]],
+    metadata_depth: MetadataDepth,
+) -> list[dict[str, object]]:
+    if metadata_depth is MetadataDepth.NONE:
+        return entries
+    return store.attach_metadata_summary(entries)
+
+
+def _refresh_metadata_for_entries(
+    store: LibraryCacheStore,
+    entries: list[dict[str, object]],
+) -> dict[str, int]:
+    tmdb_client = _tmdb_summary_client_or_exit()
+    targets = store.metadata_summary_targets_for_entries(entries)
+    return _refresh_metadata_targets(store, tmdb_client, targets)
+
+
+def _refresh_metadata_targets(
+    store: LibraryCacheStore,
+    tmdb_client: TMDbClient,
+    targets: list[dict[str, object]],
+) -> dict[str, int]:
+    summaries, errors = fetch_metadata_summaries(tmdb_client, targets)
+    store.upsert_metadata_summaries(summaries)
+    if len(targets) == 1 and errors:
+        emit_error("TMDb summary metadata request failed.")
+    return {
+        "requested": len(targets),
+        "hydrated": len(summaries),
+        "errors": errors,
+    }
+
+
+def _metadata_payload(metadata_depth: MetadataDepth) -> dict[str, object]:
+    return {
+        "requested": metadata_depth.value,
+        "attached": metadata_depth is not MetadataDepth.NONE,
+        "source": "cache" if metadata_depth is not MetadataDepth.NONE else None,
+    }
+
+
+def _tmdb_summary_client_or_none() -> TMDbClient | None:
+    try:
+        tmdb_token = resolve_tmdb_api_token(default_secret_store())
+    except (MissingTMDbAPITokenError, SecretStorageUnavailableError):
+        return None
+    return TMDbClient(tmdb_token.value)
+
+
+def _tmdb_summary_client_or_exit() -> TMDbClient:
+    try:
+        tmdb_token = resolve_tmdb_api_token(default_secret_store())
+    except (MissingTMDbAPITokenError, SecretStorageUnavailableError) as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+    return TMDbClient(tmdb_token.value)
+
+
+def _sort_entries_after_metadata(
+    entries: list[dict[str, object]],
+    sort: LibraryListSort,
+) -> list[dict[str, object]]:
+    if sort is not LibraryListSort.TITLE:
+        return entries
+    return sorted(
+        entries,
+        key=lambda entry: (
+            str(_metadata_name(_entry_metadata(entry)) or entry.get("identity") or "").lower(),
+            str(entry.get("identity") or ""),
+        ),
+    )
+
+
+def _library_list_filters_payload(
+    *,
+    watch_status: str | None,
+    hidden: bool,
+    favorite: bool,
+    on_display: bool | None,
+    sort: LibraryListSort,
+    limit: int | None,
+) -> dict[str, object]:
+    return {
+        "watch_status": watch_status,
+        "hidden": hidden,
+        "favorite": favorite,
+        "on_display": on_display,
+        "sort": sort.value,
+        "limit": limit,
+    }
+
+
+def _human_library_row(entry: dict[str, object]) -> dict[str, object]:
+    return {
+        "title": _metadata_name(_entry_metadata(entry)) or entry.get("identity"),
+        "identity": entry.get("identity"),
+        "entry_type": entry.get("entry_type"),
+        "watch_status": entry.get("watch_status"),
+        "score": entry.get("score"),
+        "favorite": entry.get("favorite"),
+        "on_display": entry.get("on_display"),
+        "saved": _compact_date(entry.get("date_saved")),
+    }
+
+
+def _entry_metadata(entry: dict[str, object]) -> dict[str, object] | None:
+    metadata = entry.get("metadata")
+    return metadata if isinstance(metadata, dict) else None
+
+
+def _metadata_name(metadata: dict[str, object] | None) -> str | None:
+    return _metadata_field(metadata, "name") or _metadata_original_name(metadata)
+
+
+def _metadata_original_name(metadata: dict[str, object] | None) -> str | None:
+    return _metadata_field(metadata, "original_name")
+
+
+def _metadata_field(metadata: dict[str, object] | None, key: str) -> str | None:
+    if metadata is None:
+        return None
+    value = metadata.get(key)
+    return value if isinstance(value, str) and value else None
+
+
+def _compact_date(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        return value[:10]
+    return value
+
+
+def _truncate_text(value: object, *, limit: int) -> object:
+    if not isinstance(value, str) or len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + "..."
+
+
 def _emit_library_list_human(entries: list[dict[str, object]]) -> None:
+    rows = [_human_library_row(entry) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(
                 "Library entries",
                 (
+                    HumanTableColumn("title", "Title"),
                     HumanTableColumn("identity", "Identity"),
                     HumanTableColumn("entry_type", "Type"),
                     HumanTableColumn("watch_status", "Status"),
                     HumanTableColumn("score", "Score", "right"),
                     HumanTableColumn("favorite", "Fav"),
                     HumanTableColumn("on_display", "Display"),
-                    HumanTableColumn("date_saved", "Saved"),
+                    HumanTableColumn("saved", "Saved"),
                 ),
-                entries,
+                rows,
                 empty_message="No cached library entries.",
             )
         ]
@@ -537,19 +1083,21 @@ def _emit_library_list_human(entries: list[dict[str, object]]) -> None:
 
 
 def _emit_library_search_human(title: str, entries: list[dict[str, object]]) -> None:
+    rows = [_human_library_row(entry) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(
                 f"Library search: {title}",
                 (
+                    HumanTableColumn("title", "Title"),
                     HumanTableColumn("identity", "Identity"),
                     HumanTableColumn("entry_type", "Type"),
                     HumanTableColumn("watch_status", "Status"),
                     HumanTableColumn("score", "Score", "right"),
-                    HumanTableColumn("date_saved", "Saved"),
+                    HumanTableColumn("saved", "Saved"),
                 ),
-                entries,
-                empty_message="No cached library entries matched the TMDb title search.",
+                rows,
+                empty_message="No cached library entries matched the title search.",
             )
         ]
     )
@@ -569,7 +1117,6 @@ def _emit_library_export_human(payload: dict[str, object]) -> None:
                 "Library export",
                 (
                     ("Entries", summary.get("entries")),
-                    ("Tombstones", summary.get("tombstones")),
                     ("Cache", cache.get("mode")),
                     ("User", cache.get("user_record_name")),
                 ),

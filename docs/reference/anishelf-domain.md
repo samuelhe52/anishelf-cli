@@ -50,19 +50,29 @@ direct movie/series TMDb matches, and season parent-series matches.
 Normal user commands should stay library-first. Useful read-only surfaces
 include:
 
-- `library get <identity...> [--metadata[=none|summary|details|full]]`
-- `library list [--offline] [--metadata[=none|summary|details|full]]`
+- `library init`
+- `library sync`
+- `library status`
+- `library clear-cache`
+- `library get <identity...> [--live-meta] [--metadata[=none|summary|details|full]]`
+- `library list [--refresh-meta] [--metadata[=none|summary|details|full]]`
 - `library search --title` with optional `--metadata`
-- `library export [--offline] [--include-tombstones]` with optional `--metadata`
+- `library export [--refresh-meta]` with optional `--metadata`
 - `tmdb search --title`
 
-`library list` and `library export` auto-refresh the authenticated user's cache
-before reading unless `--offline` is passed. Default list/export output excludes
-tombstones; export can include tombstones explicitly.
+`library init` is the explicit bootstrap entry point for the local cache.
+`library sync` is the explicit refresh entry point after bootstrap. Other
+library read commands require an initialized cache and should fail closed until
+init has been run.
+`library status` should report whether the local cache is initialized and which
+cached scopes exist, including TMDb summary metadata readiness.
+`library clear-cache` should explicitly clear all local library cache files
+after confirmation.
+Tombstones are an internal sync concern and should not appear in public entry
+counts or library list/export output.
 
-`library search --title` auto-refreshes the cache, searches TMDb movie and TV
-titles using API-key auth, intersects returned TMDb IDs with cached movie/series
-entries, and includes seasons whose `parent_series_id` matches a matched series.
+`library search --title` searches the initialized local cache by title and
+identity. Use `tmdb search --title` for global TMDb discovery.
 
 Low-level CloudKit zone, record, change, settings, and schema-check commands
 are diagnostics. Keep them out of the normal user command tree unless a future
@@ -89,6 +99,10 @@ separate top-level hydration pass. Bare `--metadata` should request the default
 summary level, while explicit `none`, `summary`, `details`, and `full` values
 should control the TMDb depth as implemented. `none` means no TMDb request.
 
-Current title search uses TMDb only to find candidate movie and TV IDs for cache
-intersection. Exact hydrated metadata fields for each depth should be finalized
-alongside the first implemented metadata-enrichment path.
+Exact hydrated metadata fields for each depth should be finalized alongside the
+first implemented metadata-enrichment path.
+
+`library init` should fetch the full library and hydrate TMDb summary metadata
+for every entry when a TMDb key is available. After that initialization pass,
+`library sync` should hydrate only newly added entries unless the user
+explicitly requests `--refresh-meta` or `--live-meta`.

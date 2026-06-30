@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -21,6 +22,7 @@ from anishelf_cli.library import (
 )
 
 CACHE_SCHEMA_VERSION = "1"
+TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v1"
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
 REBUILD_SYNC_TOKEN_META_KEY = "rebuild_sync_token"
 
@@ -87,8 +89,16 @@ class LibraryCacheStore:
         )
 
     @classmethod
+    def library_cache_root(cls) -> Path:
+        return config.cache_dir() / "library"
+
+    @classmethod
+    def library_lock_root(cls) -> Path:
+        return config.data_dir() / "locks"
+
+    @classmethod
     def find_default_scope(cls) -> LibraryCacheStore:
-        cache_root = config.cache_dir() / "library"
+        cache_root = cls.library_cache_root()
         candidates: list[LibraryCacheStore] = []
         for path in sorted(cache_root.glob("*.sqlite3")) if cache_root.exists() else []:
             scope = _scope_from_existing_database(path)
@@ -104,14 +114,35 @@ class LibraryCacheStore:
 
         if not candidates:
             raise LibraryCacheNotAvailableError(
-                "No local library cache is available. Run without --offline to refresh first."
+                "No local library cache is available. Run `ani library init` first."
             )
         if len(candidates) > 1:
             raise LibraryCacheNotAvailableError(
-                "Multiple user-scoped library caches are available. Run without --offline "
+                "Multiple user-scoped library caches are available. Run `ani library init` "
                 "to select the authenticated user."
             )
         return candidates[0]
+
+    @classmethod
+    def existing_scopes(cls) -> list[LibraryCacheScope]:
+        cache_root = cls.library_cache_root()
+        scopes: list[LibraryCacheScope] = []
+        for path in sorted(cache_root.glob("*.sqlite3")) if cache_root.exists() else []:
+            scope = _scope_from_existing_database(path)
+            if scope is not None:
+                scopes.append(scope)
+        return scopes
+
+    @classmethod
+    def remove_all_local_caches(cls) -> dict[str, int]:
+        cache_root = cls.library_cache_root()
+        lock_root = cls.library_lock_root()
+        removed_cache_files = _remove_matching_files(cache_root, "*.sqlite3")
+        removed_lock_files = _remove_matching_files(lock_root, "library-cache.*.lock")
+        return {
+            "cache_files": removed_cache_files,
+            "lock_files": removed_lock_files,
+        }
 
     @contextmanager
     def locked(self) -> Iterator[None]:
@@ -153,6 +184,30 @@ class LibraryCacheStore:
             _write_meta(db, token_key, page.sync_token)
             db.commit()
 
+    def apply_page_and_collect_new_summary_targets(
+        self,
+        page: ZoneChangesPage,
+        *,
+        staging: bool,
+    ) -> list[dict[str, Any]]:
+        table = "library_entries_stage" if staging else "library_entries"
+        token_key = REBUILD_SYNC_TOKEN_META_KEY if staging else ZONE_SYNC_TOKEN_META_KEY
+        new_targets: list[dict[str, Any]] = []
+        with self._connect_initialized() as db:
+            db.execute("BEGIN")
+            try:
+                for record in page.records:
+                    target = _summary_target_from_record(db, table, record)
+                    _apply_record(db, table, record)
+                    if target is not None and not _metadata_summary_exists(db, target):
+                        new_targets.append(target)
+                _write_meta(db, token_key, page.sync_token)
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return _dedupe_summary_targets(new_targets)
+
     def finish_rebuild(self) -> None:
         with self._connect_initialized() as db:
             sync_token = _read_meta(db, REBUILD_SYNC_TOKEN_META_KEY)
@@ -180,6 +235,73 @@ class LibraryCacheStore:
                 """
             ).fetchall()
         return [_decoded_row(row) for row in rows]
+
+    def list_entries_filtered(
+        self,
+        *,
+        include_tombstones: bool = False,
+        watch_status: str | None = None,
+        hidden: bool | None = None,
+        favorite: bool | None = None,
+        on_display: bool | None = None,
+        sort: str = "saved",
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        where_parts: list[str] = []
+        params: list[Any] = []
+        if not include_tombstones:
+            where_parts.append("kind = 'snapshot'")
+        if watch_status is not None:
+            where_parts.append("watch_status = ?")
+            params.append(watch_status)
+        if hidden is not None:
+            where_parts.append("kind = 'snapshot'")
+            where_parts.append("on_display = ?")
+            params.append(0 if hidden else 1)
+        if favorite is not None:
+            where_parts.append("kind = 'snapshot'")
+            where_parts.append("favorite = ?")
+            params.append(1 if favorite else 0)
+        if on_display is not None:
+            where_parts.append("kind = 'snapshot'")
+            where_parts.append("on_display = ?")
+            params.append(1 if on_display else 0)
+
+        where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
+        order_by = _list_order_by(sort)
+        limit_clause = ""
+        if limit is not None:
+            limit_clause = "LIMIT ?"
+            params.append(limit)
+
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT decoded_json
+                FROM library_entries
+                {where}
+                {order_by}
+                {limit_clause}
+                """,
+                params,
+            ).fetchall()
+        return [_decoded_row(row) for row in rows]
+
+    def get_entries_by_identity(self, identities: list[str]) -> dict[str, dict[str, Any]]:
+        if not identities:
+            return {}
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT decoded_json
+                FROM library_entries
+                WHERE kind = 'snapshot'
+                AND identity IN ({_placeholders(identities)})
+                """,
+                identities,
+            ).fetchall()
+        entries = [_decoded_row(row) for row in rows]
+        return {str(entry["identity"]): entry for entry in entries}
 
     def search_cached_entries(
         self,
@@ -219,12 +341,138 @@ class LibraryCacheStore:
             rows = db.execute(
                 f"""
                 SELECT decoded_json
-                FROM ({' UNION ALL '.join(query_parts)})
+                FROM ({" UNION ALL ".join(query_parts)})
                 ORDER BY date_saved DESC NULLS LAST, identity ASC
                 """,
                 params,
             ).fetchall()
         return [_decoded_row(row) for row in rows]
+
+    def search_entries_by_title(
+        self,
+        title: str,
+    ) -> list[dict[str, Any]]:
+        query = title.strip()
+        if not query:
+            return []
+
+        pattern = f"%{query.lower()}%"
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                """
+                SELECT library_entries.decoded_json
+                FROM library_entries
+                LEFT JOIN tmdb_metadata_summary
+                    ON tmdb_metadata_summary.metadata_key = CASE
+                        WHEN library_entries.entry_type = 'season' THEN
+                            'season:' || library_entries.parent_series_id || ':' ||
+                            library_entries.season_number || ':' || library_entries.tmdb_id
+                        ELSE
+                            library_entries.entry_type || ':' || library_entries.tmdb_id
+                    END
+                    AND tmdb_metadata_summary.language = ''
+                WHERE library_entries.kind = 'snapshot'
+                    AND (
+                        LOWER(library_entries.identity) LIKE ?
+                        OR LOWER(COALESCE(tmdb_metadata_summary.name, '')) LIKE ?
+                        OR LOWER(COALESCE(tmdb_metadata_summary.original_name, '')) LIKE ?
+                    )
+                ORDER BY library_entries.date_saved DESC NULLS LAST, library_entries.identity ASC
+                """,
+                (pattern, pattern, pattern),
+            ).fetchall()
+        return [_decoded_row(row) for row in rows]
+
+    def upsert_metadata_summary(self, summary: dict[str, Any]) -> None:
+        with self._connect_initialized() as db:
+            _upsert_metadata_summary(db, summary)
+
+    def upsert_metadata_summaries(self, summaries: list[dict[str, Any]]) -> None:
+        if not summaries:
+            return
+        with self._connect_initialized() as db:
+            for summary in summaries:
+                _upsert_metadata_summary(db, summary)
+
+    def metadata_summary_targets_for_entries(
+        self,
+        entries: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        return _dedupe_summary_targets(
+            [
+                {
+                    "entry_type": entry["entry_type"],
+                    "tmdb_id": entry["tmdb_id"],
+                    "parent_series_id": entry.get("parent_series_id"),
+                    "season_number": entry.get("season_number"),
+                }
+                for entry in entries
+                if entry.get("kind") == "snapshot"
+            ]
+        )
+
+    def missing_metadata_summary_targets(self) -> list[dict[str, Any]]:
+        entries = self.list_entries(include_tombstones=False)
+        if not entries:
+            return []
+        with self._connect_initialized() as db:
+            missing: list[dict[str, Any]] = []
+            for entry in entries:
+                target = {
+                    "entry_type": entry["entry_type"],
+                    "tmdb_id": entry["tmdb_id"],
+                    "parent_series_id": entry.get("parent_series_id"),
+                    "season_number": entry.get("season_number"),
+                }
+                if not _metadata_summary_exists(db, target):
+                    missing.append(target)
+        return _dedupe_summary_targets(missing)
+
+    def metadata_summary_status(self) -> dict[str, int | bool]:
+        entries = self.list_entries(include_tombstones=False)
+        if not entries:
+            return {
+                "tracked_entries": 0,
+                "hydrated_entries": 0,
+                "missing_entries": 0,
+                "ready": True,
+            }
+
+        tracked = self.metadata_summary_targets_for_entries(entries)
+        missing = self.missing_metadata_summary_targets()
+        tracked_count = len(tracked)
+        missing_count = len(missing)
+        return {
+            "tracked_entries": tracked_count,
+            "hydrated_entries": tracked_count - missing_count,
+            "missing_entries": missing_count,
+            "ready": missing_count == 0,
+        }
+
+    def attach_metadata_summary(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if not entries:
+            return []
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT metadata_json
+                FROM tmdb_metadata_summary
+                WHERE metadata_key IN ({_placeholders(entries)})
+                AND language = ''
+                """,
+                _metadata_lookup_params(entries),
+            ).fetchall()
+        metadata_by_key: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            metadata = _metadata_row(row)
+            metadata_by_key[_metadata_key_from_summary(metadata)] = metadata
+        attached: list[dict[str, Any]] = []
+        for entry in entries:
+            clone = dict(entry)
+            attached_metadata = metadata_by_key.get(_metadata_key_from_entry(entry))
+            clone["metadata"] = attached_metadata
+            attached.append(clone)
+        return attached
 
     def _connect(self) -> sqlite3.Connection:
         db = sqlite3.connect(self.path)
@@ -251,6 +499,8 @@ def _initialize_schema(db: sqlite3.Connection) -> None:
     )
     db.execute(_entries_table_sql("library_entries"))
     _create_entries_indexes(db, "library_entries", "idx_library_entries")
+    db.execute(_metadata_summary_table_sql())
+    _create_metadata_summary_indexes(db)
     _write_meta(db, "schema_version", CACHE_SCHEMA_VERSION)
 
 
@@ -260,16 +510,13 @@ def _create_entries_indexes(db: sqlite3.Connection, table: str, prefix: str) -> 
         f"ON {table}(kind, date_saved DESC, identity ASC)"
     )
     db.execute(
-        f"CREATE INDEX IF NOT EXISTS {prefix}_tmdb_lookup "
-        f"ON {table}(kind, entry_type, tmdb_id)"
+        f"CREATE INDEX IF NOT EXISTS {prefix}_tmdb_lookup ON {table}(kind, entry_type, tmdb_id)"
     )
     db.execute(
         f"CREATE INDEX IF NOT EXISTS {prefix}_parent_series_lookup "
         f"ON {table}(kind, entry_type, parent_series_id)"
     )
-    db.execute(
-        f"CREATE INDEX IF NOT EXISTS {prefix}_kind_deleted_at ON {table}(kind, deleted_at)"
-    )
+    db.execute(f"CREATE INDEX IF NOT EXISTS {prefix}_kind_deleted_at ON {table}(kind, deleted_at)")
 
 
 def _entries_table_sql(table: str) -> str:
@@ -302,6 +549,54 @@ def _entries_table_sql(table: str) -> str:
             cached_at TEXT NOT NULL
         )
     """
+
+
+def _metadata_summary_table_sql() -> str:
+    return """
+        CREATE TABLE IF NOT EXISTS tmdb_metadata_summary (
+            metadata_key TEXT NOT NULL,
+            entry_type TEXT NOT NULL,
+            tmdb_id INTEGER NOT NULL,
+            parent_series_id INTEGER,
+            season_number INTEGER,
+            language TEXT NOT NULL,
+            name TEXT,
+            name_translations_json TEXT NOT NULL,
+            original_name TEXT,
+            overview TEXT,
+            overview_translations_json TEXT NOT NULL,
+            poster_path TEXT,
+            backdrop_path TEXT,
+            logo_path TEXT,
+            original_language_code TEXT,
+            on_air_date TEXT,
+            link_to_details TEXT,
+            fetched_at TEXT NOT NULL,
+            source_version TEXT NOT NULL,
+            metadata_json TEXT NOT NULL,
+            PRIMARY KEY(metadata_key, language)
+        )
+    """
+
+
+def _create_metadata_summary_indexes(db: sqlite3.Connection) -> None:
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tmdb_metadata_summary_fetched "
+        "ON tmdb_metadata_summary(fetched_at)"
+    )
+
+
+def _list_order_by(sort: str) -> str:
+    if sort == "saved":
+        return "ORDER BY date_saved DESC NULLS LAST, identity ASC"
+    if sort == "updated":
+        return (
+            "ORDER BY COALESCE(tracking_updated_at, library_updated_at, date_saved) "
+            "DESC NULLS LAST, identity ASC"
+        )
+    if sort == "title":
+        return "ORDER BY identity ASC"
+    raise LibraryCacheError(f"Unsupported library list sort: {sort}.")
 
 
 def _write_scope_metadata(db: sqlite3.Connection, scope: LibraryCacheScope) -> None:
@@ -359,6 +654,42 @@ def _apply_record(db: sqlite3.Connection, table: str, record: dict[str, Any]) ->
 
     decoded = decode_library_entry_record(record)
     _upsert_decoded_entry(db, table, decoded, record)
+
+
+def _summary_target_from_record(
+    db: sqlite3.Connection,
+    table: str,
+    record: dict[str, Any],
+) -> dict[str, Any] | None:
+    if _record_deleted(record):
+        return None
+    decoded = decode_library_entry_record(record)
+    if decoded.get("kind") != "snapshot":
+        return None
+    if _entry_exists(db, table, str(decoded["identity"])):
+        return None
+    return {
+        "entry_type": decoded["entry_type"],
+        "tmdb_id": decoded["tmdb_id"],
+        "parent_series_id": decoded.get("parent_series_id"),
+        "season_number": decoded.get("season_number"),
+    }
+
+
+def _entry_exists(db: sqlite3.Connection, table: str, identity: str) -> bool:
+    row = db.execute(f"SELECT 1 FROM {table} WHERE identity = ?", (identity,)).fetchone()
+    return row is not None
+
+
+def _metadata_summary_exists(db: sqlite3.Connection, target: dict[str, Any]) -> bool:
+    row = db.execute(
+        """
+        SELECT 1 FROM tmdb_metadata_summary
+        WHERE metadata_key = ? AND language = ''
+        """,
+        (_metadata_key_from_entry(target),),
+    ).fetchone()
+    return row is not None
 
 
 def _upsert_decoded_entry(
@@ -547,12 +878,193 @@ def _decoded_row(row: sqlite3.Row) -> dict[str, Any]:
     return value
 
 
-def _placeholders(values: set[int]) -> str:
+def _metadata_row(row: sqlite3.Row) -> dict[str, Any]:
+    value = json.loads(str(row["metadata_json"]))
+    if not isinstance(value, dict):
+        raise LibraryCacheError("Cached TMDb metadata summary is corrupt.")
+    return value
+
+
+def _upsert_metadata_summary(db: sqlite3.Connection, summary: dict[str, Any]) -> None:
+    metadata = dict(summary)
+    metadata.setdefault("fetched_at", _now_iso())
+    metadata.setdefault("source_version", TMDB_SUMMARY_SOURCE_VERSION)
+    db.execute(
+        """
+        INSERT INTO tmdb_metadata_summary (
+            metadata_key,
+            entry_type,
+            tmdb_id,
+            parent_series_id,
+            season_number,
+            language,
+            name,
+            name_translations_json,
+            original_name,
+            overview,
+            overview_translations_json,
+            poster_path,
+            backdrop_path,
+            logo_path,
+            original_language_code,
+            on_air_date,
+            link_to_details,
+            fetched_at,
+            source_version,
+            metadata_json
+        )
+        VALUES (
+            :metadata_key,
+            :entry_type,
+            :tmdb_id,
+            :parent_series_id,
+            :season_number,
+            :language,
+            :name,
+            :name_translations_json,
+            :original_name,
+            :overview,
+            :overview_translations_json,
+            :poster_path,
+            :backdrop_path,
+            :logo_path,
+            :original_language_code,
+            :on_air_date,
+            :link_to_details,
+            :fetched_at,
+            :source_version,
+            :metadata_json
+        )
+        ON CONFLICT(metadata_key, language) DO UPDATE SET
+            language = excluded.language,
+            name = excluded.name,
+            name_translations_json = excluded.name_translations_json,
+            original_name = excluded.original_name,
+            overview = excluded.overview,
+            overview_translations_json = excluded.overview_translations_json,
+            poster_path = excluded.poster_path,
+            backdrop_path = excluded.backdrop_path,
+            logo_path = excluded.logo_path,
+            original_language_code = excluded.original_language_code,
+            on_air_date = excluded.on_air_date,
+            link_to_details = excluded.link_to_details,
+            fetched_at = excluded.fetched_at,
+            source_version = excluded.source_version,
+            metadata_json = excluded.metadata_json
+        """,
+        _metadata_summary_params(metadata),
+    )
+
+
+def _metadata_summary_params(summary: dict[str, Any]) -> dict[str, Any]:
+    metadata_json = _metadata_json(summary)
+    return {
+        "metadata_key": _metadata_key_from_entry(summary),
+        "entry_type": summary["entry_type"],
+        "tmdb_id": summary["tmdb_id"],
+        "parent_series_id": summary.get("parent_series_id"),
+        "season_number": summary.get("season_number"),
+        "language": summary.get("language") or "",
+        "name": summary.get("name"),
+        "name_translations_json": json.dumps(
+            summary.get("name_translations") or {},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        "original_name": summary.get("original_name"),
+        "overview": summary.get("overview"),
+        "overview_translations_json": json.dumps(
+            summary.get("overview_translations") or {},
+            sort_keys=True,
+            separators=(",", ":"),
+        ),
+        "poster_path": summary.get("poster_path"),
+        "backdrop_path": summary.get("backdrop_path"),
+        "logo_path": summary.get("logo_path"),
+        "original_language_code": summary.get("original_language_code"),
+        "on_air_date": summary.get("on_air_date"),
+        "link_to_details": summary.get("link_to_details"),
+        "fetched_at": summary["fetched_at"],
+        "source_version": summary["source_version"],
+        "metadata_json": metadata_json,
+    }
+
+
+def _metadata_json(summary: dict[str, Any]) -> str:
+    metadata = {
+        "entry_type": summary["entry_type"],
+        "tmdb_id": summary["tmdb_id"],
+        "parent_series_id": summary.get("parent_series_id"),
+        "season_number": summary.get("season_number"),
+        "language": summary.get("language") or None,
+        "name": summary.get("name"),
+        "name_translations": summary.get("name_translations") or {},
+        "original_name": summary.get("original_name"),
+        "overview": summary.get("overview"),
+        "overview_translations": summary.get("overview_translations") or {},
+        "poster_path": summary.get("poster_path"),
+        "backdrop_path": summary.get("backdrop_path"),
+        "logo_path": summary.get("logo_path"),
+        "original_language_code": summary.get("original_language_code"),
+        "on_air_date": summary.get("on_air_date"),
+        "link_to_details": summary.get("link_to_details"),
+        "fetched_at": summary["fetched_at"],
+        "source_version": summary["source_version"],
+    }
+    return json.dumps(metadata, sort_keys=True, separators=(",", ":"))
+
+
+def _placeholders(values: set[int] | list[str] | list[dict[str, Any]]) -> str:
     return ", ".join("?" for _ in values)
+
+
+def _metadata_lookup_params(entries: list[dict[str, Any]]) -> list[Any]:
+    return [_metadata_key_from_entry(entry) for entry in entries]
+
+
+def _dedupe_summary_targets(targets: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for target in targets:
+        key = _metadata_key_from_entry(target)
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(target)
+    return deduped
+
+
+def _metadata_key_from_summary(summary: dict[str, Any]) -> str:
+    return _metadata_key_from_entry(summary)
+
+
+def _metadata_key_from_entry(entry: dict[str, Any]) -> str:
+    entry_type = str(entry["entry_type"])
+    tmdb_id = int(entry["tmdb_id"])
+    if entry_type == "season":
+        parent_series_id = entry.get("parent_series_id")
+        season_number = entry.get("season_number")
+        if parent_series_id is None or season_number is None:
+            raise LibraryCacheError("Season metadata is missing parent series context.")
+        return f"season:{int(parent_series_id)}:{int(season_number)}:{tmdb_id}"
+    return f"{entry_type}:{tmdb_id}"
 
 
 def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
+
+
+def _remove_matching_files(root: Path, pattern: str) -> int:
+    if not root.exists():
+        return 0
+    removed = 0
+    for path in root.glob(pattern):
+        try:
+            os.remove(path)
+        except FileNotFoundError:
+            continue
+        removed += 1
+    return removed
 
 
 def _now_iso() -> str:
