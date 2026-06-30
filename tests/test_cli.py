@@ -14,6 +14,12 @@ from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
+from anishelf_cli.tmdb.client import (
+    TMDbRequestError,
+    TMDbTitleSearchMatch,
+    TMDbTitleSearchQuery,
+    TMDbTitleSearchResult,
+)
 
 runner = CliRunner()
 
@@ -78,6 +84,14 @@ def test_root_help_hides_non_user_command_groups() -> None:
     assert result.exit_code == 0
     for command in ("zones", "records", "changes", "settings", "schema"):
         assert command not in result.stdout
+
+
+def test_root_help_lists_lib_alias() -> None:
+    result = runner.invoke(app, ["--help"])
+
+    assert result.exit_code == 0
+    assert "library" in result.stdout
+    assert "lib" in result.stdout
 
 
 def test_non_user_command_groups_are_removed() -> None:
@@ -184,6 +198,15 @@ def test_library_help_lists_refresh_meta_and_not_changes() -> None:
     assert "changes" not in result.stdout
 
 
+def test_lib_alias_shows_library_commands() -> None:
+    result = runner.invoke(app, ["lib", "--help"])
+
+    assert result.exit_code == 0
+    assert "AniShelf library commands." in result.stdout
+    assert "get" in result.stdout
+    assert "refresh-meta" in result.stdout
+
+
 def test_library_refresh_meta_help_mentions_json() -> None:
     result = runner.invoke(app, ["library", "refresh-meta", "--help"])
 
@@ -210,6 +233,16 @@ def test_library_export_help_mentions_sync() -> None:
 
     assert result.exit_code == 0
     assert "--sync" in result.stdout
+
+
+def test_tmdb_search_help_mentions_title_and_json() -> None:
+    result = runner.invoke(app, ["tmdb", "search", "--help"])
+
+    assert result.exit_code == 0
+    assert "--title" in result.stdout
+    assert "--type" in result.stdout
+    assert "--year" in result.stdout
+    assert "--json" in result.stdout
 
 
 def test_library_init_help_mentions_json() -> None:
@@ -413,6 +446,294 @@ def test_config_has_no_tmdb_token_command() -> None:
 
     assert result.exit_code == 2
     assert "No such command" in result.stderr
+
+
+def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
+            return TMDbTitleSearchResult(
+                movies=(
+                    TMDbTitleSearchMatch(
+                        entry_type="movie",
+                        tmdb_id=55,
+                        title="Alien",
+                        original_title="Alien",
+                        release_date="1979-05-25",
+                        original_language_code="en",
+                        overview="A space horror film.",
+                        poster_path="/poster.jpg",
+                        details_url="https://www.themoviedb.org/movie/55",
+                    ),
+                ),
+                series=(
+                    TMDbTitleSearchMatch(
+                        entry_type="series",
+                        tmdb_id=95,
+                        title="Alien Nation",
+                        original_title="Alien Nation",
+                        release_date="1989-09-18",
+                        original_language_code="en",
+                        overview="A sci-fi police series.",
+                        poster_path="/series.jpg",
+                        details_url="https://www.themoviedb.org/tv/95",
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "query": {"mode": "search", "title": "Alien", "type": "all"},
+        "results": {
+            "movies": [
+                {
+                    "details_url": "https://www.themoviedb.org/movie/55",
+                    "entry_type": "movie",
+                    "original_language_code": "en",
+                    "original_title": "Alien",
+                    "overview": "A space horror film.",
+                    "poster_path": "/poster.jpg",
+                    "release_date": "1979-05-25",
+                    "title": "Alien",
+                    "tmdb_id": 55,
+                }
+            ],
+            "series": [
+                {
+                    "details_url": "https://www.themoviedb.org/tv/95",
+                    "entry_type": "series",
+                    "original_language_code": "en",
+                    "original_title": "Alien Nation",
+                    "overview": "A sci-fi police series.",
+                    "poster_path": "/series.jpg",
+                    "release_date": "1989-09-18",
+                    "title": "Alien Nation",
+                    "tmdb_id": 95,
+                }
+            ],
+        },
+        "summary": {"movies": 1, "series": 1, "total": 2},
+    }
+
+
+def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
+            return TMDbTitleSearchResult(
+                movies=(
+                    TMDbTitleSearchMatch(
+                        entry_type="movie",
+                        tmdb_id=55,
+                        title="Alien",
+                        original_title="Alien",
+                        release_date="1979-05-25",
+                        original_language_code="en",
+                        overview="A space horror film.",
+                        poster_path="/poster.jpg",
+                        details_url="https://www.themoviedb.org/movie/55",
+                    ),
+                ),
+                series=(),
+            )
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["--json", "tmdb", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "query": {"mode": "search", "title": "Alien", "type": "all"},
+        "results": {
+            "movies": [
+                {
+                    "details_url": "https://www.themoviedb.org/movie/55",
+                    "entry_type": "movie",
+                    "original_language_code": "en",
+                    "original_title": "Alien",
+                    "overview": "A space horror film.",
+                    "poster_path": "/poster.jpg",
+                    "release_date": "1979-05-25",
+                    "title": "Alien",
+                    "tmdb_id": 55,
+                }
+            ],
+            "series": [],
+        },
+        "summary": {"movies": 1, "series": 0, "total": 1},
+    }
+
+
+def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
+            return TMDbTitleSearchResult(
+                movies=(
+                    TMDbTitleSearchMatch(
+                        entry_type="movie",
+                        tmdb_id=55,
+                        title="Alien",
+                        original_title="Alien",
+                        release_date="1979-05-25",
+                        original_language_code="en",
+                        overview="A space horror film.",
+                        poster_path="/poster.jpg",
+                        details_url="https://www.themoviedb.org/movie/55",
+                    ),
+                ),
+                series=(),
+            )
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0
+    assert "TMDb search\n" in result.stdout
+    assert "  Mode    search\n" in result.stdout
+    assert "  Query   Alien\n" in result.stdout
+    assert "\nMovies\n" in result.stdout
+    assert "TMDb ID" in result.stdout
+    assert "Alien" in result.stdout
+    assert "1979-05-25" in result.stdout
+
+
+def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title=None, year=None, entry_type="all")
+            return TMDbTitleSearchResult(
+                movies=(),
+                series=(
+                    TMDbTitleSearchMatch(
+                        entry_type="series",
+                        tmdb_id=1399,
+                        title="Game of Thrones",
+                        original_title="Game of Thrones",
+                        release_date="2011-04-17",
+                        original_language_code="en",
+                        overview="Noble families fight for control.",
+                        poster_path="/got.jpg",
+                        details_url="https://www.themoviedb.org/tv/1399",
+                    ),
+                ),
+            )
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"mode": "discover", "type": "all"}
+    assert payload["summary"] == {"movies": 0, "series": 1, "total": 1}
+    assert payload["results"]["movies"] == []
+    assert payload["results"]["series"][0]["tmdb_id"] == 1399
+
+
+def test_tmdb_search_treats_whitespace_title_as_discover_query(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title=None, year=None, entry_type="all")
+            return TMDbTitleSearchResult(movies=(), series=())
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "   ", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"mode": "discover", "type": "all"}
+    assert payload["summary"] == {"movies": 0, "series": 0, "total": 0}
+
+
+def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title=None, year=1979, entry_type="movie")
+            return TMDbTitleSearchResult(
+                movies=(
+                    TMDbTitleSearchMatch(
+                        entry_type="movie",
+                        tmdb_id=55,
+                        title="Alien",
+                        original_title="Alien",
+                        release_date="1979-05-25",
+                        original_language_code="en",
+                        overview="A space horror film.",
+                        poster_path="/poster.jpg",
+                        details_url="https://www.themoviedb.org/movie/55",
+                    ),
+                ),
+                series=(),
+            )
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--type", "movie", "--year", "1979", "--json"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"mode": "discover", "type": "movie", "year": 1979}
+    assert payload["summary"] == {"movies": 1, "series": 0, "total": 1}
+    assert payload["results"]["movies"][0]["tmdb_id"] == 55
+    assert payload["results"]["series"] == []
+
+
+def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
+            return TMDbTitleSearchResult(movies=(), series=())
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0
+    assert "TMDb search\n" in result.stdout
+    assert "  Mode    search\n" in result.stdout
+    assert "  Query   Alien\n" in result.stdout
+    assert "  Movies  0\n" in result.stdout
+    assert "  Series  0\n" in result.stdout
+    assert "No TMDb titles matched the query." in result.stdout
+
+
+def test_tmdb_search_requires_configured_tmdb_api_key(monkeypatch) -> None:
+    monkeypatch.delenv("ANI_TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.setattr(groups, "default_secret_store", lambda: MemorySecretStore())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "TMDb API key is not configured." in result.stderr
+    assert "ANI_TMDB_API_KEY" in result.stderr
+    assert "TMDB_API_KEY" in result.stderr
+    assert "config set-tmdb-api-key" in result.stderr
+
+
+def test_tmdb_search_reports_request_errors(monkeypatch) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            _ = query
+            raise TMDbRequestError("TMDb title search failed.")
+
+    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "TMDb title search failed." in result.stderr
 
 
 def test_config_has_no_cloudkit_api_token_storage_command() -> None:

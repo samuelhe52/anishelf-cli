@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
+from enum import StrEnum
 from typing import Annotated
 
 import httpx
@@ -19,7 +20,7 @@ from anishelf_cli.cache.sync import (
     LibraryCacheSync,
     fetch_metadata_summaries,
 )
-from anishelf_cli.cli.common import json_output_requested, state_from_context
+from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
 from anishelf_cli.core.output import (
@@ -29,7 +30,6 @@ from anishelf_cli.core.output import (
     emit_error,
     emit_human_blocks,
     emit_json,
-    emit_placeholder,
 )
 from anishelf_cli.library import (
     LibraryRecordDecodeError,
@@ -45,7 +45,13 @@ from anishelf_cli.secrets import (
     set_secret,
     tmdb_api_key_secret,
 )
-from anishelf_cli.tmdb.client import TMDbClient
+from anishelf_cli.tmdb.client import (
+    TMDbClient,
+    TMDbRequestError,
+    TMDbTitleSearchMatch,
+    TMDbTitleSearchQuery,
+    TMDbTitleSearchResult,
+)
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 config_app = typer.Typer(
@@ -64,6 +70,12 @@ tmdb_app = typer.Typer(
     rich_markup_mode=None,
 )
 library_lock_factory = None
+
+
+class TMDbSearchType(StrEnum):
+    ALL = "all"
+    MOVIE = "movie"
+    SERIES = "series"
 
 MetadataOption = Annotated[
     MetadataDepth | None,
@@ -1203,10 +1215,171 @@ def _emit_library_export_human(payload: dict[str, object]) -> None:
     )
 
 
-@tmdb_app.command("search")
+@tmdb_app.command(
+    "search",
+    help="Search TMDb by title, or discover popular titles when no title is given.",
+)
 def tmdb_search(
     ctx: typer.Context,
-    title: Annotated[str, typer.Option("--title")],
+    title: Annotated[
+        str | None,
+        typer.Option(
+            "--title",
+            help="Optional title query. When omitted, discover popular titles instead.",
+        ),
+    ] = None,
+    year: Annotated[
+        int | None,
+        typer.Option("--year", min=1888, help="Filter to a release or first-air year."),
+    ] = None,
+    entry_type: Annotated[
+        TMDbSearchType,
+        typer.Option(
+            "--type",
+            "--entry-type",
+            help="Limit results to movies, series, or both.",
+            show_default=True,
+        ),
+    ] = TMDbSearchType.ALL,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
 ) -> None:
-    _ = title
-    emit_placeholder(state_from_context(ctx), "tmdb search")
+    query = TMDbTitleSearchQuery(
+        title=_normalized_tmdb_title(title),
+        year=year,
+        entry_type=entry_type.value,
+    )
+    try:
+        result = _tmdb_summary_client_or_exit().search_titles(query)
+    except TMDbRequestError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+    payload = _tmdb_search_payload(query, result)
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+
+    _emit_tmdb_search_human(query, result)
+
+
+def _tmdb_search_payload(
+    query: TMDbTitleSearchQuery,
+    result: TMDbTitleSearchResult,
+) -> dict[str, object]:
+    movies = [_tmdb_search_match_payload(match) for match in result.movies]
+    series = [_tmdb_search_match_payload(match) for match in result.series]
+    query_payload: dict[str, object] = {
+        "mode": query.mode,
+        "type": query.entry_type,
+    }
+    if query.title is not None:
+        query_payload["title"] = query.title
+    if query.year is not None:
+        query_payload["year"] = query.year
+    return {
+        "query": query_payload,
+        "summary": {
+            "movies": len(movies),
+            "series": len(series),
+            "total": len(movies) + len(series),
+        },
+        "results": {
+            "movies": movies,
+            "series": series,
+        },
+    }
+
+
+def _tmdb_search_match_payload(match: TMDbTitleSearchMatch) -> dict[str, object]:
+    return {
+        "entry_type": match.entry_type,
+        "tmdb_id": match.tmdb_id,
+        "title": match.title,
+        "original_title": match.original_title,
+        "release_date": match.release_date,
+        "original_language_code": match.original_language_code,
+        "overview": match.overview,
+        "poster_path": match.poster_path,
+        "details_url": match.details_url,
+    }
+
+
+def _emit_tmdb_search_human(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResult) -> None:
+    summary_rows: list[tuple[str, object | None]] = [
+        ("Mode", query.mode),
+    ]
+    if query.title is not None:
+        summary_rows.append(("Query", query.title))
+    if query.entry_type != TMDbSearchType.ALL.value:
+        summary_rows.append(("Type", query.entry_type))
+    if query.year is not None:
+        summary_rows.append(("Year", query.year))
+    summary_rows.extend(
+        [
+            ("Movies", len(result.movies)),
+            ("Series", len(result.series)),
+            ("Total", len(result.movies) + len(result.series)),
+        ]
+    )
+    blocks: list[HumanSection | HumanTable] = [
+        HumanSection(
+            "TMDb search",
+            tuple(summary_rows),
+        )
+    ]
+
+    if result.movies:
+        blocks.append(_tmdb_search_table("Movies", result.movies))
+    if result.series:
+        blocks.append(_tmdb_search_table("Series", result.series))
+    if not result.movies and not result.series:
+        blocks.append(
+            HumanTable(
+                "Results",
+                (
+                    HumanTableColumn("tmdb_id", "TMDb ID", "right"),
+                    HumanTableColumn("title", "Title"),
+                    HumanTableColumn("release_date", "Date"),
+                    HumanTableColumn("original_language_code", "Lang"),
+                ),
+                (),
+                empty_message="No TMDb titles matched the query.",
+            )
+        )
+
+    emit_human_blocks(blocks)
+
+
+def _tmdb_search_table(
+    title: str,
+    matches: tuple[TMDbTitleSearchMatch, ...],
+) -> HumanTable:
+    return HumanTable(
+        title,
+        (
+            HumanTableColumn("tmdb_id", "TMDb ID", "right"),
+            HumanTableColumn("title", "Title"),
+            HumanTableColumn("release_date", "Date"),
+            HumanTableColumn("original_language_code", "Lang"),
+        ),
+        [_human_tmdb_search_row(match) for match in matches],
+    )
+
+
+def _human_tmdb_search_row(match: TMDbTitleSearchMatch) -> dict[str, object]:
+    return {
+        "tmdb_id": match.tmdb_id,
+        "title": match.title or match.original_title or f"{match.entry_type}:{match.tmdb_id}",
+        "release_date": _compact_date(match.release_date),
+        "original_language_code": match.original_language_code,
+    }
+
+
+def _normalized_tmdb_title(title: str | None) -> str | None:
+    if title is None:
+        return None
+    normalized = title.strip()
+    return normalized or None

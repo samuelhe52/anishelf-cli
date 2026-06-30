@@ -13,8 +13,40 @@ class TMDbRequestError(RuntimeError):
 
 @dataclass(frozen=True, slots=True)
 class TMDbTitleSearchResult:
-    movie_ids: set[int]
-    series_ids: set[int]
+    movies: tuple[TMDbTitleSearchMatch, ...]
+    series: tuple[TMDbTitleSearchMatch, ...]
+
+    @property
+    def movie_ids(self) -> set[int]:
+        return {match.tmdb_id for match in self.movies}
+
+    @property
+    def series_ids(self) -> set[int]:
+        return {match.tmdb_id for match in self.series}
+
+
+@dataclass(frozen=True, slots=True)
+class TMDbTitleSearchQuery:
+    title: str | None = None
+    year: int | None = None
+    entry_type: str = "all"
+
+    @property
+    def mode(self) -> str:
+        return "search" if self.title else "discover"
+
+
+@dataclass(frozen=True, slots=True)
+class TMDbTitleSearchMatch:
+    entry_type: str
+    tmdb_id: int
+    title: str | None
+    original_title: str | None
+    release_date: str | None
+    original_language_code: str | None
+    overview: str | None
+    poster_path: str | None
+    details_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,15 +65,20 @@ class TMDbClient:
     client: httpx.Client = field(default_factory=httpx.Client, repr=False)
 
     def search_title(self, title: str) -> TMDbTitleSearchResult:
+        return self.search_titles(TMDbTitleSearchQuery(title=title))
+
+    def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
         try:
-            movie_payload = self._get("search/movie", params={"query": title})
-            tv_payload = self._get("search/tv", params={"query": title})
+            movie_payload = self._movie_search_payload(query)
+            tv_payload = self._series_search_payload(query)
         except Exception as exc:
-            raise TMDbRequestError("TMDb title search failed.") from exc
+            if query.mode == "search":
+                raise TMDbRequestError("TMDb title search failed.") from exc
+            raise TMDbRequestError("TMDb discovery request failed.") from exc
 
         return TMDbTitleSearchResult(
-            movie_ids=_result_ids(movie_payload),
-            series_ids=_result_ids(tv_payload),
+            movies=_title_search_matches("movie", movie_payload),
+            series=_title_search_matches("series", tv_payload),
         )
 
     def fetch_summary(self, identity: TMDbSummaryIdentity) -> dict[str, Any]:
@@ -100,20 +137,57 @@ class TMDbClient:
 
         raise TMDbRequestError("TMDb request failed.") from last_error
 
+    def _movie_search_payload(self, query: TMDbTitleSearchQuery) -> dict[str, Any]:
+        if query.entry_type == "series":
+            return {"results": []}
+        if query.mode == "search":
+            return self._get("search/movie", params=_movie_search_params(query))
+        return self._get("discover/movie", params=_movie_discover_params(query))
 
-def _result_ids(payload: dict[str, Any]) -> set[int]:
+    def _series_search_payload(self, query: TMDbTitleSearchQuery) -> dict[str, Any]:
+        if query.entry_type == "movie":
+            return {"results": []}
+        if query.mode == "search":
+            return self._get("search/tv", params=_series_search_params(query))
+        return self._get("discover/tv", params=_series_discover_params(query))
+
+
+def _title_search_matches(
+    entry_type: str,
+    payload: dict[str, Any],
+) -> tuple[TMDbTitleSearchMatch, ...]:
     results = payload.get("results")
     if not isinstance(results, list):
-        return set()
+        return ()
 
-    ids: set[int] = set()
+    matches: list[TMDbTitleSearchMatch] = []
     for item in results:
         if not isinstance(item, dict):
             continue
         raw_id = item.get("id")
-        if isinstance(raw_id, int) and not isinstance(raw_id, bool):
-            ids.add(raw_id)
-    return ids
+        if not isinstance(raw_id, int) or isinstance(raw_id, bool):
+            continue
+        matches.append(
+            TMDbTitleSearchMatch(
+                entry_type=entry_type,
+                tmdb_id=raw_id,
+                title=_optional_string(item.get("title")) or _optional_string(item.get("name")),
+                original_title=_optional_string(item.get("original_title"))
+                or _optional_string(item.get("original_name")),
+                release_date=_optional_string(item.get("release_date"))
+                or _optional_string(item.get("first_air_date")),
+                original_language_code=_optional_string(item.get("original_language")),
+                overview=_optional_string(item.get("overview")),
+                poster_path=_optional_string(item.get("poster_path")),
+                details_url=_details_link(
+                    TMDbSummaryIdentity(
+                        entry_type=entry_type,
+                        tmdb_id=raw_id,
+                    )
+                ),
+            )
+        )
+    return tuple(matches)
 
 
 def _summary_payload(identity: TMDbSummaryIdentity, payload: dict[str, Any]) -> dict[str, Any]:
@@ -161,5 +235,34 @@ def _optional_string(value: object) -> str | None:
     return value if isinstance(value, str) and value else None
 
 
+
 def _retryable_status(status_code: int) -> bool:
     return status_code == 429 or 500 <= status_code <= 599
+
+
+def _movie_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
+    params = {"query": query.title or ""}
+    if query.year is not None:
+        params["primary_release_year"] = str(query.year)
+    return params
+
+
+def _series_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
+    params = {"query": query.title or ""}
+    if query.year is not None:
+        params["first_air_date_year"] = str(query.year)
+    return params
+
+
+def _movie_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
+    params = {"sort_by": "popularity.desc"}
+    if query.year is not None:
+        params["primary_release_year"] = str(query.year)
+    return params
+
+
+def _series_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
+    params = {"sort_by": "popularity.desc"}
+    if query.year is not None:
+        params["first_air_date_year"] = str(query.year)
+    return params

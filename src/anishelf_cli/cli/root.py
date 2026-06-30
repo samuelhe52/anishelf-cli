@@ -343,4 +343,5 @@ def _emit_auth_status_human(current_user: CurrentUser) -> None:
 app.add_typer(auth_app, name="auth")
 app.add_typer(groups.config_app, name="config")
 app.add_typer(groups.library_app, name="library")
+app.add_typer(groups.library_app, name="lib")
 app.add_typer(groups.tmdb_app, name="tmdb")
