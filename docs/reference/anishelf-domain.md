@@ -54,10 +54,11 @@ include:
 - `library sync`
 - `library status`
 - `library clear-cache`
+- `library refresh-meta`
 - `library get <identity...> [--live-meta] [--metadata[=none|summary|details|full]]`
-- `library list [--refresh-meta] [--metadata[=none|summary|details|full]]`
+- `library list [--metadata[=none|summary|details|full]]`
 - `library search --title` with optional `--metadata`
-- `library export [--refresh-meta]` with optional `--metadata`
+- `library export` with optional `--metadata`
 - `tmdb search --title`
 
 `library init` is the explicit bootstrap entry point for the local cache.
@@ -68,6 +69,8 @@ init has been run.
 cached scopes exist, including TMDb summary metadata readiness.
 `library clear-cache` should explicitly clear all local library cache files
 after confirmation.
+`library refresh-meta` should explicitly refresh cached TMDb summary metadata
+for the full local library.
 Tombstones are an internal sync concern and should not appear in public entry
 counts or library list/export output.
 
@@ -106,5 +109,8 @@ first implemented metadata-enrichment path.
 
 `library init` should fetch the full library and hydrate TMDb summary metadata
 for every entry when a TMDb key is available. After that initialization pass,
-`library sync` should hydrate every newly added entry unless the user explicitly
-requests `--refresh-meta` or `--live-meta`.
+`library sync` should hydrate every newly added entry automatically.
+`library refresh-meta` should refetch TMDb summary metadata for the full local
+cache on demand. `library get --live-meta` should refetch TMDb summary metadata
+only for the requested entries and update the cache without broad library
+refresh.

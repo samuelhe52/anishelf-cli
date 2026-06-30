@@ -18,6 +18,7 @@ from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
+from anishelf_cli.tmdb.tokens import TMDbAPIToken
 
 runner = CliRunner()
 
@@ -310,6 +311,53 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
     assert payload["items"][0]["entry"]["identity"] == "movie:55"
     assert requests == []
+
+
+def test_library_get_live_meta_refreshes_only_requested_entries(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[
+                _live_record("movie:55", "movie", 55),
+                _live_record("series:22", "series", 22),
+            ],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    requested: list[tuple[str, int]] = []
+    monkeypatch.setattr(
+        groups,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> dict[str, Any]:
+            requested.append((identity.entry_type, identity.tmdb_id))
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
+
+    monkeypatch.setattr(groups, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55", "--live-meta"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert requested == [("movie", 55)]
+    assert payload["items"][0]["entry"]["metadata"]["name"] == "Alien"
+    other_entry = store.attach_metadata_summary(
+        store.get_entries_by_identity(["series:22"]).values()
+    )[0]
+    assert other_entry["metadata"] is None
 
 
 def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monkeypatch) -> None:

@@ -6,9 +6,8 @@ Read-only AniShelf library inspection CLI.
 
 The CLI implements CloudKit auth, effective configuration display, direct
 library entry lookup, and cached library list/search/export. Some surfaces, such
-as low-level diagnostics, metadata hydration depth, `library changes`, and
-top-level `tmdb search`, are still placeholders while implementation continues
-in small vertical slices.
+as low-level diagnostics, metadata hydration depth, and top-level `tmdb search`,
+are still placeholders while implementation continues in small vertical slices.
 
 ## Tooling
 
@@ -83,9 +82,10 @@ identity. Use `tmdb search` for global TMDb discovery.
 uv run ani library search --title "Alien" --json | jq '.entries[].identity'
 ```
 
-Use `--refresh-meta` on `library list`, `library search`, or `library export`
-to refetch TMDb summary metadata for the current result set. Use `--live-meta`
-on `library get` to refetch TMDb summary metadata for the requested entries.
+Use `ani library refresh-meta` to refetch TMDb summary metadata for the full
+local library cache. Use `--live-meta` on `library get` to refetch TMDb summary
+metadata only for the requested entries and write the refreshed summaries back
+to the cache.
 
 Library commands accept optional `--metadata` parsing for future TMDb enrichment.
 Bare `--metadata` selects the default summary level; explicit levels use `none`,

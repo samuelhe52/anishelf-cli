@@ -168,13 +168,26 @@ def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
     assert payload["summary"]["entries"] == 0
 
 
-def test_library_list_help_mentions_refresh_meta_flag() -> None:
+def test_library_list_help_does_not_mention_refresh_meta_flag() -> None:
     result = runner.invoke(app, ["library", "list", "--help"])
 
     assert result.exit_code == 0
-    assert "--refresh-meta" in result.stdout
+    assert "--refresh-meta" not in result.stdout
 
 
+def test_library_help_lists_refresh_meta_and_not_changes() -> None:
+    result = runner.invoke(app, ["library", "--help"])
+
+    assert result.exit_code == 0
+    assert "refresh-meta" in result.stdout
+    assert "changes" not in result.stdout
+
+
+def test_library_refresh_meta_help_mentions_json() -> None:
+    result = runner.invoke(app, ["library", "refresh-meta", "--help"])
+
+    assert result.exit_code == 0
+    assert "--json" in result.stdout
 def test_library_init_help_mentions_json() -> None:
     result = runner.invoke(app, ["library", "init", "--help"])
 
@@ -201,8 +214,6 @@ def test_library_clear_cache_help_mentions_confirmation_bypass() -> None:
 
     assert result.exit_code == 0
     assert "--yes" in result.stdout
-
-
 def test_unknown_command_error_uses_plain_formatting() -> None:
     result = runner.invoke(app, ["auth", "loggg"])
 

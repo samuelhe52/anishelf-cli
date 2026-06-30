@@ -1071,7 +1071,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     assert [entry["identity"] for entry in payload["entries"]] == ["movie:66"]
 
 
-def test_library_list_refresh_metadata_updates_current_result_set(
+def test_library_refresh_meta_updates_full_library_cache(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -1105,17 +1105,20 @@ def test_library_list_refresh_metadata_updates_current_result_set(
 
     result = runner.invoke(
         app,
-        ["--json", "library", "list", "--refresh-meta"],
+        ["--json", "library", "refresh-meta"],
     )
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["metadata"]["refresh"] == {
+    assert payload["summary"]["entries"] == 1
+    assert payload["summary"]["metadata"] == {
         "requested": 1,
         "hydrated": 1,
         "errors": 0,
     }
-    assert payload["entries"][0]["metadata"]["name"] == "Alien"
+    refreshed = store.attach_metadata_summary(store.list_entries())[0]
+    assert refreshed["metadata"]["name"] == "Alien"
+
 
 def test_library_export_attaches_cached_metadata_by_default(
     tmp_path,

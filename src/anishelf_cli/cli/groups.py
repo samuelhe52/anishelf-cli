@@ -587,13 +587,6 @@ def _optional_human_text(value: object) -> object:
 def library_list(
     ctx: typer.Context,
     metadata: MetadataOption = None,
-    refresh_meta: Annotated[
-        bool,
-        typer.Option(
-            "--refresh-meta",
-            help="Refresh cached TMDb summary metadata for the current result set.",
-        ),
-    ] = False,
     watch_status: Annotated[
         str | None,
         typer.Option("--watch-status", help="Filter by watch status."),
@@ -634,7 +627,7 @@ def library_list(
         _require_complete_tmdb_summary_metadata(
             store,
             action="sort library entries by title",
-            hint="Run `ani library list --refresh-meta --metadata none` after configuring a TMDb API key.",
+            hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
         )
     entries = store.list_entries_filtered(
         include_tombstones=False,
@@ -645,15 +638,12 @@ def library_list(
         sort=sort.value,
         limit=None if sort is LibraryListSort.TITLE else limit,
     )
-    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
     entries = _sort_entries_after_metadata(entries, sort)
     if sort is LibraryListSort.TITLE and limit is not None:
         entries = entries[:limit]
     payload = _library_entries_payload(entries, store, None)
     metadata_payload = _metadata_payload(metadata_depth)
-    if metadata_refresh_result is not None:
-        metadata_payload["refresh"] = metadata_refresh_result
     payload["metadata"] = metadata_payload
     payload["filters"] = _library_list_filters_payload(
         watch_status=watch_status,
@@ -674,13 +664,6 @@ def library_search(
     ctx: typer.Context,
     title: Annotated[str, typer.Option("--title")],
     metadata: MetadataOption = None,
-    refresh_meta: Annotated[
-        bool,
-        typer.Option(
-            "--refresh-meta",
-            help="Refresh cached TMDb summary metadata for matched entries.",
-        ),
-    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -692,16 +675,12 @@ def library_search(
     _require_complete_tmdb_summary_metadata(
         store,
         action="search cached library entries by title",
-        hint="Run `ani library list --refresh-meta --metadata none` after configuring a TMDb API key.",
+        hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
     )
     entries = store.search_entries_by_title(title)
-    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
     payload = _library_entries_payload(entries, store, None)
-    metadata_payload = _metadata_payload(metadata_depth)
-    if metadata_refresh_result is not None:
-        metadata_payload["refresh"] = metadata_refresh_result
-    payload["metadata"] = metadata_payload
+    payload["metadata"] = _metadata_payload(metadata_depth)
     payload["query"] = {
         "title": title,
     }
@@ -715,13 +694,6 @@ def library_search(
 def library_export(
     ctx: typer.Context,
     metadata: MetadataOption = None,
-    refresh_meta: Annotated[
-        bool,
-        typer.Option(
-            "--refresh-meta",
-            help="Refresh cached TMDb summary metadata for exported entries.",
-        ),
-    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -731,17 +703,60 @@ def library_export(
     _reject_reserved_metadata_depth(metadata_depth)
     store = _library_store_for_read()
     entries = store.list_entries(include_tombstones=False)
-    metadata_refresh_result = _refresh_metadata_for_entries(store, entries) if refresh_meta else None
     entries = _entries_for_metadata_depth(store, entries, metadata_depth)
     payload = _library_entries_payload(entries, store, None)
-    metadata_payload = _metadata_payload(metadata_depth)
-    if metadata_refresh_result is not None:
-        metadata_payload["refresh"] = metadata_refresh_result
-    payload["metadata"] = metadata_payload
+    payload["metadata"] = _metadata_payload(metadata_depth)
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
     _emit_library_export_human(payload)
+
+
+@library_app.command(
+    "refresh-meta",
+    help="Refresh cached TMDb summary metadata for the local library.",
+)
+def library_refresh_meta(
+    ctx: typer.Context,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    store = _library_store_for_read()
+    entries = store.list_entries(include_tombstones=False)
+    refresh_result = _refresh_metadata_for_entries(store, entries)
+    payload = {
+        "summary": {
+            "entries": len(entries),
+            "metadata": refresh_result,
+            "cache": {
+                "container": store.scope.container,
+                "environment": store.scope.environment,
+                "database": store.scope.database,
+                "zone": store.scope.zone,
+                "user_record_name": store.scope.user_record_name,
+            },
+        }
+    }
+    if json_output_requested(ctx, json_output):
+        emit_json(payload)
+        return
+
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library metadata refresh",
+                (
+                    ("Entries", len(entries)),
+                    ("Requested", refresh_result["requested"]),
+                    ("Hydrated", refresh_result["hydrated"]),
+                    ("Errors", refresh_result["errors"]),
+                    ("User", store.scope.user_record_name),
+                ),
+            )
+        ]
+    )
 
 
 def _library_store_for_read() -> LibraryCacheStore:
@@ -1151,15 +1166,6 @@ def _emit_library_export_human(payload: dict[str, object]) -> None:
             )
         ]
     )
-
-
-@library_app.command("changes")
-def library_changes(
-    ctx: typer.Context,
-    metadata: MetadataOption = None,
-) -> None:
-    _ = metadata
-    emit_placeholder(state_from_context(ctx), "library changes")
 
 
 @tmdb_app.command("search")

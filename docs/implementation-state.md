@@ -41,15 +41,15 @@ spec.
   reserved until detail cache behavior exists.
 - `library init` hydrates TMDb summary metadata for the full fetched library
   when a TMDb key is available. Later `library sync` refreshes hydrate all
-  newly added entries automatically. Library read commands also support
-  `--refresh-meta`, and `library get` supports `--live-meta`, for explicit
-  summary refresh.
+  newly added entries automatically. `library refresh-meta` explicitly
+  refreshes cached TMDb summaries for the full local library, and `library get`
+  supports `--live-meta` for targeted per-entry refresh.
 - `library list` has first-pass ergonomic filters and ordering for common
   questions: watch status, hidden/display state, favorites, saved/updated/title
   sort, and result limits.
 - Low-level CloudKit diagnostics, settings, and schema checks are not
   user-facing command groups.
-- `library changes` and top-level `tmdb search` are still placeholders.
+- Top-level `tmdb search` is still a placeholder.
 
 ## Near-Term Direction
 
