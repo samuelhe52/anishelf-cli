@@ -7,6 +7,7 @@ from typing import Any
 
 from anishelf_cli.cache import metadata
 from anishelf_cli.cache.schema import LibraryCacheError
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.library import (
     LibraryIdentityError,
     decode_library_entry_record,
@@ -189,18 +190,18 @@ def record_deleted(record: dict[str, Any]) -> bool:
 
 
 def record_name(record: dict[str, Any]) -> str:
-    if name := metadata.optional_string(record.get("recordName")):
+    if name := nonempty_string_or_none(record.get("recordName")):
         return name
     record_id = record.get("recordID")
     if isinstance(record_id, dict) and (
-        name := metadata.optional_string(record_id.get("recordName"))
+        name := nonempty_string_or_none(record_id.get("recordName"))
     ):
         return name
     raise LibraryCacheError("CloudKit deleted record is missing recordName.")
 
 
 def record_change_tag(record: dict[str, Any]) -> str | None:
-    return metadata.optional_string(record.get("recordChangeTag"))
+    return nonempty_string_or_none(record.get("recordChangeTag"))
 
 
 def deleted_timestamp(record: dict[str, Any]) -> str:
