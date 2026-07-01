@@ -27,7 +27,7 @@ from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.queries import cache_summary_payload
-from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.domain import LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import (
     CacheActiveResult,
     CacheMetadataStatusResult,
@@ -36,7 +36,7 @@ from anishelf_cli.models.output import (
     LibraryEntriesResult,
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, SecretStore
-from anishelf_cli.tmdb.client import TMDbClient, TMDbSummaryIdentity
+from anishelf_cli.tmdb.client import TMDbClient
 
 
 @dataclass(frozen=True, slots=True)

@@ -13,9 +13,8 @@ from anishelf_cli.cache.schema import (
     LibraryCacheError,
 )
 from anishelf_cli.core.coercion import nonempty_string_or_none as optional_string
-from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
+from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.identity import LibraryIdentityError, library_identity_from_fields
-from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
 def metadata_row(row: sqlite3.Row) -> LibraryEntryMetadata:

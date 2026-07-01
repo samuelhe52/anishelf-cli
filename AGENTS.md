@@ -31,14 +31,10 @@ the authority. Do not infer schema shape from this CLI alone.
 
 ## Standing Constraints
 
-- Keep the CLI read-only unless a future task explicitly changes the safety
-  model.
+- Keep the CLI read-only.
 - Never print secret values, raw callback URLs containing tokens, or stored auth
   tokens in normal output, JSON output, logs, errors, tests, or docs.
-- Do not add user-facing CloudKit app-token setup or storage instructions.
-- Do not reintroduce persisted local configuration or credential namespaces.
-- Keep Keychain storage for user-scoped CloudKit web auth tokens and TMDb keys;
-  do not add Keychain storage for CloudKit app auth.
 - Use `uv run ...` for development commands in this repo.
+- **Always** ensure `uv run pytest`, `uv run ruff check .`, and `uv run mypy src` all pass before committing, unless the user explicitly demanded otherwise.
 - Commit messages should use concise `type: Subject` style, for example
   `feat: Add CloudKit login flow` or `fix: Tighten credential source handling`.

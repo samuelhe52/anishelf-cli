@@ -201,6 +201,17 @@ def test_library_entry_metadata_uses_typed_fields_and_preserves_partial_payload_
     }
 
 
+def test_library_entry_metadata_with_updates_preserves_partial_payload_shape() -> None:
+    metadata = LibraryEntryMetadata.model_validate({"name": "Alien"})
+
+    updated = metadata.with_updates(fetched_at="2026-07-02T00:00:00Z")
+
+    assert updated.model_dump(mode="json") == {
+        "name": "Alien",
+        "fetched_at": "2026-07-02T00:00:00Z",
+    }
+
+
 def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None:
     payload = {
         "entry_type": "series",
@@ -308,6 +319,44 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
         "fetched_at": None,
         "source_version": None,
     }
+
+
+def test_library_entry_metadata_with_updates_preserves_full_payload_shape() -> None:
+    metadata = LibraryEntryMetadata.model_validate(
+        {
+            "entry_type": "movie",
+            "tmdb_id": 55,
+            "parent_series_id": None,
+            "season_number": None,
+            "language": None,
+            "name": "Alien",
+            "name_translations": {},
+            "original_name": None,
+            "overview": None,
+            "overview_translations": {},
+            "poster_path": None,
+            "backdrop_path": None,
+            "logo_path": None,
+            "original_language_code": None,
+            "on_air_date": None,
+            "status": None,
+            "genres": [],
+            "runtime_minutes": None,
+            "season_count": None,
+            "episode_count": None,
+            "vote_average": None,
+            "vote_count": None,
+            "popularity": None,
+            "link_to_details": None,
+            "fetched_at": None,
+            "source_version": "tmdbsummary.v2",
+        }
+    )
+
+    updated = metadata.with_updates(fetched_at="2026-07-02T00:00:00Z")
+
+    assert set(updated.model_dump(mode="json")) == set(metadata.model_dump(mode="json"))
+    assert updated.model_dump(mode="json")["fetched_at"] == "2026-07-02T00:00:00Z"
 
 
 def test_snapshot_library_entry_json_omits_missing_metadata() -> None:

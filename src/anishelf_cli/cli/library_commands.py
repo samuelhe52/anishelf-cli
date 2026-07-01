@@ -50,7 +50,7 @@ from anishelf_cli.library.queries import (
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
 from anishelf_cli.models import LibraryListSort, MetadataDepth
-from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.domain import LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import (
     CacheStatusResult,
     ClearedCachePathsResult,
@@ -64,7 +64,7 @@ from anishelf_cli.models.output import (
     MetadataHydrationSummaryResult,
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
-from anishelf_cli.tmdb.client import TMDbClient, TMDbSummaryIdentity
+from anishelf_cli.tmdb.client import TMDbClient
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 library_app = typer.Typer(

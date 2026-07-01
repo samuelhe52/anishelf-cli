@@ -13,10 +13,9 @@ from anishelf_cli import config
 from anishelf_cli.cache import metadata, records, schema
 from anishelf_cli.cache.scope import LibraryCacheScope, scope_from_existing_database
 from anishelf_cli.cloudkit.executor import ANI_SHELF_LIBRARY_ZONE_NAME
-from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
+from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import CacheMetadataStatusResult, RemovedCacheFilesResult
 from anishelf_cli.models.transport.cloudkit import ZoneChangesPage
-from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 LibraryCacheError = schema.LibraryCacheError
 LibraryCacheNotAvailableError = schema.LibraryCacheNotAvailableError

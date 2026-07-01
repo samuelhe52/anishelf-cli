@@ -12,9 +12,9 @@ from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
 from anishelf_cli.models.common import AniShelfBaseModel
-from anishelf_cli.models.domain import LibraryEntryMetadata
+from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
 from anishelf_cli.models.output import LibraryEntriesCacheResult
-from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
+from anishelf_cli.tmdb.client import TMDbRequestError
 
 
 class LibraryCacheResultScope(Protocol):

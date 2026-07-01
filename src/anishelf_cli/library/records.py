@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from typing import cast
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
@@ -9,6 +10,7 @@ from anishelf_cli.models.domain import (
     WATCH_STATUS_VALUES as DOMAIN_WATCH_STATUS_VALUES,
 )
 from anishelf_cli.models.domain import (
+    EpisodeProgress,
     LibraryEntryModel,
     LibraryEntrySnapshot,
     LibraryEntryTombstone,
@@ -62,23 +64,84 @@ def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:
     )
     if common_fields.deleted_at is not None:
         tombstone_fields = _validated_record_fields(record, CloudKitLibraryEntryTombstoneFields)
-        payload = tombstone_fields.model_dump(mode="python", by_alias=False)
-        payload.update(kind="tombstone", identity=identity.raw)
-        return _build_entry(LibraryEntryTombstone, **payload)
+        return _tombstone_entry_from_cloudkit_fields(identity, tombstone_fields)
 
     snapshot_fields = _validated_record_fields(record, CloudKitLibraryEntrySnapshotFields)
-    payload = snapshot_fields.model_dump(mode="python", by_alias=False)
-    payload.pop("deleted_at", None)
-    payload.pop("custom_poster_url", None)
-    payload["custom_poster_path"] = (
-        _custom_poster_path(snapshot_fields) if snapshot_fields.using_custom_poster else None
+    return _snapshot_entry_from_cloudkit_fields(identity, snapshot_fields)
+
+
+def _snapshot_entry_from_cloudkit_fields(
+    identity: LibraryIdentity,
+    fields: CloudKitLibraryEntrySnapshotFields,
+) -> LibraryEntrySnapshot:
+    return cast(
+        LibraryEntrySnapshot,
+        _build_entry(
+            LibraryEntrySnapshot,
+            kind="snapshot",
+            identity=_identity_raw(identity),
+            schema_version=fields.schema_version,
+            entry_type=fields.entry_type,
+            tmdb_id=fields.tmdb_id,
+            parent_series_id=fields.parent_series_id,
+            season_number=fields.season_number,
+            on_display=fields.on_display,
+            date_saved=fields.date_saved,
+            watch_status=fields.watch_status,
+            date_started=fields.date_started,
+            date_finished=fields.date_finished,
+            is_date_tracking_enabled=fields.is_date_tracking_enabled,
+            score=fields.score,
+            favorite=fields.favorite,
+            notes=fields.notes,
+            using_custom_poster=fields.using_custom_poster,
+            custom_poster_path=(
+                _custom_poster_path(fields) if fields.using_custom_poster else None
+            ),
+            episode_progresses=_episode_progresses_from_cloudkit_fields(fields),
+            library_updated_at=fields.library_updated_at,
+            tracking_updated_at=fields.tracking_updated_at,
+        ),
     )
-    payload["episode_progresses"] = tuple(
-        progress.model_dump(mode="python", by_alias=False)
-        for progress in snapshot_fields.episode_progresses
+
+
+def _tombstone_entry_from_cloudkit_fields(
+    identity: LibraryIdentity,
+    fields: CloudKitLibraryEntryTombstoneFields,
+) -> LibraryEntryTombstone:
+    return cast(
+        LibraryEntryTombstone,
+        _build_entry(
+            LibraryEntryTombstone,
+            kind="tombstone",
+            identity=_identity_raw(identity),
+            schema_version=fields.schema_version,
+            entry_type=fields.entry_type,
+            tmdb_id=fields.tmdb_id,
+            parent_series_id=fields.parent_series_id,
+            season_number=fields.season_number,
+            deleted_at=fields.deleted_at,
+        ),
     )
-    payload.update(kind="snapshot", identity=identity.raw)
-    return _build_entry(LibraryEntrySnapshot, **payload)
+
+
+def _episode_progresses_from_cloudkit_fields(
+    fields: CloudKitLibraryEntrySnapshotFields,
+) -> tuple[EpisodeProgress, ...]:
+    return tuple(
+        EpisodeProgress(
+            season_number=progress.season_number,
+            watched_through_episode=progress.watched_through_episode,
+            updated_at=progress.updated_at,
+        )
+        for progress in fields.episode_progresses
+    )
+
+
+def _identity_raw(identity: LibraryIdentity) -> str:
+    if identity.raw is None:
+        raise LibraryRecordDecodeError("CloudKit record identity is missing its canonical value.")
+    return identity.raw
 
 
 def _record_name(record: CloudKitRecord) -> str:

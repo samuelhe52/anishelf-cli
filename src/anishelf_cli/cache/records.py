@@ -11,6 +11,7 @@ from anishelf_cli.library import decode_library_entry_record
 from anishelf_cli.models.domain import (
     LibraryEntryModel,
     LibraryEntryTombstone,
+    TMDbSummaryIdentity,
     validate_library_entry_json,
 )
 from anishelf_cli.models.identity import (
@@ -18,7 +19,6 @@ from anishelf_cli.models.identity import (
     parse_library_identity,
 )
 from anishelf_cli.models.transport.cloudkit import CloudKitRecord
-from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 ENTRY_MODEL_COLUMNS = (
     "identity",

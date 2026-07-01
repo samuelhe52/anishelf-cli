@@ -167,7 +167,11 @@ class LibraryEntryMetadata(AniShelfBaseModel):
         )
 
     def with_updates(self, **updates: object) -> LibraryEntryMetadata:
-        payload = self.model_dump(mode="python", round_trip=True)
+        payload = {
+            field_name: getattr(self, field_name)
+            for field_name in self.model_fields_set
+            if field_name in self.__class__.model_fields
+        }
         payload.update(updates)
         return self.__class__.model_validate(payload)
 
