@@ -277,13 +277,15 @@ class CloudKitExecutor:
                 json=json_payload,
             )
             emit_verbose(
-                f"CloudKit response <- HTTP {response.status_code} {method.upper()} {response.request.url}",
+                "CloudKit response <- "
+                f"HTTP {response.status_code} {method.upper()} {response.request.url}",
                 redactor=redactor,
             )
             return response
         except httpx.HTTPError as exc:
             emit_verbose(
-                f"CloudKit transport error <- {method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc}",
+                "CloudKit transport error <- "
+                f"{method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc}",
                 redactor=redactor,
             )
             raise CloudKitRequestFailedError(
@@ -460,7 +462,10 @@ def _cloudkit_failure_message(
 
 
 def _cloudkit_payload_log(response: httpx.Response, payload: dict[str, Any]) -> str:
-    parts = [f"CloudKit payload <- HTTP {response.status_code} {response.request.method} {response.request.url}"]
+    parts = [
+        "CloudKit payload <- "
+        f"HTTP {response.status_code} {response.request.method} {response.request.url}"
+    ]
     if code := _optional_string(payload.get("serverErrorCode")):
         parts.append(f"serverErrorCode={code}")
     if reason := _optional_string(payload.get("reason")):

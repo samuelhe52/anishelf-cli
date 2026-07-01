@@ -126,8 +126,10 @@ class TMDbClient:
         url = f"https://api.themoviedb.org/3/{path}"
         redactor = self._redactor()
         for attempt in range(1, attempts + 1):
+            params_log = json.dumps(params, sort_keys=True)
             emit_verbose(
-                f"TMDb request -> GET {url} params={json.dumps(params, sort_keys=True)} attempt={attempt}/{attempts}",
+                f"TMDb request -> GET {url} params={params_log} "
+                f"attempt={attempt}/{attempts}",
                 redactor=redactor,
             )
             try:

@@ -211,8 +211,9 @@ def test_manual_paste_login_verbose_transport_error_redacts_secrets(monkeypatch)
     assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
         result.stderr
     )
-    assert "[verbose] CloudKit transport error <- GET https://api.apple-cloudkit.com/database/1/" in (
-        result.stderr
+    assert (
+        "[verbose] CloudKit transport error <- GET https://api.apple-cloudkit.com/database/1/"
+        in result.stderr
     )
     assert "ConnectError" in result.stderr
     assert "CloudKit login initiation request failed" in result.stderr

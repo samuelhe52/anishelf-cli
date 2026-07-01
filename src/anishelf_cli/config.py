@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import os
 import sys
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-import tomllib
 
 from anishelf_cli.models import MetadataDepth
 
@@ -121,7 +121,9 @@ def save_user_defaults(defaults: UserDefaults) -> Path:
     return path
 
 
-def normalize_library_display_fields(value: str | list[object] | tuple[object, ...]) -> tuple[str, ...]:
+def normalize_library_display_fields(
+    value: str | list[object] | tuple[object, ...],
+) -> tuple[str, ...]:
     raw_values: list[object]
     if isinstance(value, str):
         raw_values = [part.strip() for part in value.split(",")]

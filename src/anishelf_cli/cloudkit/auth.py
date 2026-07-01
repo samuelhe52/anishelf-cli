@@ -93,8 +93,9 @@ def initiate_login(
     endpoint_url = database_endpoint_url("users/current")
     redactor = SecretRedactor()
     redactor.register(api_token.value, "cloudkit-api-token")
+    params_log = json.dumps({"ckAPIToken": api_token.value}, sort_keys=True)
     emit_verbose(
-        f"CloudKit request -> GET {endpoint_url} params={json.dumps({'ckAPIToken': api_token.value}, sort_keys=True)}",
+        f"CloudKit request -> GET {endpoint_url} params={params_log}",
         redactor=redactor,
     )
     try:
