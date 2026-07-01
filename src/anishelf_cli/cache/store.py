@@ -14,7 +14,7 @@ from anishelf_cli.cache import metadata, records, schema
 from anishelf_cli.cache.scope import LibraryCacheScope, scope_from_existing_database
 from anishelf_cli.cloudkit.executor import ANI_SHELF_LIBRARY_ZONE_NAME
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
-from anishelf_cli.models.output import CacheMetadataStatusResult
+from anishelf_cli.models.output import CacheMetadataStatusResult, RemovedCacheFilesResult
 from anishelf_cli.models.transport.cloudkit import ZoneChangesPage
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
@@ -83,13 +83,13 @@ class LibraryCacheStore:
         return scopes
 
     @classmethod
-    def remove_all_local_caches(cls) -> dict[str, int]:
+    def remove_all_local_caches(cls) -> RemovedCacheFilesResult:
         cache_root = cls.library_cache_root()
         lock_root = cls.library_lock_root()
-        return {
-            "cache_files": schema.remove_matching_files(cache_root, "*.sqlite3"),
-            "lock_files": schema.remove_matching_files(lock_root, "library-cache.*.lock"),
-        }
+        return RemovedCacheFilesResult(
+            cache_files=schema.remove_matching_files(cache_root, "*.sqlite3"),
+            lock_files=schema.remove_matching_files(lock_root, "library-cache.*.lock"),
+        )
 
     @contextmanager
     def locked(self) -> Generator[None]:

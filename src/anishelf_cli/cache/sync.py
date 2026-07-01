@@ -100,13 +100,13 @@ def _refresh_result_with_hydration(
     refresh_result: LibraryCacheRefreshResult,
     hydration_result: MetadataHydrationResult,
 ) -> LibraryCacheRefreshResult:
-    payload = refresh_result.model_dump(mode="python", round_trip=True)
-    payload.update(
-        metadata_requested=hydration_result.requested,
-        metadata_hydrated=hydration_result.hydrated,
-        metadata_errors=hydration_result.errors,
+    return refresh_result.model_copy(
+        update={
+            "metadata_requested": hydration_result.requested,
+            "metadata_hydrated": hydration_result.hydrated,
+            "metadata_errors": hydration_result.errors,
+        }
     )
-    return LibraryCacheRefreshResult.model_validate(payload)
 
 
 @dataclass(slots=True)

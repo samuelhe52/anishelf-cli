@@ -62,7 +62,6 @@ from anishelf_cli.models.output import (
     LibraryRefreshMetadataResult,
     LibraryRefreshMetadataSummaryResult,
     MetadataHydrationSummaryResult,
-    RemovedCacheFilesResult,
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbSummaryIdentity
@@ -273,7 +272,7 @@ def library_clear_cache(
     removed = LibraryCacheStore.remove_all_local_caches()
     payload = LibraryClearCacheResult(
         status="cleared",
-        removed=RemovedCacheFilesResult.model_validate(removed),
+        removed=removed,
         paths=ClearedCachePathsResult(
             cache_dir=str(LibraryCacheStore.library_cache_root()),
             lock_dir=str(LibraryCacheStore.library_lock_root()),
@@ -464,8 +463,10 @@ def library_refresh_meta(
     payload = LibraryRefreshMetadataResult(
         summary=LibraryRefreshMetadataSummaryResult(
             entries=len(entries),
-            metadata=MetadataHydrationSummaryResult.model_validate(
-                refresh_result.model_dump(mode="json")
+            metadata=MetadataHydrationSummaryResult(
+                requested=refresh_result.requested,
+                hydrated=refresh_result.hydrated,
+                errors=refresh_result.errors,
             ),
             cache=LibraryRefreshMetadataCacheResult(
                 container=store.scope.container,

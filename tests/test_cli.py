@@ -13,6 +13,7 @@ from anishelf_cli.cli.root import _normalize_metadata_args, app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
+from anishelf_cli.models.output import RemovedCacheFilesResult
 from anishelf_cli.models.tmdb import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
@@ -978,7 +979,7 @@ def test_logout_deletes_web_auth_token(monkeypatch) -> None:
     monkeypatch.setattr(
         root.LibraryCacheStore,
         "remove_all_local_caches",
-        classmethod(lambda cls: {"cache_files": 2, "lock_files": 1}),
+        classmethod(lambda cls: RemovedCacheFilesResult(cache_files=2, lock_files=1)),
     )
 
     result = runner.invoke(app, ["--json", "auth", "logout"])
@@ -1019,7 +1020,7 @@ def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> Non
     monkeypatch.setattr(
         root.LibraryCacheStore,
         "remove_all_local_caches",
-        classmethod(lambda cls: {"cache_files": 0, "lock_files": 0}),
+        classmethod(lambda cls: RemovedCacheFilesResult(cache_files=0, lock_files=0)),
     )
 
     result = runner.invoke(app, ["--json", "auth", "logout"])

@@ -280,8 +280,8 @@ def logout(
                 "status": "logged-out",
                 "cache": {
                     "status": "cleared",
-                    "cache_files": removed["cache_files"],
-                    "lock_files": removed["lock_files"],
+                    "cache_files": removed.cache_files,
+                    "lock_files": removed.lock_files,
                 },
             }
         )
