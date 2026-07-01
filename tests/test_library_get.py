@@ -19,6 +19,8 @@ from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
+from anishelf_cli.library.metadata import LibraryEntryMetadata
+from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 
@@ -448,7 +450,7 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             requested.append((identity.entry_type, identity.tmdb_id))
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
 
@@ -464,10 +466,10 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
         {"id": 878, "name": "Science Fiction"}
     ]
     assert payload["items"][0]["entry"]["metadata"]["runtime_minutes"] == 117
-    other_entry = store.attach_metadata_summary(
-        store.get_entries_by_identity(["series:22"]).values()
+    other_entry = store.attach_metadata_summary_models(
+        list(store.get_entry_models_by_identity(["series:22"]).values())
     )[0]
-    assert other_entry["metadata"] is None
+    assert other_entry.metadata is None
 
 
 def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monkeypatch) -> None:
@@ -488,6 +490,61 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     assert "  Custom poster     /current/custom.jpg\n" in result.stdout
     assert "  Episode progress  S1:E12 (2026-05-08T00:00:00Z)\n" in result.stdout
     assert "  Notes             Round trip\n" in result.stdout
+
+
+def test_library_get_human_output_accepts_live_envelope_model() -> None:
+    raw_envelope = {
+        "items": [
+            {
+                "identity": "movie:55",
+                "status": "found",
+                "entry": {
+                    "identity": "movie:55",
+                    "kind": "snapshot",
+                    "entry_type": "movie",
+                    "tmdb_id": 55,
+                    "schema_version": 2,
+                    "on_display": True,
+                    "date_saved": "2026-05-01T00:00:00Z",
+                    "watch_status": "watched",
+                    "date_started": None,
+                    "date_finished": None,
+                    "is_date_tracking_enabled": False,
+                    "score": 4,
+                    "favorite": True,
+                    "notes": "",
+                    "using_custom_poster": False,
+                    "custom_poster_path": None,
+                    "episode_progresses": [],
+                    "library_updated_at": None,
+                    "tracking_updated_at": None,
+                    "metadata": {
+                        "name": "Alien",
+                        "original_name": "Alien",
+                        "overview": "A crew answers a distress signal.",
+                    },
+                },
+            }
+        ],
+        "summary": {"requested": 1, "found": 1, "errors": 0},
+    }
+
+    import io
+    from contextlib import redirect_stdout
+
+    from anishelf_cli.cli.presentation import render_library_get
+    from anishelf_cli.models.output import LibraryGetEnvelope
+
+    stream = io.StringIO()
+    with redirect_stdout(stream):
+        render_library_get(LibraryGetEnvelope.model_validate(raw_envelope))
+
+    output = stream.getvalue()
+    assert "Library entries\n" in output
+    assert "Alien\n" in output
+    assert "  Status            found\n" in output
+    assert "  Identity          movie:55\n" in output
+    assert "decode-error" not in output
 
 
 def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(
@@ -637,7 +694,7 @@ def test_library_init_emits_stderr_progress_without_touching_json_stdout(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             return _metadata_summary(
                 identity.entry_type, identity.tmdb_id, name=f"Movie {identity.tmdb_id}"
             )
@@ -711,19 +768,25 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
 
 def test_library_tombstone_decodes_from_identity_fields_and_deleted_at() -> None:
     decoded = decode_library_entry_record(
-        _tombstone_record("season:22:3:33", "season", 33, parent_series_id=22, season_number=3)
+        _cloudkit_record(
+            _tombstone_record(
+                "season:22:3:33",
+                "season",
+                33,
+                parent_series_id=22,
+                season_number=3,
+            )
+        )
     )
 
-    assert decoded == {
-        "kind": "tombstone",
-        "identity": "season:22:3:33",
-        "schema_version": 2,
-        "tmdb_id": 33,
-        "entry_type": "season",
-        "parent_series_id": 22,
-        "season_number": 3,
-        "deleted_at": "2026-05-12T00:00:00Z",
-    }
+    assert decoded.kind == "tombstone"
+    assert decoded.identity == "season:22:3:33"
+    assert decoded.schema_version == 2
+    assert decoded.tmdb_id == 33
+    assert decoded.entry_type == "season"
+    assert decoded.parent_series_id == 22
+    assert decoded.season_number == 3
+    assert decoded.deleted_at == "2026-05-12T00:00:00Z"
 
 
 def test_library_get_tombstone_identity_is_treated_as_not_found(
@@ -755,7 +818,7 @@ def test_library_decoder_rejects_future_schema_versions() -> None:
     record["fields"]["schemaVersion"] = {"value": 3}
 
     with pytest.raises(LibraryRecordDecodeError, match="Unsupported LibraryEntry schema version 3"):
-        decode_library_entry_record(record)
+        decode_library_entry_record(_cloudkit_record(record))
 
 
 def test_library_decoder_accepts_cloudkit_int64_boolean_wrappers() -> None:
@@ -771,31 +834,31 @@ def test_library_decoder_accepts_cloudkit_int64_boolean_wrappers() -> None:
             "value": 1 if field != "usingCustomPoster" else 0,
         }
 
-    decoded = decode_library_entry_record(record)
+    decoded = decode_library_entry_record(_cloudkit_record(record))
 
-    assert decoded["on_display"] is True
-    assert decoded["is_date_tracking_enabled"] is True
-    assert decoded["favorite"] is True
-    assert decoded["using_custom_poster"] is False
-    assert decoded["custom_poster_path"] is None
+    assert decoded.on_display is True
+    assert decoded.is_date_tracking_enabled is True
+    assert decoded.favorite is True
+    assert decoded.using_custom_poster is False
+    assert decoded.custom_poster_path is None
 
 
 def test_library_decoder_accepts_empty_notes() -> None:
     record = _live_record("movie:55", "movie", 55)
     record["fields"]["notes"] = {"type": "STRING", "value": ""}
 
-    decoded = decode_library_entry_record(record)
+    decoded = decode_library_entry_record(_cloudkit_record(record))
 
-    assert decoded["notes"] == ""
+    assert decoded.notes == ""
 
 
 def test_library_decoder_uses_swift_reference_epoch_for_episode_progress_dates() -> None:
     record = _live_record("movie:55", "movie", 55)
-    decoded = decode_library_entry_record(record)
+    decoded = decode_library_entry_record(_cloudkit_record(record))
 
-    assert decoded["date_saved"] == "2026-05-01T00:00:00Z"
-    assert decoded["date_started"] == "2026-05-02T00:00:00Z"
-    assert decoded["episode_progresses"][0]["updated_at"] == "2026-05-08T00:00:00Z"
+    assert decoded.date_saved == "2026-05-01T00:00:00Z"
+    assert decoded.date_started == "2026-05-02T00:00:00Z"
+    assert decoded.episode_progresses[0].updated_at == "2026-05-08T00:00:00Z"
 
 
 def _install_lookup(
@@ -835,32 +898,38 @@ def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
 
 
-def _metadata_summary(entry_type: str, tmdb_id: int, *, name: str) -> dict[str, Any]:
-    return {
-        "entry_type": entry_type,
-        "tmdb_id": tmdb_id,
-        "language": None,
-        "name": name,
-        "name_translations": {},
-        "original_name": name,
-        "overview": f"{name} overview.",
-        "overview_translations": {},
-        "poster_path": "/poster.jpg",
-        "backdrop_path": "/backdrop.jpg",
-        "logo_path": None,
-        "original_language_code": "en",
-        "on_air_date": "1979-05-25",
-        "status": "Released" if entry_type == "movie" else "Returning Series",
-        "genres": [{"id": 878, "name": "Science Fiction"}],
-        "runtime_minutes": 117 if entry_type == "movie" else None,
-        "season_count": 3 if entry_type == "series" else None,
-        "episode_count": 22 if entry_type == "series" else None,
-        "vote_average": 8.2,
-        "vote_count": 15432,
-        "popularity": 44.5,
-        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-        "source_version": "test",
-    }
+def _metadata_summary(entry_type: str, tmdb_id: int, *, name: str) -> LibraryEntryMetadata:
+    return LibraryEntryMetadata.model_validate(
+        {
+            "entry_type": entry_type,
+            "tmdb_id": tmdb_id,
+            "language": None,
+            "name": name,
+            "name_translations": {},
+            "original_name": name,
+            "overview": f"{name} overview.",
+            "overview_translations": {},
+            "poster_path": "/poster.jpg",
+            "backdrop_path": "/backdrop.jpg",
+            "logo_path": None,
+            "original_language_code": "en",
+            "on_air_date": "1979-05-25",
+            "status": "Released" if entry_type == "movie" else "Returning Series",
+            "genres": [{"id": 878, "name": "Science Fiction"}],
+            "runtime_minutes": 117 if entry_type == "movie" else None,
+            "season_count": 3 if entry_type == "series" else None,
+            "episode_count": 22 if entry_type == "series" else None,
+            "vote_average": 8.2,
+            "vote_count": 15432,
+            "popularity": 44.5,
+            "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+            "source_version": "test",
+        }
+    )
+
+
+def _cloudkit_record(record: dict[str, Any]) -> CloudKitRecord:
+    return CloudKitRecord.model_validate(record)
 
 
 def _insert_legacy_v1_metadata_summary(

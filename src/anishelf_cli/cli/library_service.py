@@ -26,40 +26,17 @@ from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError, LockFactory
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
-from anishelf_cli.library.entries import LibraryEntry
-from anishelf_cli.library.queries import (
+from anishelf_cli.library.queries import cache_summary_payload
+from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.output import (
+    CacheActiveResult,
+    CacheMetadataStatusResult,
+    CacheScopeResult,
+    CacheStatusResult,
     LibraryEntriesResult,
-    cache_summary_payload,
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, SecretStore
 from anishelf_cli.tmdb.client import TMDbClient, TMDbSummaryIdentity
-
-
-@dataclass(frozen=True, slots=True)
-class CacheStatusResult:
-    initialized: bool
-    active: dict[str, object]
-    scopes: list[dict[str, str]]
-    cache_path: str
-    lock_path: str
-    cache_files: int
-    lock_files: int
-
-    def to_payload(self) -> dict[str, object]:
-        return {
-            "summary": {
-                "initialized": self.initialized,
-                "scope_count": len(self.scopes),
-                "cache_files": self.cache_files,
-                "lock_files": self.lock_files,
-            },
-            "active": self.active,
-            "scopes": self.scopes,
-            "cache": {
-                "path": self.cache_path,
-                "lock_path": self.lock_path,
-            },
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,12 +68,12 @@ class LibraryCommandService:
 
     def entries_result(
         self,
-        entries: list[LibraryEntry],
+        entries: list[LibraryEntryModel],
         store: LibraryCacheStore,
         refresh_result: LibraryCacheRefreshResult | None,
     ) -> LibraryEntriesResult:
         return LibraryEntriesResult(
-            entries=entries,
+            entries=tuple(entries),
             cache=cache_summary_payload(store, refresh_result),
         )
 
@@ -123,12 +100,18 @@ def library_status() -> CacheStatusResult:
     cache_files = sorted(cache_root.glob("*.sqlite3")) if cache_root.exists() else []
     lock_files = sorted(lock_root.glob("library-cache.*.lock")) if lock_root.exists() else []
 
-    active: dict[str, object] = {
-        "initialized": False,
-        "entries": 0,
-        "has_sync_token": False,
-        "scope": None,
-    }
+    active = CacheActiveResult(
+        initialized=False,
+        entries=0,
+        has_sync_token=False,
+        scope=None,
+        metadata=CacheMetadataStatusResult(
+            tracked_entries=0,
+            hydrated_entries=0,
+            missing_entries=0,
+            ready=False,
+        ),
+    )
     try:
         store = LibraryCacheStore.find_default_scope()
     except LibraryCacheError:
@@ -136,26 +119,18 @@ def library_status() -> CacheStatusResult:
     if store is not None:
         with store.locked():
             store.initialize()
-            metadata_status = store.metadata_summary_status()
-            active = {
-                "initialized": store.has_entries(),
-                "entries": len(store.list_entries(include_tombstones=False)),
-                "has_sync_token": store.read_sync_token() is not None,
-                "scope": store.scope.key_payload(),
-                "metadata": metadata_status,
-            }
-    else:
-        active["metadata"] = {
-            "tracked_entries": 0,
-            "hydrated_entries": 0,
-            "missing_entries": 0,
-            "ready": False,
-        }
+            active = CacheActiveResult(
+                initialized=store.has_entries(),
+                entries=len(store.list_entry_models(include_tombstones=False)),
+                has_sync_token=store.read_sync_token() is not None,
+                scope=CacheScopeResult.model_validate(store.scope.key_payload()),
+                metadata=store.metadata_summary_status(),
+            )
 
     return CacheStatusResult(
-        initialized=bool(active["initialized"]),
+        initialized=active.initialized,
         active=active,
-        scopes=[scope.key_payload() for scope in scopes],
+        scopes=tuple(CacheScopeResult.model_validate(scope.key_payload()) for scope in scopes),
         cache_path=str(cache_root),
         lock_path=str(lock_root),
         cache_files=len(cache_files),

@@ -27,12 +27,12 @@ from anishelf_cli.cloudkit.auth import (
 from anishelf_cli.cloudkit.executor import (
     CloudKitExecutor,
     CloudKitWhoamiError,
-    CurrentUser,
     cloudkit_web_auth_token_lock,
 )
 from anishelf_cli.core.output import emit_error, emit_json, set_current_app_state
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
+from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,

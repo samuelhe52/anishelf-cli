@@ -139,9 +139,7 @@ def normalize_library_display_fields(
             continue
         if field not in LIBRARY_DISPLAY_FIELDS:
             valid = ", ".join(LIBRARY_DISPLAY_FIELDS)
-            raise UserConfigError(
-                f"Invalid display field {field!r}. Expected one of: {valid}."
-            )
+            raise UserConfigError(f"Invalid display field {field!r}. Expected one of: {valid}.")
         if field not in fields:
             fields.append(field)
 

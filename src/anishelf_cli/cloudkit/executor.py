@@ -9,6 +9,7 @@ from typing import Any
 
 import httpx
 from filelock import FileLock
+from pydantic import ValidationError
 
 from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken, resolve_cloudkit_api_token
@@ -16,6 +17,14 @@ from anishelf_cli.cloudkit.auth import database_endpoint_url, successor_web_auth
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.core.output import emit_verbose
 from anishelf_cli.core.redaction import SecretRedactor
+from anishelf_cli.models.domain import CurrentUser
+from anishelf_cli.models.transport.cloudkit import (
+    CloudKitCurrentUserResponse,
+    CloudKitLookupResponse,
+    CloudKitZoneChangesResponse,
+    CloudKitZoneResult,
+    ZoneChangesPage,
+)
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     SecretStore,
@@ -37,37 +46,6 @@ AUTH_FAILURE_CODES = {
 TokenResolver = Callable[[], CloudKitAPIToken]
 LockFactory = Callable[[Path], AbstractContextManager[Any]]
 QueryParamValue = str | int | float | bool | None
-
-
-@dataclass(frozen=True, slots=True)
-class CurrentUser:
-    user_record_name: str
-    first_name: str | None = None
-    last_name: str | None = None
-    email: str | None = None
-
-    @property
-    def display_name(self) -> str | None:
-        parts = [part for part in (self.first_name, self.last_name) if part]
-        return " ".join(parts) if parts else None
-
-    def to_json_payload(self) -> dict[str, object]:
-        return {
-            "status": "authenticated",
-            "user": {
-                "user_record_name": self.user_record_name,
-                "first_name": self.first_name,
-                "last_name": self.last_name,
-                "email": self.email,
-            },
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class ZoneChangesPage:
-    records: list[dict[str, Any]]
-    sync_token: str
-    more_coming: bool
 
 
 class CloudKitWhoamiError(RuntimeError):
@@ -119,18 +97,19 @@ class CloudKitExecutor:
         record_names: list[str],
         *,
         zone_name: str = ANI_SHELF_LIBRARY_ZONE_NAME,
-    ) -> dict[str, Any]:
+    ) -> CloudKitLookupResponse:
         request_payload = {
             "records": [{"recordName": record_name} for record_name in record_names],
             "zoneID": {"zoneName": zone_name},
         }
-        return self.authenticated_request(
+        payload = self.authenticated_request(
             "POST",
             "records/lookup",
             json_payload=request_payload,
             error_context="CloudKit library lookup request",
             response_description="CloudKit library lookup",
         )
+        return _lookup_response_from_payload(payload, SecretRedactor())
 
     def fetch_zone_changes(
         self,
@@ -355,52 +334,56 @@ def _current_user_from_payload(
     payload: dict[str, Any],
     redactor: SecretRedactor,
 ) -> CurrentUser:
-    user_record_name = nonempty_string_or_none(payload.get("userRecordName"))
-    if not user_record_name:
+    try:
+        response = CloudKitCurrentUserResponse.model_validate(payload)
+    except ValidationError as exc:
         raise CloudKitUnexpectedResponseError(
             "CloudKit whoami response did not include userRecordName.",
             redactor=redactor,
-        )
+        ) from exc
 
-    return CurrentUser(
-        user_record_name=user_record_name,
-        first_name=nonempty_string_or_none(payload.get("firstName")),
-        last_name=nonempty_string_or_none(payload.get("lastName")),
-        email=nonempty_string_or_none(payload.get("email")),
-    )
+    return response.to_domain()
+
+
+def _lookup_response_from_payload(
+    payload: dict[str, Any],
+    redactor: SecretRedactor,
+) -> CloudKitLookupResponse:
+    try:
+        return CloudKitLookupResponse.model_validate(payload)
+    except ValidationError as exc:
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit lookup response had an unexpected shape.",
+            redactor=redactor,
+        ) from exc
 
 
 def _zone_changes_page_from_payload(
     payload: dict[str, Any],
     redactor: SecretRedactor,
 ) -> ZoneChangesPage:
-    zones = payload.get("zones")
-    if not isinstance(zones, list) or len(zones) != 1 or not isinstance(zones[0], dict):
+    try:
+        response = CloudKitZoneChangesResponse.model_validate(payload)
+    except ValidationError as exc:
+        raise CloudKitUnexpectedResponseError(
+            "CloudKit zone changes response had an unexpected shape.",
+            redactor=redactor,
+        ) from exc
+
+    if len(response.zones) != 1:
         raise CloudKitUnexpectedResponseError(
             "CloudKit zone changes response did not include one zone result.",
             redactor=redactor,
         )
 
-    zone_result = zones[0]
-    if code := nonempty_string_or_none(zone_result.get("serverErrorCode")):
+    zone_result = response.zones[0]
+    if code := nonempty_string_or_none(zone_result.server_error_code):
         message = _zone_error_message(code, zone_result)
         if _is_change_token_expired_code(code):
             raise CloudKitChangeTokenExpiredError(message, redactor=redactor)
         raise CloudKitRequestFailedError(message, redactor=redactor)
 
-    records = zone_result.get("records")
-    if not isinstance(records, list):
-        raise CloudKitUnexpectedResponseError(
-            "CloudKit zone changes response did not include records.",
-            redactor=redactor,
-        )
-    if not all(isinstance(record, dict) for record in records):
-        raise CloudKitUnexpectedResponseError(
-            "CloudKit zone changes response included an invalid record.",
-            redactor=redactor,
-        )
-
-    sync_token = nonempty_string_or_none(zone_result.get("syncToken"))
+    sync_token = nonempty_string_or_none(zone_result.sync_token)
     if not sync_token:
         raise CloudKitUnexpectedResponseError(
             "CloudKit zone changes response did not include syncToken.",
@@ -408,9 +391,9 @@ def _zone_changes_page_from_payload(
         )
 
     return ZoneChangesPage(
-        records=records,
+        records=zone_result.records,
         sync_token=sync_token,
-        more_coming=bool(zone_result.get("moreComing")),
+        more_coming=zone_result.more_coming,
     )
 
 
@@ -485,9 +468,9 @@ def _safe_lock_name(value: str) -> str:
     return safe or DEFAULT_PROFILE_ID
 
 
-def _zone_error_message(code: str, zone_result: dict[str, Any]) -> str:
+def _zone_error_message(code: str, zone_result: CloudKitZoneResult) -> str:
     details = [code]
-    if reason := nonempty_string_or_none(zone_result.get("reason")):
+    if reason := nonempty_string_or_none(zone_result.reason):
         details.append(reason)
     return f"CloudKit zone changes request failed ({': '.join(details)})."
 

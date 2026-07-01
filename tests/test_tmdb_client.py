@@ -44,20 +44,20 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
 
     summary = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
 
-    assert summary["name"] == "Alien"
-    assert summary["link_to_details"] == "https://www.themoviedb.org/movie/55"
-    assert summary["status"] == "Released"
-    assert summary["genres"] == [
+    assert summary.name == "Alien"
+    assert summary.link_to_details == "https://www.themoviedb.org/movie/55"
+    assert summary.status == "Released"
+    assert [genre.model_dump(mode="json") for genre in summary.genres] == [
         {"id": 878, "name": "Science Fiction"},
         {"id": 27, "name": "Horror"},
     ]
-    assert summary["runtime_minutes"] == 117
-    assert summary["season_count"] is None
-    assert summary["episode_count"] is None
-    assert summary["vote_average"] == 8.2
-    assert summary["vote_count"] == 15432
-    assert summary["popularity"] == 44.5
-    assert summary["source_version"] == "tmdb.http.summary.v2"
+    assert summary.runtime_minutes == 117
+    assert summary.season_count is None
+    assert summary.episode_count is None
+    assert summary.vote_average == 8.2
+    assert summary.vote_count == 15432
+    assert summary.popularity == 44.5
+    assert summary.source_version == "tmdb.http.summary.v2"
     assert len(requests) == 1
     assert requests[0].url.path == "/3/movie/55"
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
@@ -110,13 +110,15 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
         TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22, season_number=1)
     )
 
-    assert series_summary["season_count"] == 1
-    assert series_summary["episode_count"] == 22
-    assert series_summary["runtime_minutes"] is None
-    assert series_summary["genres"] == [{"id": 18, "name": "Drama"}]
-    assert season_summary["season_count"] is None
-    assert season_summary["episode_count"] == 3
-    assert season_summary["link_to_details"] == "https://www.themoviedb.org/tv/22/season/1"
+    assert series_summary.season_count == 1
+    assert series_summary.episode_count == 22
+    assert series_summary.runtime_minutes is None
+    assert [genre.model_dump(mode="json") for genre in series_summary.genres] == [
+        {"id": 18, "name": "Drama"}
+    ]
+    assert season_summary.season_count is None
+    assert season_summary.episode_count == 3
+    assert season_summary.link_to_details == "https://www.themoviedb.org/tv/22/season/1"
     assert [request.url.path for request in requests] == ["/3/tv/22", "/3/tv/22/season/1"]
 
 

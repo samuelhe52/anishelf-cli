@@ -25,7 +25,9 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError
-from anishelf_cli.library.entries import LibraryEntry, LibraryEntryMetadata
+from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
+from anishelf_cli.library.metadata import LibraryEntryMetadata
+from anishelf_cli.models.output import CacheMetadataStatusResult
 from anishelf_cli.secrets import SecretStorageUnavailableError, cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
@@ -68,8 +70,8 @@ def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> Non
     store.apply_page(page, staging=False)
 
     assert store.read_sync_token() == "t1"
-    entries = store.list_entries()
-    assert [entry["identity"] for entry in entries] == ["movie:55"]
+    entries = store.list_entry_models()
+    assert [entry.identity for entry in entries] == ["movie:55"]
     assert (
         LibraryCacheStore.for_scope(scope).path
         != LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user_b")).path
@@ -137,14 +139,17 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
 
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    raw_entry = store.list_entries()[0]
-    assert "metadata" not in raw_entry
-    attached = store.attach_metadata_summary([raw_entry])[0]
-    assert attached["metadata"]["name"] == "Alien"
-    assert attached["metadata"]["poster_path"] == "/poster.jpg"
-    assert attached["metadata"]["genres"] == [{"id": 878, "name": "Science Fiction"}]
-    assert attached["metadata"]["runtime_minutes"] == 117
-    assert attached["metadata"]["vote_average"] == 8.2
+    raw_entry = store.list_entry_models()[0]
+    assert raw_entry.metadata is None
+    attached = store.attach_metadata_summary_models([raw_entry])[0]
+    assert attached.metadata is not None
+    assert attached.metadata.name == "Alien"
+    assert attached.metadata.poster_path == "/poster.jpg"
+    assert [genre.model_dump(mode="json") for genre in attached.metadata.genres] == [
+        {"id": 878, "name": "Science Fiction"}
+    ]
+    assert attached.metadata.runtime_minutes == 117
+    assert attached.metadata.vote_average == 8.2
 
     with sqlite3.connect(store.path) as db:
         decoded_json = db.execute("SELECT decoded_json FROM library_entries").fetchone()[0]
@@ -173,16 +178,45 @@ def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
         tmdb_id=55,
     )
 
-    attached = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
+    attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
+    assert attached is not None
 
-    assert attached["status"] is None
-    assert attached["genres"] == []
-    assert attached["runtime_minutes"] is None
-    assert attached["season_count"] is None
-    assert attached["episode_count"] is None
-    assert attached["vote_average"] is None
-    assert attached["vote_count"] is None
-    assert attached["popularity"] is None
+    assert attached.status is None
+    assert attached.genres == ()
+    assert attached.runtime_minutes is None
+    assert attached.season_count is None
+    assert attached.episode_count is None
+    assert attached.vote_average is None
+    assert attached.vote_count is None
+    assert attached.popularity is None
+
+
+def test_attach_metadata_summary_preserves_dict_compatibility(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store.initialize()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:55", "movie", 55)],
+            sync_token="t1",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    raw_entry = store.list_entry_models()[0]
+    assert getattr(raw_entry, "metadata", None) is None
+
+    attached = store.attach_metadata_summary_models([raw_entry])[0]
+
+    assert attached.identity == "movie:55"
+    assert attached.metadata is not None
+    assert attached.metadata.name == "Alien"
+    assert attached.metadata.poster_path == "/poster.jpg"
 
 
 def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
@@ -214,7 +248,7 @@ def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
     assert store.incomplete_metadata_summary_targets() == [
         TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
     ]
-    assert store.metadata_summary_status() == {
+    assert store.metadata_summary_status().model_dump(mode="json") == {
         "tracked_entries": 1,
         "hydrated_entries": 0,
         "missing_entries": 1,
@@ -260,7 +294,7 @@ def test_cache_sync_hydrates_tmdb_summary_for_new_entries_only(
         def __init__(self) -> None:
             self.targets: list[tuple[str, int]] = []
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             self.targets.append((identity.entry_type, identity.tmdb_id))
             return _metadata_summary(
                 identity.entry_type,
@@ -318,7 +352,7 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
         def __init__(self) -> None:
             self.targets: list[tuple[str, int]] = []
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             self.targets.append((identity.entry_type, identity.tmdb_id))
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
 
@@ -335,10 +369,11 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
     assert result.metadata_requested == 1
     assert result.metadata_hydrated == 1
     assert tmdb.targets == [("movie", 55)]
-    refreshed = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
-    assert refreshed["source_version"] == "tmdbsummary.v2"
-    assert refreshed["runtime_minutes"] == 117
-    assert store.metadata_summary_status()["ready"] is True
+    refreshed = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
+    assert refreshed is not None
+    assert refreshed.source_version == "tmdbsummary.v2"
+    assert refreshed.runtime_minutes == 117
+    assert store.metadata_summary_status().ready is True
 
 
 def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled(
@@ -421,7 +456,7 @@ def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
             self.started: list[int] = []
             self.lock = threading.Lock()
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             with self.lock:
                 self.started.append(identity.tmdb_id)
                 if len(self.started) == 2:
@@ -447,8 +482,8 @@ def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
     assert result.metadata_requested == 2
     assert result.metadata_hydrated == 2
     assert both_started.is_set()
-    attached = store.attach_metadata_summary(store.list_entries())
-    assert {entry["metadata"]["name"] for entry in attached} == {
+    attached = store.attach_metadata_summary_models(store.list_entry_models())
+    assert {entry.metadata.name for entry in attached if entry.metadata is not None} == {
         "Name 22",
         "Name 55",
     }
@@ -481,7 +516,7 @@ def test_cache_sync_does_not_retry_old_metadata_failures_without_new_entries(
         def __init__(self) -> None:
             self.calls = 0
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             self.calls += 1
             if self.calls == 1:
                 raise TMDbRequestError("temporary failure")
@@ -497,7 +532,7 @@ def test_cache_sync_does_not_retry_old_metadata_failures_without_new_entries(
     assert first.metadata_errors == 1
     assert second.metadata_requested == 0
     assert second.metadata_hydrated == 0
-    assert store.attach_metadata_summary(store.list_entries())[0]["metadata"] is None
+    assert store.attach_metadata_summary_models(store.list_entry_models())[0].metadata is None
 
 
 def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
@@ -522,7 +557,7 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
             )
 
     class FakeTMDb:
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             assert identity.entry_type == "season"
             assert identity.tmdb_id == 33
             assert identity.parent_series_id == 22
@@ -542,10 +577,11 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
     ).refresh()
 
     assert result.metadata_hydrated == 1
-    attached = store.attach_metadata_summary(store.list_entries())[0]
-    assert attached["metadata"]["name"] == "Season 1"
-    assert attached["metadata"]["parent_series_id"] == 22
-    assert attached["metadata"]["season_number"] == 1
+    attached = store.attach_metadata_summary_models(store.list_entry_models())[0]
+    assert attached.metadata is not None
+    assert attached.metadata.name == "Season 1"
+    assert attached.metadata.parent_series_id == 22
+    assert attached.metadata.season_number == 1
 
 
 def test_cache_excludes_tombstones_by_default(tmp_path, monkeypatch) -> None:
@@ -564,8 +600,8 @@ def test_cache_excludes_tombstones_by_default(tmp_path, monkeypatch) -> None:
     store.initialize()
     store.apply_page(page, staging=False)
 
-    assert [entry["identity"] for entry in store.list_entries()] == ["movie:55"]
-    assert [entry["identity"] for entry in store.list_entries(include_tombstones=True)] == [
+    assert [entry.identity for entry in store.list_entry_models()] == ["movie:55"]
+    assert [entry.identity for entry in store.list_entry_models(include_tombstones=True)] == [
         "movie:55",
         "movie:66",
         "series:22",
@@ -593,9 +629,9 @@ def test_cache_search_matches_movies_series_and_seasons_in_saved_order(
         staging=False,
     )
 
-    entries = store.search_cached_entries(movie_ids={55}, series_ids={22, 99})
+    entries = store.search_cached_entry_models(movie_ids={55}, series_ids={22, 99})
 
-    assert [entry["identity"] for entry in entries] == [
+    assert [entry.identity for entry in entries] == [
         "series:22",
         "season:22:1:33",
         "movie:55",
@@ -616,7 +652,7 @@ def test_cache_does_not_advance_token_when_apply_fails(tmp_path, monkeypatch) ->
         store.apply_page(page, staging=False)
 
     assert store.read_sync_token() is None
-    assert store.list_entries(include_tombstones=True) == []
+    assert store.list_entry_models(include_tombstones=True) == []
 
 
 def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
@@ -646,7 +682,7 @@ def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
             if sync_token == "old":
                 raise CloudKitChangeTokenExpiredError("expired")
             assert sync_token is None
-            assert [entry["identity"] for entry in store.list_entries()] == ["movie:55"]
+            assert [entry.identity for entry in store.list_entry_models()] == ["movie:55"]
             return ZoneChangesPage(
                 records=[_live_record("series:22", "series", 22)],
                 sync_token="new",
@@ -657,7 +693,7 @@ def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
 
     assert result.rebuilt is True
     assert store.read_sync_token() == "new"
-    assert [entry["identity"] for entry in store.list_entries()] == ["series:22"]
+    assert [entry.identity for entry in store.list_entry_models()] == ["series:22"]
 
 
 def test_executor_fetches_zone_changes_with_pagination_token(monkeypatch) -> None:
@@ -691,7 +727,7 @@ def test_executor_fetches_zone_changes_with_pagination_token(monkeypatch) -> Non
 
     assert page.more_coming is True
     assert page.sync_token == "next-token"
-    assert page.records[0]["recordName"] == "movie:55"
+    assert page.records[0].effective_record_name == "movie:55"
     request = requests[0]
     assert request.url.path.endswith("/production/private/changes/zone")
     assert request.url.params["ckAPIToken"] == "api-secret-token"
@@ -837,7 +873,7 @@ def test_library_refresh_does_not_hold_cache_lock_during_tmdb_hydration(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             assert lock_depth == 0
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
 
@@ -900,7 +936,7 @@ def test_library_initialization_hydrates_full_library(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             calls.append(identity.tmdb_id)
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Movie")
 
@@ -1009,8 +1045,8 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     assert payload["summary"]["cache"]["records"] == 1
     assert payload["summary"]["cache"]["rebuilt"] is False
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
-    cached_entries = initialized_store.list_entries()
-    assert {entry["identity"] for entry in cached_entries} == {"series:22", "movie:55"}
+    cached_entries = initialized_store.list_entry_models()
+    assert {entry.identity for entry in cached_entries} == {"series:22", "movie:55"}
 
 
 def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
@@ -1059,7 +1095,7 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             assert identity.entry_type == "series"
             assert identity.tmdb_id == 22
             return _metadata_summary("series", 22, name="Alien Nation")
@@ -1083,9 +1119,12 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
     assert "[progress] Fetched page 1: 1 records (1 total)." in result.stderr
     assert "[progress] Hydrating TMDb summary metadata for 1 entries." in result.stderr
     assert "[progress] TMDb summary metadata 1/1 complete (0 errors)." in result.stderr
-    refreshed = initialized_store.attach_metadata_summary(initialized_store.list_entries())
-    series = next(entry for entry in refreshed if entry["identity"] == "series:22")
-    assert series["metadata"]["name"] == "Alien Nation"
+    refreshed = initialized_store.attach_metadata_summary_models(
+        initialized_store.list_entry_models()
+    )
+    series = next(entry for entry in refreshed if entry.identity == "series:22")
+    assert series.metadata is not None
+    assert series.metadata.name == "Alien Nation"
 
 
 def test_library_init_reports_tmdb_secure_storage_failure(
@@ -1632,7 +1671,7 @@ def test_library_refresh_meta_updates_full_library_cache(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> dict[str, Any]:
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
             assert identity.entry_type == "movie"
             assert identity.tmdb_id == 55
             return _metadata_summary("movie", 55, name="Alien")
@@ -1652,8 +1691,9 @@ def test_library_refresh_meta_updates_full_library_cache(
         "hydrated": 1,
         "errors": 0,
     }
-    refreshed = store.attach_metadata_summary(store.list_entries())[0]
-    assert refreshed["metadata"]["name"] == "Alien"
+    refreshed = store.attach_metadata_summary_models(store.list_entry_models())[0]
+    assert refreshed.metadata is not None
+    assert refreshed.metadata.name == "Alien"
 
 
 def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
@@ -1673,11 +1713,12 @@ def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
     )
 
     summary = _metadata_summary("movie", 55, name="Alien")
-    summary["source_version"] = "tmdb.http.summary.v2"
+    summary = summary.model_copy(update={"source_version": "tmdb.http.summary.v2"})
     store.upsert_metadata_summary(summary)
 
-    attached = store.attach_metadata_summary(store.list_entries())[0]["metadata"]
-    assert attached["source_version"] == "tmdbsummary.v2"
+    attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
+    assert attached is not None
+    assert attached.source_version == "tmdbsummary.v2"
     with sqlite3.connect(store.path) as db:
         stored = db.execute(
             "SELECT source_version FROM tmdb_metadata_summary WHERE metadata_key = ?",
@@ -1767,33 +1808,25 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         scope = LibraryCacheScope.default_for_user("_user")
         attach_calls = 0
 
-        def metadata_summary_status(self) -> dict[str, Any]:
-            return {
-                "tracked_entries": 1,
-                "hydrated_entries": 1,
-                "missing_entries": 0,
-                "ready": True,
-            }
+        def metadata_summary_status(self) -> CacheMetadataStatusResult:
+            return CacheMetadataStatusResult(
+                tracked_entries=1,
+                hydrated_entries=1,
+                missing_entries=0,
+                ready=True,
+            )
 
-        def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
+        def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
             assert title == "Alien"
-            return [
-                LibraryEntry.from_payload(
-                    {
-                        "identity": "movie:55",
-                        "kind": "snapshot",
-                        "entry_type": "movie",
-                        "tmdb_id": 55,
-                    }
-                )
-            ]
+            return [validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))]
 
-        def attach_metadata_summary_models(self, entries: list[LibraryEntry]) -> list[LibraryEntry]:
+        def attach_metadata_summary_models(
+            self,
+            entries: list[LibraryEntryModel],
+        ) -> list[LibraryEntryModel]:
             self.attach_calls += 1
             return [
-                entry.with_metadata(
-                    LibraryEntryMetadata.from_payload(_metadata_summary("movie", 55, name="Alien"))
-                )
+                entry.with_metadata(_metadata_summary("movie", 55, name="Alien"))
                 for entry in entries
             ]
 
@@ -1889,46 +1922,34 @@ def _fake_search_store() -> object:
         search_title_arg: str | None = None
         scope = LibraryCacheScope.default_for_user("_user")
 
-        def metadata_summary_status(self) -> dict[str, Any]:
-            return {
-                "tracked_entries": 3,
-                "hydrated_entries": 3,
-                "missing_entries": 0,
-                "ready": True,
-            }
+        def metadata_summary_status(self) -> CacheMetadataStatusResult:
+            return CacheMetadataStatusResult(
+                tracked_entries=3,
+                hydrated_entries=3,
+                missing_entries=0,
+                ready=True,
+            )
 
-        def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
+        def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
             self.search_title_arg = title
             return [
-                LibraryEntry.from_payload(
-                    {
-                        "identity": "movie:55",
-                        "kind": "snapshot",
-                        "entry_type": "movie",
-                        "tmdb_id": 55,
-                    }
-                ),
-                LibraryEntry.from_payload(
-                    {
-                        "identity": "series:22",
-                        "kind": "snapshot",
-                        "entry_type": "series",
-                        "tmdb_id": 22,
-                    }
-                ),
-                LibraryEntry.from_payload(
-                    {
-                        "identity": "season:22:1:33",
-                        "kind": "snapshot",
-                        "entry_type": "season",
-                        "tmdb_id": 33,
-                        "parent_series_id": 22,
-                        "season_number": 1,
-                    }
+                validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55)),
+                validate_library_entry(_snapshot_entry_payload("series:22", "series", 22)),
+                validate_library_entry(
+                    _snapshot_entry_payload(
+                        "season:22:1:33",
+                        "season",
+                        33,
+                        parent_series_id=22,
+                        season_number=1,
+                    )
                 ),
             ]
 
-        def attach_metadata_summary_models(self, entries: list[LibraryEntry]) -> list[LibraryEntry]:
+        def attach_metadata_summary_models(
+            self,
+            entries: list[LibraryEntryModel],
+        ) -> list[LibraryEntryModel]:
             return entries
 
     return FakeStore()
@@ -1941,34 +1962,70 @@ def _metadata_summary(
     name: str,
     parent_series_id: int | None = None,
     season_number: int | None = None,
-) -> dict[str, Any]:
-    return {
+) -> LibraryEntryMetadata:
+    return LibraryEntryMetadata.model_validate(
+        {
+            "entry_type": entry_type,
+            "tmdb_id": tmdb_id,
+            "parent_series_id": parent_series_id,
+            "season_number": season_number,
+            "language": None,
+            "name": name,
+            "name_translations": {},
+            "original_name": name,
+            "overview": f"{name} overview.",
+            "overview_translations": {},
+            "poster_path": "/poster.jpg",
+            "backdrop_path": "/backdrop.jpg",
+            "logo_path": None,
+            "original_language_code": "en",
+            "on_air_date": "1979-05-25",
+            "status": "Released" if entry_type == "movie" else "Returning Series",
+            "genres": [{"id": 878, "name": "Science Fiction"}],
+            "runtime_minutes": 117 if entry_type == "movie" else None,
+            "season_count": 3 if entry_type == "series" else None,
+            "episode_count": 22
+            if entry_type == "series"
+            else 10
+            if entry_type == "season"
+            else None,
+            "vote_average": 8.2,
+            "vote_count": 15432,
+            "popularity": 44.5,
+            "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
+            "source_version": "test",
+        }
+    )
+
+
+def _snapshot_entry_payload(
+    identity: str,
+    entry_type: str,
+    tmdb_id: int,
+    *,
+    parent_series_id: int | None = None,
+    season_number: int | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "identity": identity,
+        "kind": "snapshot",
         "entry_type": entry_type,
         "tmdb_id": tmdb_id,
-        "parent_series_id": parent_series_id,
-        "season_number": season_number,
-        "language": None,
-        "name": name,
-        "name_translations": {},
-        "original_name": name,
-        "overview": f"{name} overview.",
-        "overview_translations": {},
-        "poster_path": "/poster.jpg",
-        "backdrop_path": "/backdrop.jpg",
-        "logo_path": None,
-        "original_language_code": "en",
-        "on_air_date": "1979-05-25",
-        "status": "Released" if entry_type == "movie" else "Returning Series",
-        "genres": [{"id": 878, "name": "Science Fiction"}],
-        "runtime_minutes": 117 if entry_type == "movie" else None,
-        "season_count": 3 if entry_type == "series" else None,
-        "episode_count": 22 if entry_type == "series" else 10 if entry_type == "season" else None,
-        "vote_average": 8.2,
-        "vote_count": 15432,
-        "popularity": 44.5,
-        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-        "source_version": "test",
+        "schema_version": 2,
+        "on_display": True,
+        "date_saved": "2026-05-01T00:00:00Z",
+        "watch_status": "watched",
+        "is_date_tracking_enabled": False,
+        "favorite": False,
+        "notes": "",
+        "using_custom_poster": False,
+        "episode_progresses": [],
     }
+    if parent_series_id is not None:
+        payload["parent_series_id"] = parent_series_id
+    if season_number is not None:
+        payload["season_number"] = season_number
+    return payload
 
 
 def _insert_legacy_v1_metadata_summary(

@@ -3,11 +3,13 @@ from __future__ import annotations
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, replace
-from typing import Any, Protocol
+from typing import Protocol
 
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
+from anishelf_cli.models.common import AniShelfBaseModel
+from anishelf_cli.models.domain import LibraryEntryMetadata
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 
 
@@ -30,7 +32,7 @@ MAX_METADATA_HYDRATION_WORKERS = 8
 
 
 class TMDbSummaryClient(Protocol):
-    def fetch_summary(self, identity: TMDbSummaryIdentity) -> dict[str, Any]: ...
+    def fetch_summary(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,18 +50,10 @@ class LibraryCacheProgress:
 type LibraryCacheProgressCallback = Callable[[LibraryCacheProgress], None]
 
 
-@dataclass(frozen=True, slots=True)
-class MetadataHydrationResult:
+class MetadataHydrationResult(AniShelfBaseModel):
     requested: int
     hydrated: int
     errors: int
-
-    def to_payload(self) -> dict[str, int]:
-        return {
-            "requested": self.requested,
-            "hydrated": self.hydrated,
-            "errors": self.errors,
-        }
 
 
 @dataclass(slots=True)
@@ -106,9 +100,7 @@ class LibraryCacheSync:
         pages = 0
         records = 0
         metadata_targets = (
-            self.store.outdated_metadata_summary_targets()
-            if self.collect_metadata_targets
-            else []
+            self.store.outdated_metadata_summary_targets() if self.collect_metadata_targets else []
         )
         next_token: str | None = sync_token
         self._emit_progress("sync-started", rebuilt=False)
@@ -283,12 +275,12 @@ def fetch_metadata_summaries(
     *,
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
     progress_callback: Callable[[int, int, int], None] | None = None,
-) -> tuple[list[dict[str, Any]], int]:
+) -> tuple[list[LibraryEntryMetadata], int]:
     if not targets:
         return [], 0
 
     worker_count = max(1, min(max_workers, len(targets)))
-    summaries: list[dict[str, Any]] = []
+    summaries: list[LibraryEntryMetadata] = []
     errors = 0
 
     with ThreadPoolExecutor(max_workers=worker_count) as pool:

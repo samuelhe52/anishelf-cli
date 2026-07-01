@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel
+from anishelf_cli.models.common import AniShelfBaseModel
 
 
 class MetadataDepth(StrEnum):
@@ -23,6 +23,15 @@ class CallbackStrategy(StrEnum):
     LOOPBACK = "loopback"
 
 
-class AppState(BaseModel):
+class AppState(AniShelfBaseModel):
     json_output: bool = False
     verbose: bool = False
+
+
+__all__ = [
+    "AniShelfBaseModel",
+    "AppState",
+    "CallbackStrategy",
+    "LibraryListSort",
+    "MetadataDepth",
+]

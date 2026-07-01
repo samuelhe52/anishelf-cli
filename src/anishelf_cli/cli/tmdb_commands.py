@@ -82,7 +82,7 @@ def tmdb_search(
 
     payload = tmdb_search_payload(query, result)
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json", exclude_none=True))
         return
 
     render_tmdb_search(query, result)

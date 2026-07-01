@@ -58,6 +58,15 @@ spec.
 ## Near-Term Direction
 
 - Keep the CLI read-only while expanding library inspection and export depth.
+- Use one model system for structured data that crosses a boundary or moves
+  between layers: pydantic v2. Raw dict/list values are allowed only at
+  `httpx.Response.json()`, SQLite JSON columns, and Typer argument parsing.
+  Immediately after ingress, validate with `model_validate(...)`,
+  `model_validate_json(...)`, or `TypeAdapter(...)`; at egress, dump explicitly
+  with `model_dump(...)` or `model_dump_json(...)`.
+- Name transport models `*Payload` or `*Response`, internal models with domain
+  names, and CLI payloads `*Result` or `*Envelope`. Avoid `dict[str, Any]` in
+  service/store/query signatures except for true raw transport edge helpers.
 - Route real CloudKit requests through the executor instead of adding one-off
   request code in commands.
 - Keep JSON stdout clean and write progress, warnings, and diagnostics to

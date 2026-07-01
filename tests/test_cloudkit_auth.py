@@ -114,9 +114,7 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     )
 
     assert result.exit_code == 0, result.output
-    assert store.values == {
-        (descriptor.service, descriptor.account): "web-secret-token"
-    }
+    assert store.values == {(descriptor.service, descriptor.account): "web-secret-token"}
     assert json.loads(result.stdout)["status"] == "logged-in"
     combined = result.stdout + result.stderr
     assert "api-secret-token" not in combined
@@ -154,9 +152,7 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     )
 
     assert result.exit_code == 0, result.output
-    assert store.values == {
-        (descriptor.service, descriptor.account): "web-secret-token"
-    }
+    assert store.values == {(descriptor.service, descriptor.account): "web-secret-token"}
     assert opened == []
 
 

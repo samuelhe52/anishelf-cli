@@ -1,4 +1,3 @@
-from anishelf_cli.library.entries import EpisodeProgress, LibraryEntry, LibraryEntryMetadata
 from anishelf_cli.library.envelope import (
     has_any_found_item,
     library_get_cache_envelope,
@@ -16,6 +15,15 @@ from anishelf_cli.library.records import (
     LibraryRecordDecodeError,
     decode_library_entry_record,
 )
+from anishelf_cli.models.domain import (
+    EpisodeProgress,
+    LibraryEntry,
+    LibraryEntryMetadata,
+    LibraryEntryMetadataGenre,
+    LibraryEntryModel,
+    LibraryEntrySnapshot,
+    LibraryEntryTombstone,
+)
 
 __all__ = [
     "LIBRARY_ENTRY_RECORD_TYPE",
@@ -23,6 +31,10 @@ __all__ = [
     "EpisodeProgress",
     "LibraryEntry",
     "LibraryEntryMetadata",
+    "LibraryEntryMetadataGenre",
+    "LibraryEntryModel",
+    "LibraryEntrySnapshot",
+    "LibraryEntryTombstone",
     "LibraryIdentity",
     "LibraryIdentityError",
     "LibraryRecordDecodeError",

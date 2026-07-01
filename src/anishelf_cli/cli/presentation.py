@@ -6,7 +6,23 @@ from anishelf_cli.core.output import (
     HumanTableColumn,
     emit_human_blocks,
 )
-from anishelf_cli.library.entries import EpisodeProgress, LibraryEntry, LibraryEntryMetadata
+from anishelf_cli.models.domain import (
+    EpisodeProgress,
+    LibraryEntryMetadata,
+    LibraryEntryModel,
+    LibraryEntryTombstone,
+)
+from anishelf_cli.models.output import (
+    LibraryEntriesCacheResult,
+    LibraryGetEnvelope,
+    LibraryGetItemErrorResult,
+    LibraryGetItemFound,
+    TMDbSearchMatchResult,
+    TMDbSearchOutputResult,
+    TMDbSearchQueryResult,
+    TMDbSearchResultsResult,
+    TMDbSearchSummaryResult,
+)
 from anishelf_cli.tmdb.client import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
@@ -45,66 +61,48 @@ DISPLAY_FIELD_COLUMNS = {
 }
 
 
-def render_library_get(envelope: dict[str, object]) -> None:
-    items = envelope.get("items")
-    summary = envelope.get("summary")
+def render_library_get(envelope: LibraryGetEnvelope) -> None:
     blocks: list[HumanSection] = []
 
-    if isinstance(summary, dict):
-        blocks.append(
-            HumanSection(
-                "Library entries",
-                (
-                    ("Requested", summary.get("requested")),
-                    ("Found", summary.get("found")),
-                    ("Errors", summary.get("errors")),
-                ),
-            )
+    blocks.append(
+        HumanSection(
+            "Library entries",
+            (
+                ("Requested", envelope.summary.requested),
+                ("Found", envelope.summary.found),
+                ("Errors", envelope.summary.errors),
+            ),
         )
+    )
 
-    if isinstance(items, list):
-        for item in items:
-            if not isinstance(item, dict):
-                continue
-            blocks.append(_library_get_item_section(item))
+    for item in envelope.items:
+        blocks.append(_library_get_item_section(item))
 
     emit_human_blocks(blocks)
 
 
-def _library_get_item_section(item: dict[str, object]) -> HumanSection:
-    identity = str(item.get("identity") or "unknown identity")
-    status = str(item.get("status") or "unknown")
-    if status != "found":
-        error = item.get("error")
-        code = ""
-        message = ""
-        if isinstance(error, dict):
-            code = str(error.get("code") or "")
-            message = str(error.get("message") or "")
+def _library_get_item_section(
+    item: LibraryGetItemFound | LibraryGetItemErrorResult,
+) -> HumanSection:
+    identity = item.identity
+    if isinstance(item, LibraryGetItemErrorResult):
         return HumanSection(
             identity,
             (
-                ("Status", status),
-                ("Error", code),
-                ("Detail", message),
+                ("Status", item.status),
+                ("Error", item.error.code),
+                ("Detail", item.error.message),
             ),
         )
 
-    entry = item.get("entry")
-    if not isinstance(entry, dict):
-        return HumanSection(identity, (("Status", "decode-error"),))
-    try:
-        entry_model = LibraryEntry.from_payload(entry)
-    except ValueError:
-        return HumanSection(identity, (("Status", "decode-error"),))
-    metadata = entry_model.metadata
+    entry_model = item.entry
     title = entry_model.metadata_title
 
-    if entry_model.kind == "tombstone":
+    if isinstance(entry_model, LibraryEntryTombstone):
         return HumanSection(
             title or identity,
             (
-                ("Status", status),
+                ("Status", item.status),
                 ("Identity", identity),
                 ("Kind", entry_model.kind),
                 ("Type", entry_model.entry_type),
@@ -116,10 +114,11 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
             ),
         )
 
+    metadata = entry_model.metadata
     return HumanSection(
         title or identity,
         (
-            ("Status", status),
+            ("Status", item.status),
             ("Identity", identity),
             ("Title", title),
             ("Original title", _metadata_original_name(metadata)),
@@ -143,7 +142,7 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
             ("Date started", entry_model.date_started),
             ("Date finished", entry_model.date_finished),
             ("Date tracking", entry_model.is_date_tracking_enabled),
-            ("Poster", _metadata_field(metadata, "poster_path")),
+            ("Poster", metadata.poster_path if metadata is not None else None),
             ("Custom poster", entry_model.custom_poster_path),
             ("Episode progress", _format_episode_progresses(entry_model.episode_progresses)),
             ("Library updated", entry_model.library_updated_at),
@@ -173,27 +172,23 @@ def _optional_human_text(value: object) -> object:
     return value
 
 
-def _human_library_row(entry: LibraryEntry) -> dict[str, object]:
+def _human_library_row(entry: LibraryEntryModel) -> dict[str, object]:
     return {
         "title": entry.title,
         "identity": entry.identity,
         "type": entry.entry_type,
-        "status": entry.watch_status,
-        "score": entry.score,
-        "favorite": entry.favorite,
-        "display": entry.on_display,
-        "saved": _compact_date(entry.date_saved),
+        "status": getattr(entry, "watch_status", None),
+        "score": getattr(entry, "score", None),
+        "favorite": getattr(entry, "favorite", None),
+        "display": getattr(entry, "on_display", None),
+        "saved": _compact_date(getattr(entry, "date_saved", None)),
     }
 
 
 def _metadata_original_name(metadata: LibraryEntryMetadata | None) -> str | None:
-    return _metadata_field(metadata, "original_name")
-
-
-def _metadata_field(metadata: LibraryEntryMetadata | None, key: str) -> str | None:
     if metadata is None:
         return None
-    return metadata.string_field(key)
+    return metadata.original_name
 
 
 def _compact_date(value: object) -> object:
@@ -211,7 +206,7 @@ def _truncate_text(value: object, *, limit: int) -> object:
 
 
 def render_library_list(
-    entries: list[LibraryEntry],
+    entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
 ) -> None:
@@ -230,7 +225,7 @@ def render_library_list(
 
 def render_library_search(
     title: str,
-    entries: list[LibraryEntry],
+    entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
 ) -> None:
@@ -251,22 +246,18 @@ def _columns_for_display_fields(fields: tuple[str, ...]) -> tuple[HumanTableColu
     return tuple(DISPLAY_FIELD_COLUMNS[field] for field in fields)
 
 
-def render_library_export(payload: dict[str, object]) -> None:
-    summary = payload.get("summary")
-    if not isinstance(summary, dict):
-        raise RuntimeError("library export payload was not initialized correctly")
-    cache = summary.get("cache")
-    if not isinstance(cache, dict):
-        raise RuntimeError("library export cache payload was not initialized correctly")
-
+def render_library_export_result(
+    entries: list[LibraryEntryModel],
+    cache: LibraryEntriesCacheResult,
+) -> None:
     emit_human_blocks(
         [
             HumanSection(
                 "Library export",
                 (
-                    ("Entries", summary.get("entries")),
-                    ("Cache", cache.get("mode")),
-                    ("User", cache.get("user_record_name")),
+                    ("Entries", len(entries)),
+                    ("Cache", cache.mode),
+                    ("User", cache.user_record_name),
                 ),
             )
         ]
@@ -276,43 +267,26 @@ def render_library_export(payload: dict[str, object]) -> None:
 def tmdb_search_payload(
     query: TMDbTitleSearchQuery,
     result: TMDbTitleSearchResult,
-) -> dict[str, object]:
-    movies = [_tmdb_search_match_payload(match) for match in result.movies]
-    series = [_tmdb_search_match_payload(match) for match in result.series]
-    query_payload: dict[str, object] = {
-        "mode": query.mode,
-        "type": query.entry_type,
-    }
-    if query.title is not None:
-        query_payload["title"] = query.title
-    if query.year is not None:
-        query_payload["year"] = query.year
-    return {
-        "query": query_payload,
-        "summary": {
-            "movies": len(movies),
-            "series": len(series),
-            "total": len(movies) + len(series),
-        },
-        "results": {
-            "movies": movies,
-            "series": series,
-        },
-    }
-
-
-def _tmdb_search_match_payload(match: TMDbTitleSearchMatch) -> dict[str, object]:
-    return {
-        "entry_type": match.entry_type,
-        "tmdb_id": match.tmdb_id,
-        "title": match.title,
-        "original_title": match.original_title,
-        "release_date": match.release_date,
-        "original_language_code": match.original_language_code,
-        "overview": match.overview,
-        "poster_path": match.poster_path,
-        "details_url": match.details_url,
-    }
+) -> TMDbSearchOutputResult:
+    movies = tuple(TMDbSearchMatchResult.from_match(match) for match in result.movies)
+    series = tuple(TMDbSearchMatchResult.from_match(match) for match in result.series)
+    return TMDbSearchOutputResult(
+        query=TMDbSearchQueryResult(
+            mode=query.mode,
+            type=query.entry_type,
+            title=query.title,
+            year=query.year,
+        ),
+        summary=TMDbSearchSummaryResult(
+            movies=len(movies),
+            series=len(series),
+            total=len(movies) + len(series),
+        ),
+        results=TMDbSearchResultsResult(
+            movies=movies,
+            series=series,
+        ),
+    )
 
 
 def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResult) -> None:

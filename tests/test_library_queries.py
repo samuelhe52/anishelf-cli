@@ -5,14 +5,17 @@ from typing import Any
 
 import pytest
 
-from anishelf_cli.library.entries import LibraryEntry, LibraryEntryMetadata
+from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
+from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
     build_library_list_result,
     build_library_search_result,
+    cache_summary_payload,
     require_metadata_ready,
 )
 from anishelf_cli.models import LibraryListSort, MetadataDepth
+from anishelf_cli.models.output import CacheMetadataStatusResult
 
 
 def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -> None:
@@ -30,7 +33,7 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
     result = build_library_list_result(
         store,
         metadata_depth=MetadataDepth.NONE,
-        cache={"mode": "cached"},
+        cache=cache_summary_payload(store, None),
         watch_status=None,
         hidden=False,
         favorite=False,
@@ -42,7 +45,7 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
     assert [entry.identity for entry in result.entries] == ["movie:66", "movie:55"]
     assert all(entry.metadata is None for entry in result.entries)
     assert store.list_filter_kwargs["limit"] is None
-    assert result.to_payload()["metadata"] == {
+    assert result.model_dump(mode="json")["metadata"] == {
         "requested": "none",
         "attached": False,
         "source": None,
@@ -83,11 +86,11 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
         store,
         title="Alien",
         metadata_depth=MetadataDepth.SUMMARY,
-        cache={"mode": "cached"},
+        cache=cache_summary_payload(store, None),
     )
 
     assert store.search_title == "Alien"
-    payload = result.to_payload()
+    payload = result.model_dump(mode="json")
     assert payload["query"] == {"title": "Alien"}
     assert payload["metadata"] == {
         "requested": "summary",
@@ -122,9 +125,9 @@ class FakeQueryStore:
         self.list_filter_kwargs: dict[str, Any] = {}
         self.search_title: str | None = None
 
-    def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntry]:
+    def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
         _ = include_tombstones
-        return [LibraryEntry.from_payload(entry) for entry in self.entries]
+        return [validate_library_entry(entry) for entry in self.entries]
 
     def list_entry_models_filtered(
         self,
@@ -136,7 +139,7 @@ class FakeQueryStore:
         on_display: bool | None = None,
         sort: str = "saved",
         limit: int | None = None,
-    ) -> list[LibraryEntry]:
+    ) -> list[LibraryEntryModel]:
         self.list_filter_kwargs = {
             "include_tombstones": include_tombstones,
             "watch_status": watch_status,
@@ -147,42 +150,56 @@ class FakeQueryStore:
             "limit": limit,
         }
         entries = self.entries[:limit] if limit is not None else self.entries
-        return [LibraryEntry.from_payload(entry) for entry in entries]
+        return [validate_library_entry(entry) for entry in entries]
 
-    def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
+    def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
         self.search_title = title
-        return [LibraryEntry.from_payload(entry) for entry in self.entries]
+        return [validate_library_entry(entry) for entry in self.entries]
 
-    def metadata_summary_status(self) -> dict[str, int | bool]:
+    def metadata_summary_status(self) -> CacheMetadataStatusResult:
         tracked = len(self.entries)
         missing = 0 if self.metadata_ready else tracked
-        return {
-            "tracked_entries": tracked,
-            "hydrated_entries": tracked - missing,
-            "missing_entries": missing,
-            "ready": self.metadata_ready,
-        }
+        return CacheMetadataStatusResult(
+            tracked_entries=tracked,
+            hydrated_entries=tracked - missing,
+            missing_entries=missing,
+            ready=self.metadata_ready,
+        )
 
     def attach_metadata_summary_models(
         self,
-        entries: list[LibraryEntry],
-    ) -> list[LibraryEntry]:
-        attached: list[LibraryEntry] = []
+        entries: list[LibraryEntryModel],
+    ) -> list[LibraryEntryModel]:
+        attached: list[LibraryEntryModel] = []
         for entry in entries:
             attached.append(
                 entry.with_metadata(
                     None
                     if str(entry.identity) not in self.metadata
-                    else LibraryEntryMetadata.from_payload(self.metadata[str(entry.identity)])
+                    else LibraryEntryMetadata.model_validate(self.metadata[str(entry.identity)])
                 )
             )
         return attached
 
 
 def _entry(identity: str, entry_type: str, tmdb_id: int) -> dict[str, object]:
-    return {
+    payload: dict[str, object] = {
         "identity": identity,
         "kind": "snapshot",
         "entry_type": entry_type,
         "tmdb_id": tmdb_id,
+        "schema_version": 2,
+        "on_display": True,
+        "date_saved": "2026-05-01T00:00:00Z",
+        "watch_status": "watched",
+        "is_date_tracking_enabled": False,
+        "favorite": False,
+        "notes": "",
+        "using_custom_poster": False,
+        "episode_progresses": [],
     }
+    if entry_type == "season":
+        _, parent_series_id, season_number, _ = identity.split(":")
+        payload["parent_series_id"] = int(parent_series_id)
+        payload["season_number"] = int(season_number)
+    return payload

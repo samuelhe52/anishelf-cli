@@ -12,7 +12,11 @@ from anishelf_cli.cache.store import (
     LibraryCacheNotAvailableError,
     LibraryCacheStore,
 )
-from anishelf_cli.cache.sync import LibraryCacheProgress, LibraryCacheRefreshResult
+from anishelf_cli.cache.sync import (
+    LibraryCacheProgress,
+    LibraryCacheRefreshResult,
+    MetadataHydrationResult,
+)
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.library_service import (
     LibraryCommandService,
@@ -25,7 +29,7 @@ from anishelf_cli.cli.options import FieldListOption, MetadataOption
 from anishelf_cli.cli.presentation import (
     LIBRARY_LIST_DEFAULT_FIELDS,
     LIBRARY_SEARCH_DEFAULT_FIELDS,
-    render_library_export,
+    render_library_export_result,
     render_library_get,
     render_library_list,
     render_library_search,
@@ -36,7 +40,6 @@ from anishelf_cli.library import (
     library_get_cache_envelope,
     valid_lookup_record_names,
 )
-from anishelf_cli.library.entries import LibraryEntry
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
     attach_metadata_for_depth,
@@ -47,6 +50,20 @@ from anishelf_cli.library.queries import (
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
 from anishelf_cli.models import LibraryListSort, MetadataDepth
+from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.output import (
+    CacheStatusResult,
+    ClearedCachePathsResult,
+    LibraryCacheUpdateResult,
+    LibraryCacheUpdateSummaryResult,
+    LibraryClearCacheResult,
+    LibraryEntriesCacheResult,
+    LibraryRefreshMetadataCacheResult,
+    LibraryRefreshMetadataResult,
+    LibraryRefreshMetadataSummaryResult,
+    MetadataHydrationSummaryResult,
+    RemovedCacheFilesResult,
+)
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
@@ -90,26 +107,25 @@ def library_get(
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
     lookup_record_names = valid_lookup_record_names(identities)
-    cached_entries: dict[str, dict[str, object]] = {}
+    cached_entries: dict[str, LibraryEntryModel] = {}
     if lookup_record_names:
         store, _ = _library_read_store(sync=sync)
-        cached_entries = store.get_entries_by_identity(lookup_record_names)
+        cached_entries = store.get_entry_models_by_identity(lookup_record_names)
         if live_meta:
             _refresh_metadata_for_entries(store, list(cached_entries.values()))
         if metadata_depth is not MetadataDepth.NONE:
-            typed_entries = [LibraryEntry.from_payload(entry) for entry in cached_entries.values()]
             cached_entries = {
-                entry.identity: entry.to_payload()
+                entry.identity: entry
                 for entry in attach_metadata_for_depth(
                     store,
-                    typed_entries,
+                    list(cached_entries.values()),
                     metadata_depth,
                 )
             }
 
     envelope = library_get_cache_envelope(identities, cached_entries)
     if json_output_requested(ctx, json_output):
-        emit_json(envelope)
+        emit_json(envelope.model_dump(mode="json"))
     else:
         render_library_get(envelope)
 
@@ -130,27 +146,9 @@ def library_init(
         require_missing_cache=True,
         progress_callback=_emit_library_cache_progress,
     )
-    payload = {
-        "summary": {
-            "cache": {
-                "mode": "updated",
-                "updated": True,
-                "rebuilt": refresh_result.rebuilt,
-                "pages": refresh_result.pages,
-                "records": refresh_result.records,
-                "metadata_requested": refresh_result.metadata_requested,
-                "metadata_hydrated": refresh_result.metadata_hydrated,
-                "metadata_errors": refresh_result.metadata_errors,
-                "container": store.scope.container,
-                "environment": store.scope.environment,
-                "database": store.scope.database,
-                "zone": store.scope.zone,
-                "user_record_name": store.scope.user_record_name,
-            }
-        }
-    }
+    payload = _library_cache_update_result(store, refresh_result)
     if machine_output:
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
     emit_human_blocks(
         [
@@ -182,27 +180,9 @@ def library_sync(
         require_existing_cache=True,
         progress_callback=_emit_library_cache_progress,
     )
-    payload = {
-        "summary": {
-            "cache": {
-                "mode": "updated",
-                "updated": True,
-                "rebuilt": refresh_result.rebuilt,
-                "pages": refresh_result.pages,
-                "records": refresh_result.records,
-                "metadata_requested": refresh_result.metadata_requested,
-                "metadata_hydrated": refresh_result.metadata_hydrated,
-                "metadata_errors": refresh_result.metadata_errors,
-                "container": store.scope.container,
-                "environment": store.scope.environment,
-                "database": store.scope.database,
-                "zone": store.scope.zone,
-                "user_record_name": store.scope.user_record_name,
-            }
-        }
-    }
+    payload = _library_cache_update_result(store, refresh_result)
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
     emit_human_blocks(
         [
@@ -230,51 +210,39 @@ def library_status(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    payload = _library_status_payload()
+    status = service_library_status()
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(status.model_dump(mode="json"))
         return
 
-    summary = payload["summary"]
-    cache = payload["cache"]
-    active = payload["active"]
-    if not (isinstance(summary, dict) and isinstance(cache, dict) and isinstance(active, dict)):
-        raise RuntimeError("library status payload was not initialized correctly")
-
-    active_scope = active.get("scope")
-    active_user = None
-    if isinstance(active_scope, dict):
-        active_user = active_scope.get("user_record_name")
-    metadata = active.get("metadata")
-    metadata_hydrated = None
-    metadata_missing = None
+    active_user = status.active.scope.user_record_name if status.active.scope is not None else None
+    metadata = status.active.metadata
+    metadata_hydrated = metadata.hydrated_entries
+    metadata_missing = metadata.missing_entries
     metadata_state = "empty"
-    if isinstance(metadata, dict):
-        metadata_hydrated = metadata.get("hydrated_entries")
-        metadata_missing = metadata.get("missing_entries")
-        if summary.get("initialized"):
-            if metadata.get("ready"):
-                metadata_state = "complete"
-            elif metadata_hydrated:
-                metadata_state = "partial"
+    if status.initialized:
+        if metadata.ready:
+            metadata_state = "complete"
+        elif metadata_hydrated:
+            metadata_state = "partial"
 
     emit_human_blocks(
         [
             HumanSection(
                 "Library cache",
                 (
-                    ("Initialized", "yes" if summary.get("initialized") else "no"),
-                    ("Entries", active.get("entries")),
-                    ("Sync token", "present" if active.get("has_sync_token") else "missing"),
+                    ("Initialized", "yes" if status.initialized else "no"),
+                    ("Entries", status.active.entries),
+                    ("Sync token", "present" if status.active.has_sync_token else "missing"),
                     ("Metadata", metadata_state),
                     ("Metadata hydrated", metadata_hydrated),
                     ("Metadata missing", metadata_missing),
                     ("Active user", active_user),
-                    ("Scope count", summary.get("scope_count")),
-                    ("Cache files", summary.get("cache_files")),
-                    ("Lock files", summary.get("lock_files")),
-                    ("Cache path", cache.get("path")),
-                    ("Lock path", cache.get("lock_path")),
+                    ("Scope count", len(status.scopes)),
+                    ("Cache files", status.cache_files),
+                    ("Lock files", status.lock_files),
+                    ("Cache path", status.cache_path),
+                    ("Lock path", status.lock_path),
                 ),
             )
         ]
@@ -303,16 +271,16 @@ def library_clear_cache(
             raise typer.Exit(code=1)
 
     removed = LibraryCacheStore.remove_all_local_caches()
-    payload = {
-        "status": "cleared",
-        "removed": removed,
-        "paths": {
-            "cache_dir": str(LibraryCacheStore.library_cache_root()),
-            "lock_dir": str(LibraryCacheStore.library_lock_root()),
-        },
-    }
+    payload = LibraryClearCacheResult(
+        status="cleared",
+        removed=RemovedCacheFilesResult.model_validate(removed),
+        paths=ClearedCachePathsResult(
+            cache_dir=str(LibraryCacheStore.library_cache_root()),
+            lock_dir=str(LibraryCacheStore.library_lock_root()),
+        ),
+    )
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
 
     emit_human_blocks(
@@ -321,8 +289,8 @@ def library_clear_cache(
                 "Library cache clear",
                 (
                     ("Status", "cleared"),
-                    ("Cache files", removed["cache_files"]),
-                    ("Lock files", removed["lock_files"]),
+                    ("Cache files", payload.removed.cache_files),
+                    ("Lock files", payload.removed.lock_files),
                     ("Cache dir", str(LibraryCacheStore.library_cache_root())),
                     ("Lock dir", str(LibraryCacheStore.library_lock_root())),
                 ),
@@ -395,12 +363,12 @@ def library_list(
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
-    payload = result.to_payload()
+    payload = result.model_dump(mode="json")
     if machine_output:
         emit_json(payload)
         return
     render_library_list(
-        store.attach_metadata_summary_models(result.entries),
+        store.attach_metadata_summary_models(list(result.entries)),
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
     )
 
@@ -437,13 +405,13 @@ def library_search(
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
-    payload = result.to_payload()
+    payload = result.model_dump(mode="json")
     if machine_output:
         emit_json(payload)
         return
     render_library_search(
         title,
-        store.attach_metadata_summary_models(result.entries),
+        store.attach_metadata_summary_models(list(result.entries)),
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
     )
 
@@ -472,11 +440,11 @@ def library_export(
         metadata_depth=metadata_depth,
         cache=cache_summary_payload(store, refresh_result),
     )
-    payload = result.to_payload()
+    payload = result.model_dump(mode="json")
     if json_output_requested(ctx, json_output):
         emit_json(payload)
         return
-    render_library_export(payload)
+    render_library_export_result(list(result.entries), result.cache)
 
 
 @library_app.command(
@@ -491,23 +459,25 @@ def library_refresh_meta(
     ] = False,
 ) -> None:
     store = _library_store_for_read()
-    entries = store.list_entries(include_tombstones=False)
+    entries = store.list_entry_models(include_tombstones=False)
     refresh_result = _refresh_metadata_for_entries(store, entries)
-    payload = {
-        "summary": {
-            "entries": len(entries),
-            "metadata": refresh_result,
-            "cache": {
-                "container": store.scope.container,
-                "environment": store.scope.environment,
-                "database": store.scope.database,
-                "zone": store.scope.zone,
-                "user_record_name": store.scope.user_record_name,
-            },
-        }
-    }
+    payload = LibraryRefreshMetadataResult(
+        summary=LibraryRefreshMetadataSummaryResult(
+            entries=len(entries),
+            metadata=MetadataHydrationSummaryResult.model_validate(
+                refresh_result.model_dump(mode="json")
+            ),
+            cache=LibraryRefreshMetadataCacheResult(
+                container=store.scope.container,
+                environment=store.scope.environment,
+                database=store.scope.database,
+                zone=store.scope.zone,
+                user_record_name=store.scope.user_record_name,
+            ),
+        )
+    )
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
 
     emit_human_blocks(
@@ -516,9 +486,9 @@ def library_refresh_meta(
                 "Library metadata refresh",
                 (
                     ("Entries", len(entries)),
-                    ("Requested", refresh_result["requested"]),
-                    ("Hydrated", refresh_result["hydrated"]),
-                    ("Errors", refresh_result["errors"]),
+                    ("Requested", refresh_result.requested),
+                    ("Hydrated", refresh_result.hydrated),
+                    ("Errors", refresh_result.errors),
                     ("User", store.scope.user_record_name),
                 ),
             )
@@ -550,8 +520,33 @@ def _library_store_for_read() -> LibraryCacheStore:
         raise typer.Exit(code=2) from exc
 
 
-def _library_status_payload() -> dict[str, object]:
-    return service_library_status().to_payload()
+def _library_status_payload() -> CacheStatusResult:
+    return service_library_status()
+
+
+def _library_cache_update_result(
+    store: LibraryCacheStore,
+    refresh_result: LibraryCacheRefreshResult,
+) -> LibraryCacheUpdateResult:
+    return LibraryCacheUpdateResult(
+        summary=LibraryCacheUpdateSummaryResult(
+            cache=LibraryEntriesCacheResult(
+                mode="updated",
+                updated=True,
+                rebuilt=refresh_result.rebuilt,
+                pages=refresh_result.pages,
+                records=refresh_result.records,
+                metadata_requested=refresh_result.metadata_requested,
+                metadata_hydrated=refresh_result.metadata_hydrated,
+                metadata_errors=refresh_result.metadata_errors,
+                container=store.scope.container,
+                environment=store.scope.environment,
+                database=store.scope.database,
+                zone=store.scope.zone,
+                user_record_name=store.scope.user_record_name,
+            )
+        )
+    )
 
 
 def _initialize_library_store(
@@ -607,8 +602,8 @@ def _validate_watch_status(watch_status: str | None) -> None:
 
 def _refresh_metadata_for_entries(
     store: LibraryCacheStore,
-    entries: list[dict[str, object]],
-) -> dict[str, int]:
+    entries: list[LibraryEntryModel],
+) -> MetadataHydrationResult:
     tmdb_client = _tmdb_summary_client_or_exit()
     targets = store.metadata_summary_targets_for_entries(entries)
     return _refresh_metadata_targets(store, tmdb_client, targets)
@@ -620,7 +615,7 @@ def _refresh_metadata_targets(
     targets: list[TMDbSummaryIdentity],
     *,
     emit_progress_updates: bool = False,
-) -> dict[str, int]:
+) -> MetadataHydrationResult:
     return (
         _library_command_service()
         .refresh_metadata_targets(
@@ -629,7 +624,6 @@ def _refresh_metadata_targets(
             targets,
             emit_progress_updates=emit_progress_updates,
         )
-        .to_payload()
     )
 
 

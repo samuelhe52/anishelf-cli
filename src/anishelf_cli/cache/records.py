@@ -13,29 +13,37 @@ from anishelf_cli.library import (
     decode_library_entry_record,
     parse_library_identity,
 )
+from anishelf_cli.models.domain import (
+    LibraryEntryModel,
+    LibraryEntryTombstone,
+    validate_library_entry_json,
+)
+from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
-def apply_record(db: sqlite3.Connection, table: str, record: dict[str, Any]) -> None:
-    if record_deleted(record):
-        upsert_decoded_entry(db, table, deleted_entry(record), record)
+def apply_record(db: sqlite3.Connection, table: str, record: CloudKitRecord) -> None:
+    payload = _cloudkit_record_payload(record)
+    if record_deleted(payload):
+        upsert_decoded_entry(db, table, deleted_entry(payload), payload)
         return
 
     decoded = decode_library_entry_record(record)
-    upsert_decoded_entry(db, table, decoded, record)
+    upsert_decoded_entry(db, table, decoded, payload)
 
 
 def summary_target_from_record(
     db: sqlite3.Connection,
     table: str,
-    record: dict[str, Any],
+    record: CloudKitRecord,
 ) -> TMDbSummaryIdentity | None:
-    if record_deleted(record):
+    payload = _cloudkit_record_payload(record)
+    if record_deleted(payload):
         return None
     decoded = decode_library_entry_record(record)
-    if decoded.get("kind") != "snapshot":
+    if decoded.kind != "snapshot":
         return None
-    if entry_exists(db, table, str(decoded["identity"])):
+    if entry_exists(db, table, decoded.identity):
         return None
     return metadata.metadata_target_from_entry(decoded)
 
@@ -48,7 +56,7 @@ def entry_exists(db: sqlite3.Connection, table: str, identity: str) -> bool:
 def upsert_decoded_entry(
     db: sqlite3.Connection,
     table: str,
-    entry: dict[str, Any],
+    entry: LibraryEntryModel,
     raw_record: dict[str, Any],
 ) -> None:
     db.execute(
@@ -137,52 +145,58 @@ def upsert_decoded_entry(
     )
 
 
-def entry_row_params(entry: dict[str, Any], raw_record: dict[str, Any]) -> dict[str, Any]:
+def entry_row_params(entry: LibraryEntryModel, raw_record: dict[str, Any]) -> dict[str, Any]:
     return {
-        "identity": entry["identity"],
-        "kind": entry["kind"],
-        "entry_type": entry["entry_type"],
-        "tmdb_id": entry["tmdb_id"],
-        "parent_series_id": entry.get("parent_series_id"),
-        "season_number": entry.get("season_number"),
-        "watch_status": entry.get("watch_status"),
-        "score": entry.get("score"),
-        "favorite": optional_bool_int(entry.get("favorite")),
-        "on_display": optional_bool_int(entry.get("on_display")),
-        "date_saved": entry.get("date_saved"),
-        "date_started": entry.get("date_started"),
-        "date_finished": entry.get("date_finished"),
-        "is_date_tracking_enabled": optional_bool_int(entry.get("is_date_tracking_enabled")),
-        "notes": entry.get("notes"),
-        "using_custom_poster": optional_bool_int(entry.get("using_custom_poster")),
-        "custom_poster_path": entry.get("custom_poster_path"),
-        "library_updated_at": entry.get("library_updated_at"),
-        "tracking_updated_at": entry.get("tracking_updated_at"),
-        "deleted_at": entry.get("deleted_at"),
-        "schema_version": entry.get("schema_version"),
+        "identity": entry.identity,
+        "kind": entry.kind,
+        "entry_type": entry.entry_type,
+        "tmdb_id": entry.tmdb_id,
+        "parent_series_id": entry.parent_series_id,
+        "season_number": entry.season_number,
+        "watch_status": getattr(entry, "watch_status", None),
+        "score": getattr(entry, "score", None),
+        "favorite": optional_bool_int(getattr(entry, "favorite", None)),
+        "on_display": optional_bool_int(getattr(entry, "on_display", None)),
+        "date_saved": getattr(entry, "date_saved", None),
+        "date_started": getattr(entry, "date_started", None),
+        "date_finished": getattr(entry, "date_finished", None),
+        "is_date_tracking_enabled": optional_bool_int(
+            getattr(entry, "is_date_tracking_enabled", None)
+        ),
+        "notes": getattr(entry, "notes", None),
+        "using_custom_poster": optional_bool_int(getattr(entry, "using_custom_poster", None)),
+        "custom_poster_path": getattr(entry, "custom_poster_path", None),
+        "library_updated_at": getattr(entry, "library_updated_at", None),
+        "tracking_updated_at": getattr(entry, "tracking_updated_at", None),
+        "deleted_at": getattr(entry, "deleted_at", None),
+        "schema_version": entry.schema_version,
         "record_change_tag": record_change_tag(raw_record),
         "raw_record_json": json.dumps(raw_record, sort_keys=True, separators=(",", ":")),
-        "decoded_json": json.dumps(entry, sort_keys=True, separators=(",", ":")),
+        "decoded_json": entry.model_dump_json(
+            by_alias=False,
+            exclude_none=False,
+            round_trip=True,
+        ),
         "cached_at": _now_iso(),
     }
 
 
-def deleted_entry(record: dict[str, Any]) -> dict[str, Any]:
+def deleted_entry(record: dict[str, Any]) -> LibraryEntryModel:
     name = record_name(record)
     try:
         identity = parse_library_identity(name)
     except LibraryIdentityError as exc:
         raise LibraryCacheError(f"CloudKit deleted record has invalid identity {name}.") from exc
     deleted_at = deleted_timestamp(record)
-    return {
-        "kind": "deleted",
-        "identity": identity.raw,
-        "entry_type": identity.entry_type,
-        "tmdb_id": identity.tmdb_id,
-        "parent_series_id": identity.parent_series_id,
-        "season_number": identity.season_number,
-        "deleted_at": deleted_at,
-    }
+    return LibraryEntryTombstone(
+        kind="tombstone",
+        identity=identity.raw,
+        entry_type=identity.entry_type,
+        tmdb_id=identity.tmdb_id,
+        parent_series_id=identity.parent_series_id,
+        season_number=identity.season_number,
+        deleted_at=deleted_at,
+    )
 
 
 def record_deleted(record: dict[str, Any]) -> bool:
@@ -222,11 +236,11 @@ def optional_bool_int(value: object) -> int | None:
     return None
 
 
-def decoded_row(row: sqlite3.Row) -> dict[str, Any]:
-    value = json.loads(str(row["decoded_json"]))
-    if not isinstance(value, dict):
-        raise LibraryCacheError("Cached library entry is corrupt.")
-    return value
+def decoded_entry(row: sqlite3.Row) -> LibraryEntryModel:
+    try:
+        return validate_library_entry_json(str(row["decoded_json"]))
+    except ValueError as exc:
+        raise LibraryCacheError("Cached library entry is corrupt.") from exc
 
 
 def _now_iso() -> str:
@@ -235,3 +249,7 @@ def _now_iso() -> str:
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _cloudkit_record_payload(record: CloudKitRecord) -> dict[str, Any]:
+    return record.to_cloudkit_payload()

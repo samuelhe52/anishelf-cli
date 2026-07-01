@@ -9,6 +9,13 @@ from urllib.parse import urlsplit
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.library.identity import LibraryIdentity
+from anishelf_cli.models.domain import (
+    EpisodeProgress,
+    LibraryEntryModel,
+    LibraryEntrySnapshot,
+    LibraryEntryTombstone,
+)
+from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
 SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION = 2
@@ -21,16 +28,17 @@ class LibraryRecordDecodeError(ValueError):
     pass
 
 
-def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
-    record_name = _record_name(record)
-    record_type = nonempty_string_or_none(record.get("recordType"))
+def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:
+    payload = _cloudkit_record_payload(record)
+    record_name = _record_name(payload)
+    record_type = nonempty_string_or_none(payload.get("recordType"))
     if record_type != LIBRARY_ENTRY_RECORD_TYPE:
         actual_type = record_type or "missing record type"
         raise LibraryRecordDecodeError(
             f"Expected {LIBRARY_ENTRY_RECORD_TYPE} record, got {actual_type}."
         )
 
-    fields = record.get("fields")
+    fields = payload.get("fields")
     if not isinstance(fields, dict):
         raise LibraryRecordDecodeError("CloudKit record is missing fields.")
 
@@ -54,16 +62,16 @@ def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
     )
     deleted_at = _optional_datetime(fields, "deletedAt")
     if deleted_at is not None:
-        return {
-            "kind": "tombstone",
-            "identity": identity.raw,
-            "schema_version": schema_version,
-            "tmdb_id": tmdb_id,
-            "entry_type": entry_type,
-            "parent_series_id": parent_series_id,
-            "season_number": season_number,
-            "deleted_at": deleted_at,
-        }
+        return LibraryEntryTombstone(
+            kind="tombstone",
+            identity=identity.raw,
+            schema_version=schema_version,
+            tmdb_id=tmdb_id,
+            entry_type=entry_type,
+            parent_series_id=parent_series_id,
+            season_number=season_number,
+            deleted_at=deleted_at,
+        )
 
     watch_status = _required_string(fields, "watchStatus")
     if watch_status not in WATCH_STATUS_VALUES:
@@ -72,29 +80,29 @@ def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
     using_custom_poster = _required_bool(fields, "usingCustomPoster")
     custom_poster_path = _custom_poster_path(fields) if using_custom_poster else None
 
-    return {
-        "kind": "snapshot",
-        "identity": identity.raw,
-        "schema_version": schema_version,
-        "tmdb_id": tmdb_id,
-        "entry_type": entry_type,
-        "parent_series_id": parent_series_id,
-        "season_number": season_number,
-        "on_display": _required_bool(fields, "onDisplay"),
-        "date_saved": _required_datetime(fields, "dateSaved"),
-        "watch_status": watch_status,
-        "date_started": _optional_datetime(fields, "dateStarted"),
-        "date_finished": _optional_datetime(fields, "dateFinished"),
-        "is_date_tracking_enabled": _required_bool(fields, "isDateTrackingEnabled"),
-        "score": _optional_int(fields, "score"),
-        "favorite": _required_bool(fields, "favorite"),
-        "notes": _required_string(fields, "notes", allow_empty=True),
-        "using_custom_poster": using_custom_poster,
-        "custom_poster_path": custom_poster_path,
-        "episode_progresses": _required_episode_progresses(fields, "episodeProgresses"),
-        "library_updated_at": _optional_datetime(fields, "libraryUpdatedAt"),
-        "tracking_updated_at": _optional_datetime(fields, "trackingUpdatedAt"),
-    }
+    return LibraryEntrySnapshot(
+        kind="snapshot",
+        identity=identity.raw,
+        schema_version=schema_version,
+        tmdb_id=tmdb_id,
+        entry_type=entry_type,
+        parent_series_id=parent_series_id,
+        season_number=season_number,
+        on_display=_required_bool(fields, "onDisplay"),
+        date_saved=_required_datetime(fields, "dateSaved"),
+        watch_status=watch_status,
+        date_started=_optional_datetime(fields, "dateStarted"),
+        date_finished=_optional_datetime(fields, "dateFinished"),
+        is_date_tracking_enabled=_required_bool(fields, "isDateTrackingEnabled"),
+        score=_optional_int(fields, "score"),
+        favorite=_required_bool(fields, "favorite"),
+        notes=_required_string(fields, "notes", allow_empty=True),
+        using_custom_poster=using_custom_poster,
+        custom_poster_path=custom_poster_path,
+        episode_progresses=_required_episode_progresses(fields, "episodeProgresses"),
+        library_updated_at=_optional_datetime(fields, "libraryUpdatedAt"),
+        tracking_updated_at=_optional_datetime(fields, "trackingUpdatedAt"),
+    )
 
 
 def _record_name(record: dict[str, Any]) -> str:
@@ -174,7 +182,10 @@ def _storage_path_from_url(value: str) -> str | None:
     return None
 
 
-def _required_episode_progresses(fields: dict[str, Any], field: str) -> list[dict[str, Any]]:
+def _required_episode_progresses(
+    fields: dict[str, Any],
+    field: str,
+) -> tuple[EpisodeProgress, ...]:
     raw = _required_field_value(fields, field)
     if isinstance(raw, list):
         decoded = raw
@@ -186,24 +197,24 @@ def _required_episode_progresses(fields: dict[str, Any], field: str) -> list[dic
     if not isinstance(decoded, list):
         raise LibraryRecordDecodeError(f"Invalid {field} value.")
 
-    progresses: list[dict[str, Any]] = []
+    progresses: list[EpisodeProgress] = []
     for item in decoded:
         if not isinstance(item, dict):
             raise LibraryRecordDecodeError(f"Invalid {field} item.")
         progresses.append(
-            {
-                "season_number": _int_from_raw(item.get("seasonNumber"), "seasonNumber"),
-                "watched_through_episode": _int_from_raw(
+            EpisodeProgress(
+                season_number=_int_from_raw(item.get("seasonNumber"), "seasonNumber"),
+                watched_through_episode=_int_from_raw(
                     item.get("watchedThroughEpisode"),
                     "watchedThroughEpisode",
                 ),
-                "updated_at": _swift_reference_datetime_from_raw(
+                updated_at=_swift_reference_datetime_from_raw(
                     item.get("updatedAt"),
                     "updatedAt",
                 ),
-            }
+            )
         )
-    return progresses
+    return tuple(progresses)
 
 
 def _decode_episode_progress_string(raw: str) -> Any:
@@ -319,6 +330,10 @@ def _swift_reference_datetime_from_raw(raw: Any, field: str) -> str:
     if isinstance(raw, int | float) and not isinstance(raw, bool):
         return _iso_z(SWIFT_REFERENCE_DATE + timedelta(seconds=float(raw)))
     raise LibraryRecordDecodeError(f"Invalid {field} value.")
+
+
+def _cloudkit_record_payload(record: CloudKitRecord) -> dict[str, Any]:
+    return record.to_cloudkit_payload()
 
 
 def _iso_z(value: datetime) -> str:
