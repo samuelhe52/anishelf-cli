@@ -8,7 +8,7 @@ import httpx
 from typer.testing import CliRunner
 
 from anishelf_cli import config
-from anishelf_cli.cli import groups, root
+from anishelf_cli.cli import config_commands, groups, library_commands, root, tmdb_commands
 from anishelf_cli.cli.root import _normalize_metadata_args, app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
@@ -97,6 +97,15 @@ def test_root_help_lists_lib_alias() -> None:
     assert "lib" in result.stdout
 
 
+def test_command_tree_registers_public_groups() -> None:
+    group_names = {group.name for group in app.registered_groups}
+
+    assert {"auth", "config", "library", "lib", "tmdb"} <= group_names
+    assert groups.config_app is config_commands.config_app
+    assert groups.library_app is library_commands.library_app
+    assert groups.tmdb_app is tmdb_commands.tmdb_app
+
+
 def test_non_user_command_groups_are_removed() -> None:
     for command in ("zones", "records", "changes", "settings", "schema"):
         result = runner.invoke(app, [command, "--help"])
@@ -156,7 +165,7 @@ def test_normalize_metadata_args_preserves_none_level() -> None:
 
 
 def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata"])
 
@@ -166,7 +175,7 @@ def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
 
 
 def test_library_list_rejects_reserved_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "full"])
 
@@ -176,7 +185,7 @@ def test_library_list_rejects_reserved_metadata_level(monkeypatch) -> None:
 
 
 def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda: _fake_store())
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "none"])
 
@@ -350,11 +359,11 @@ def test_config_show_accepts_command_level_json() -> None:
 
 def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
     monkeypatch.setattr(
-        groups,
+        tmdb_commands,
         "resolve_tmdb_api_token",
         lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
     )
-    monkeypatch.setattr(groups, "default_secret_store", lambda: None)
+    monkeypatch.setattr(tmdb_commands, "default_secret_store", lambda: None)
 
     requests: list[httpx.Request] = []
 
@@ -363,7 +372,9 @@ def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
         return httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(groups, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client))
+    monkeypatch.setattr(
+        tmdb_commands, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client)
+    )
 
     result = runner.invoke(
         app,
@@ -373,7 +384,9 @@ def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert requests != []
     assert '"total": 1' in result.stdout
-    assert "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in result.stderr
+    assert (
+        "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in result.stderr
+    )
     assert "[verbose] TMDb response <- HTTP 200 GET" in result.stderr
     assert "tmdb-secret-token" not in result.stderr
     assert "api_key=tmdb-secret-token" not in result.stderr
@@ -382,18 +395,20 @@ def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
 
 def test_verbose_flag_resets_across_multiple_invocations(monkeypatch) -> None:
     monkeypatch.setattr(
-        groups,
+        tmdb_commands,
         "resolve_tmdb_api_token",
         lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
     )
-    monkeypatch.setattr(groups, "default_secret_store", lambda: None)
+    monkeypatch.setattr(tmdb_commands, "default_secret_store", lambda: None)
 
     client = httpx.Client(
         transport=httpx.MockTransport(
             lambda request: httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
         )
     )
-    monkeypatch.setattr(groups, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client))
+    monkeypatch.setattr(
+        tmdb_commands, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client)
+    )
 
     verbose_result = runner.invoke(
         app,
@@ -534,9 +549,7 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (
-        "[library]\n"
-        'metadata = "none"\n'
-        'display_fields = ["title", "identity", "saved"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "identity", "saved"]\n'
     )
 
 
@@ -544,9 +557,7 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        "[library]\n"
-        'metadata = "none"\n'
-        'display_fields = ["title", "identity"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "identity"]\n'
     )
 
     result = runner.invoke(
@@ -560,19 +571,14 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
         "metadata": "none",
         "display_fields": None,
     }
-    assert (tmp_path / "config" / "config.toml").read_text() == (
-        "[library]\n"
-        'metadata = "none"\n'
-    )
+    assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
 
 def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        "[library]\n"
-        'metadata = "none"\n'
-        'display_fields = ["title", "saved"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\n'
     )
 
     result = runner.invoke(
@@ -633,9 +639,7 @@ def test_config_show_rejects_unknown_library_key(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        "[library]\n"
-        'metadata = "none"\n'
-        "auto_sync = true\n"
+        '[library]\nmetadata = "none"\nauto_sync = true\n'
     )
 
     result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
@@ -678,10 +682,7 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
         "metadata": "none",
         "display_fields": None,
     }
-    assert config_file.read_text() == (
-        "[library]\n"
-        'metadata = "none"\n'
-    )
+    assert config_file.read_text() == ('[library]\nmetadata = "none"\n')
 
 
 def test_config_set_defaults_still_fails_on_broken_config_without_replacements(
@@ -701,7 +702,7 @@ def test_config_set_defaults_still_fails_on_broken_config_without_replacements(
 
 def test_config_set_tmdb_api_key_stores_without_echoing_secret(monkeypatch) -> None:
     store = MemorySecretStore()
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
+    monkeypatch.setattr(config_commands, "default_secret_store", lambda: store)
 
     tmdb = runner.invoke(
         app,
@@ -754,7 +755,7 @@ def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
                 ),
             )
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien", "--json"])
 
@@ -815,7 +816,7 @@ def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
                 series=(),
             )
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["--json", "tmdb", "search", "--title", "Alien"])
 
@@ -864,7 +865,7 @@ def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
                 series=(),
             )
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
@@ -899,7 +900,7 @@ def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:
                 ),
             )
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--json"])
 
@@ -917,7 +918,7 @@ def test_tmdb_search_treats_whitespace_title_as_discover_query(monkeypatch) -> N
             assert query == TMDbTitleSearchQuery(title=None, year=None, entry_type="all")
             return TMDbTitleSearchResult(movies=(), series=())
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "   ", "--json"])
 
@@ -948,7 +949,7 @@ def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -
                 series=(),
             )
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--type", "movie", "--year", "1979", "--json"])
 
@@ -966,7 +967,7 @@ def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:
             assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
             return TMDbTitleSearchResult(movies=(), series=())
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
@@ -982,7 +983,7 @@ def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:
 def test_tmdb_search_requires_configured_tmdb_api_key(monkeypatch) -> None:
     monkeypatch.delenv("ANI_TMDB_API_KEY", raising=False)
     monkeypatch.delenv("TMDB_API_KEY", raising=False)
-    monkeypatch.setattr(groups, "default_secret_store", lambda: MemorySecretStore())
+    monkeypatch.setattr(tmdb_commands, "default_secret_store", lambda: MemorySecretStore())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
@@ -1000,7 +1001,7 @@ def test_tmdb_search_reports_request_errors(monkeypatch) -> None:
             _ = query
             raise TMDbRequestError("TMDb title search failed.")
 
-    monkeypatch.setattr(groups, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 

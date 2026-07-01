@@ -12,8 +12,9 @@ import httpx
 import pytest
 from typer.testing import CliRunner
 
-from anishelf_cli.cache.store import LibraryCacheScope, LibraryCacheStore
-from anishelf_cli.cli import groups
+from anishelf_cli.cache.scope import LibraryCacheScope
+from anishelf_cli.cache.store import LibraryCacheStore
+from anishelf_cli.cli import library_commands
 from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
@@ -211,8 +212,8 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
     requests: list[httpx.Request] = []
 
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -232,7 +233,7 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+    monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
     init_result = runner.invoke(app, ["--json", "library", "init"])
     assert init_result.exit_code == 0, init_result.output
@@ -320,7 +321,7 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "_make_http_client",
         lambda: httpx.Client(
             transport=httpx.MockTransport(
@@ -357,8 +358,8 @@ def test_library_get_sync_refreshes_cache_before_lookup(
     requests: list[httpx.Request] = []
 
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: secret_store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -378,7 +379,7 @@ def test_library_get_sync_refreshes_cache_before_lookup(
         )
 
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "_make_http_client",
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
@@ -398,13 +399,10 @@ def test_library_get_does_not_sync_from_config_by_default(
 ) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "config.toml").write_text(
-        "[library]\n"
-        'metadata = "summary"\n'
-    )
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "summary"\n')
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "_make_http_client",
         lambda: httpx.Client(
             transport=httpx.MockTransport(
@@ -419,6 +417,7 @@ def test_library_get_does_not_sync_from_config_by_default(
     payload = json.loads(result.stdout)
     assert payload["items"][0]["entry"]["identity"] == "movie:55"
     assert requests == []
+
 
 def test_library_get_live_meta_refreshes_only_requested_entries(
     tmp_path,
@@ -440,7 +439,7 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     )
     requested: list[tuple[str, int]] = []
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "resolve_tmdb_api_token",
         lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
     )
@@ -453,7 +452,7 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
             requested.append((identity.entry_type, identity.tmdb_id))
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
 
-    monkeypatch.setattr(groups, "TMDbClient", FakeTMDbClient)
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
     result = runner.invoke(app, ["--json", "library", "get", "movie:55", "--live-meta"])
 
@@ -514,7 +513,7 @@ def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(
 def test_library_get_invalid_identity_is_item_error_without_network(monkeypatch) -> None:
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "_make_http_client",
         lambda: httpx.Client(
             transport=httpx.MockTransport(
@@ -563,8 +562,8 @@ def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch)
 def test_library_init_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -> None:
     store = _store_with_cloudkit_token("bad-web-secret-token")
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
 
     client = httpx.Client(
         transport=httpx.MockTransport(
@@ -582,7 +581,7 @@ def test_library_init_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -
             )
         )
     )
-    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+    monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["--json", "library", "init"])
 
@@ -605,10 +604,10 @@ def test_library_init_emits_stderr_progress_without_touching_json_stdout(
     store = _store_with_cloudkit_token("web-secret-token")
 
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
     monkeypatch.setattr(
-        groups,
+        library_commands,
         "resolve_tmdb_api_token",
         lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
     )
@@ -639,11 +638,13 @@ def test_library_init_emits_stderr_progress_without_touching_json_stdout(
             assert api_key == "tmdb-secret-token"
 
         def fetch_summary(self, identity) -> dict[str, Any]:
-            return _metadata_summary(identity.entry_type, identity.tmdb_id, name=f"Movie {identity.tmdb_id}")
+            return _metadata_summary(
+                identity.entry_type, identity.tmdb_id, name=f"Movie {identity.tmdb_id}"
+            )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
-    monkeypatch.setattr(groups, "TMDbClient", FakeTMDbClient)
+    monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
     result = runner.invoke(app, ["--json", "library", "init"])
 
@@ -667,8 +668,8 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
     store = _store_with_cloudkit_token("web-secret-token")
 
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path.endswith("/users/current"):
@@ -687,13 +688,19 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
         )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+    monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["--verbose", "--json", "library", "init"])
 
     assert result.exit_code == 0, result.output
-    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in result.stderr
-    assert "[verbose] CloudKit request -> POST https://api.apple-cloudkit.com/database/1/" in result.stderr
+    assert (
+        "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/"
+        in result.stderr
+    )
+    assert (
+        "[verbose] CloudKit request -> POST https://api.apple-cloudkit.com/database/1/"
+        in result.stderr
+    )
     assert "[verbose] CloudKit response <- HTTP 200 GET" in result.stderr
     assert "[verbose] CloudKit payload <- HTTP 200" in result.stderr
     assert "api-secret-token" not in result.stderr
@@ -797,12 +804,12 @@ def _install_lookup(
 ) -> MemorySecretStore:
     store = _store_with_cloudkit_token("web-secret-token")
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(groups, "default_secret_store", lambda: store)
-    monkeypatch.setattr(groups, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
     client = httpx.Client(
         transport=httpx.MockTransport(lambda request: httpx.Response(200, json=payload))
     )
-    monkeypatch.setattr(groups, "_make_http_client", lambda: client)
+    monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
     return store
 
 
@@ -818,7 +825,7 @@ def _install_cached_entry(
         ZoneChangesPage(records=[record], sync_token="t1", more_coming=False),
         staging=False,
     )
-    monkeypatch.setattr(groups, "_library_store_for_read", lambda: store)
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: store)
     return store
 
 
