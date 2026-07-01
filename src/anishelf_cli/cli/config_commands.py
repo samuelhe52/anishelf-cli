@@ -11,7 +11,7 @@ from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.options import FieldListOption
 from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
 from anishelf_cli.core.output import HumanSection, emit_error, emit_human_blocks, emit_json
-from anishelf_cli.models import CallbackStrategy, MetadataDepth
+from anishelf_cli.models import CallbackStrategy
 from anishelf_cli.models.output import (
     ConfigCallbackResult,
     ConfigCloudKitResult,
@@ -135,10 +135,10 @@ def config_show(
 def config_set_defaults(
     ctx: typer.Context,
     metadata: Annotated[
-        MetadataDepth | None,
+        str | None,
         typer.Option(
             "--metadata",
-            help="Default metadata level for library read commands.",
+            help="Default metadata level for library read commands: none or summary.",
             show_default=False,
         ),
     ] = None,
@@ -160,7 +160,7 @@ def config_set_defaults(
 
     if metadata is not None:
         try:
-            metadata = config.resolve_configured_metadata_depth(metadata.value)
+            metadata = config.resolve_configured_metadata_depth(metadata)
         except config.UserConfigError as exc:
             emit_error(str(exc))
             raise typer.Exit(code=2) from exc

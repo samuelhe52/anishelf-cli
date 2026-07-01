@@ -51,9 +51,10 @@ spec.
 - `library list` has first-pass ergonomic filters and ordering for common
   questions: watch status, hidden/display state, favorites, saved/updated/title
   sort, and result limits.
-- Low-level CloudKit diagnostics, settings, and schema checks are not
+- Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
-- Top-level `tmdb search` is still a placeholder.
+- `tmdb search` performs global TMDb title search, and discover-style popular
+  title lookup when no title is provided.
 
 ## Near-Term Direction
 
@@ -84,7 +85,6 @@ spec.
 
 ## Decisions Still Open
 
-- Exact command grammar for filters, stdin/file batch inputs, and partial
-  failures.
+- Exact command grammar for filters and stdin/file batch inputs.
 - Staleness and invalidation rules for TMDb summaries and details.
 - Whether low-level CloudKit diagnostics need a separate dev-only entry point.

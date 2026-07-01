@@ -10,8 +10,7 @@ Current reference constants:
 - Container: `iCloud.com.samuelhe.MyAnimeList`
 - Custom zone: `AniShelfLibrary`
 - Library entry record type: `LibraryEntry`
-- Settings record type: `LibrarySettings`
-- Settings record name: `userDefaults`
+- `LibrarySettings` records are not supported or planned for this CLI.
 
 Stable library identities are semantic record names:
 
@@ -59,7 +58,7 @@ include:
 - `library list [--sync] [--metadata[=none|summary|details|full]]`
 - `library search --title` with optional `--sync` and `--metadata`
 - `library export` with optional `--sync` and `--metadata`
-- `tmdb search --title`
+- `tmdb search [--title]`
 
 `library init` is the explicit bootstrap entry point for the local cache.
 `library sync` is the explicit refresh entry point after bootstrap. Other
@@ -78,10 +77,10 @@ counts or library list/export output.
 `library search --title` depends on cached TMDb summary metadata. If that
 metadata is incomplete or unavailable, the command should fail explicitly and
 tell the user how to hydrate metadata first. Use `tmdb search --title` for
-global TMDb discovery.
+global TMDb title search, or omit `--title` for popular-title discovery.
 
-Low-level CloudKit zone, record, change, settings, and schema-check commands
-are diagnostics. Keep them out of the normal user command tree unless a future
+Low-level CloudKit zone, record, change, and schema-check commands are
+diagnostics. Keep them out of the normal user command tree unless a future
 dev-only entry point is intentionally added.
 
 ## Batch And Output
@@ -91,8 +90,9 @@ input can grow from positional arguments first, then stdin/file/JSONL when a
 real workflow needs it.
 
 Batch output should preserve caller order, keep item-level errors, and keep
-progress or diagnostics on stderr. Partial-success exit behavior should be
-defined when the first batch command needs it.
+progress or diagnostics on stderr. `library get` exits nonzero only when no
+requested item is found; partial failures remain item-level errors in the output
+envelope, so agents should inspect `summary.errors`.
 
 ## Metadata Hydration
 
@@ -102,15 +102,12 @@ Hydration should be explicit and optional.
 
 The CLI decision is to keep metadata on library commands instead of exposing a
 separate top-level hydration pass. Bare `--metadata` should request the default
-summary level, while explicit `none`, `summary`, `details`, and `full` values
-should control the TMDb depth as implemented. Both `--metadata none` and
-`--metadata=none` should behave the same. If a positional identity or title is
-literally `none`, `summary`, `details`, or `full`, require `--` before that
-positional argument so it is not consumed as the metadata level. `none` means
-no TMDb request.
-
-Exact hydrated metadata fields for each depth should be finalized alongside the
-first implemented metadata-enrichment path.
+summary level. Explicit `none` and `summary` are implemented; `details` and
+`full` are reserved and should fail clearly until detail metadata caching exists.
+Both `--metadata none` and `--metadata=none` should behave the same. If a
+positional identity or title is literally `none`, `summary`, `details`, or
+`full`, require `--` before that positional argument so it is not consumed as
+the metadata level. `none` means no TMDb request.
 
 `library init` should fetch the full library and hydrate TMDb summary metadata
 for every entry when a TMDb key is available. After that initialization pass,

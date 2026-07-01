@@ -42,14 +42,12 @@ library concepts instead of raw CloudKit records.
 - The default CloudKit environment is `production`.
 - The default database scope is `private`.
 - The AniShelf CloudKit custom zone is `AniShelfLibrary`.
-- The synced record types are `LibraryEntry` and `LibrarySettings`.
-- The settings record name is `userDefaults`.
+- The CLI syncs `LibraryEntry` records only.
 - User-scoped CloudKit web auth tokens belong in secure local storage.
 - TMDb API keys belong in secure local storage or environment variables.
 - CloudKit app auth may be embedded as public app material, with environment
   overrides for development and diagnostics.
-- `LibrarySettings` is an internal schema/cache concern, not a primary
-  user-facing command surface.
+- `LibrarySettings` is not a supported or planned CLI surface.
 - TMDb metadata attachment belongs on library read commands via `--metadata`,
   while explicit cache refresh stays under `library refresh-meta` rather than a
   separate top-level workflow.
