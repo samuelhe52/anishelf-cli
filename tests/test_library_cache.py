@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -47,7 +47,7 @@ class MemorySecretStore:
 
 
 @contextmanager
-def null_lock(path: Path) -> Iterator[None]:
+def null_lock(path: Path) -> Generator[None]:
     _ = path
     yield
 
@@ -799,7 +799,7 @@ def test_library_refresh_does_not_hold_cache_lock_during_tmdb_hydration(
     monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
 
     @contextmanager
-    def tracking_lock(path: Path) -> Iterator[None]:
+    def tracking_lock(path: Path) -> Generator[None]:
         nonlocal lock_depth
         _ = path
         lock_depth += 1

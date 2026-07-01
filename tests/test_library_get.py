@@ -3,7 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -40,7 +40,7 @@ class MemorySecretStore:
 
 
 @contextmanager
-def null_lock(path: Path) -> Iterator[None]:
+def null_lock(path: Path) -> Generator[None]:
     _ = path
     yield
 

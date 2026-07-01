@@ -7,6 +7,8 @@ reading the code.
   that should not drift casually.
 - `implementation-state.md`: Lightweight snapshot of what the repo currently
   implements and the likely next work.
+- `ux-evaluation.md`: Hands-on from-scratch UX evaluation (human + agent
+  perspectives) with prioritized optimization recommendations.
 - `reference/cloudkit-auth.md`: CloudKit login, web auth token execution,
   locking, retries, and redaction notes.
 - `reference/cloudkit-app-auth.md`: Embedded public app auth, environment

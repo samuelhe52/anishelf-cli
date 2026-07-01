@@ -1,5 +1,5 @@
 import json
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -1103,7 +1103,7 @@ def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> Non
         original_delete_password(service, account)
 
     @contextmanager
-    def recording_lock(path: Path) -> Iterator[None]:
+    def recording_lock(path: Path) -> Generator[None]:
         _ = path
         events.append("enter-lock")
         try:
@@ -1286,7 +1286,7 @@ def test_whoami_saves_successor_token_before_releasing_lock(monkeypatch) -> None
     store.set_password = set_password  # type: ignore[method-assign]
 
     @contextmanager
-    def recording_lock(path: Path) -> Iterator[None]:
+    def recording_lock(path: Path) -> Generator[None]:
         _ = path
         events.append("enter-lock")
         try:

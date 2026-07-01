@@ -18,7 +18,8 @@ spec.
   use.
 - `auth logout` removes the stored CloudKit web auth token and clears all local
   library cache files.
-- `config show` and `config set-tmdb-api-key` are implemented.
+- `config show`, `config set-defaults`, and `config set-tmdb-api-key` are
+  implemented.
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.
@@ -26,6 +27,8 @@ spec.
   aligned tables for collections.
 - `library init` initializes a rebuildable SQLite cache of `LibraryEntry`
   records from CloudKit, and `library sync` refreshes that initialized cache.
+- `library init` now keeps JSON stdout clean while still emitting cache and
+  TMDb hydration progress to stderr.
 - `library status` reports local cache initialization state, and
   TMDb summary metadata readiness, and
   `library clear-cache` removes all local library cache files after explicit

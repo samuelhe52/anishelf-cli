@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Iterator
+from collections.abc import Generator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -89,7 +89,7 @@ class LibraryCacheStore:
         }
 
     @contextmanager
-    def locked(self) -> Iterator[None]:
+    def locked(self) -> Generator[None]:
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         with FileLock(str(self.lock_path)):
             yield
@@ -442,7 +442,7 @@ class LibraryCacheStore:
         return db
 
     @contextmanager
-    def _connect_initialized(self) -> Iterator[sqlite3.Connection]:
+    def _connect_initialized(self) -> Generator[sqlite3.Connection]:
         self.initialize()
         with self._connect() as db:
             yield db
