@@ -95,6 +95,19 @@ class MetadataHydrationResult(AniShelfBaseModel):
     errors: int
 
 
+def _refresh_result_with_hydration(
+    refresh_result: LibraryCacheRefreshResult,
+    hydration_result: MetadataHydrationResult,
+) -> LibraryCacheRefreshResult:
+    payload = refresh_result.model_dump(mode="python", round_trip=True)
+    payload.update(
+        metadata_requested=hydration_result.requested,
+        metadata_hydrated=hydration_result.hydrated,
+        metadata_errors=hydration_result.errors,
+    )
+    return LibraryCacheRefreshResult.model_validate(payload)
+
+
 @dataclass(slots=True)
 class LibraryCacheSync:
     store: LibraryCacheStore
@@ -128,13 +141,7 @@ class LibraryCacheSync:
             max_workers=self.metadata_workers,
             progress_callback=self.progress_callback,
         )
-        return refresh_result.model_copy(
-            update={
-                "metadata_requested": hydration_result.requested,
-                "metadata_hydrated": hydration_result.hydrated,
-                "metadata_errors": hydration_result.errors,
-            }
-        )
+        return _refresh_result_with_hydration(refresh_result, hydration_result)
 
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
         pages = 0

@@ -23,7 +23,7 @@ from anishelf_cli.models.output import (
     TMDbSearchResultsResult,
     TMDbSearchSummaryResult,
 )
-from anishelf_cli.tmdb.client import (
+from anishelf_cli.models.tmdb import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
     TMDbTitleSearchResult,

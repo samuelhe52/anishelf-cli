@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import Field, StrictFloat, StrictInt, StrictStr, field_validator
 
@@ -13,41 +13,6 @@ from anishelf_cli.models.domain import (
 )
 
 TMDB_SUMMARY_SOURCE_VERSION = "tmdb.http.summary.v2"
-
-
-class TMDbTitleSearchQuery(AniShelfBaseModel):
-    title: StrictStr | None = None
-    year: StrictInt | None = None
-    entry_type: Literal["all", "movie", "series"] = "all"
-
-    @property
-    def mode(self) -> str:
-        return "search" if self.title else "discover"
-
-
-class TMDbTitleSearchMatch(AniShelfBaseModel):
-    entry_type: StrictStr
-    tmdb_id: StrictInt
-    title: StrictStr | None
-    original_title: StrictStr | None
-    release_date: StrictStr | None
-    original_language_code: StrictStr | None
-    overview: StrictStr | None
-    poster_path: StrictStr | None
-    details_url: StrictStr
-
-
-class TMDbTitleSearchResult(AniShelfBaseModel):
-    movies: tuple[TMDbTitleSearchMatch, ...]
-    series: tuple[TMDbTitleSearchMatch, ...]
-
-    @property
-    def movie_ids(self) -> set[int]:
-        return {match.tmdb_id for match in self.movies}
-
-    @property
-    def series_ids(self) -> set[int]:
-        return {match.tmdb_id for match in self.series}
 
 
 class TMDbGenrePayload(AniShelfBaseModel):
@@ -81,23 +46,6 @@ class TMDbSearchItem(AniShelfBaseModel):
         if value is None:
             return ()
         return value
-
-    def to_match(self, entry_type: Literal["movie", "series"]) -> TMDbTitleSearchMatch | None:
-        if self.id is None:
-            return None
-        return TMDbTitleSearchMatch(
-            entry_type=entry_type,
-            tmdb_id=self.id,
-            title=nonempty_string_or_none(self.title) or nonempty_string_or_none(self.name),
-            original_title=nonempty_string_or_none(self.original_title)
-            or nonempty_string_or_none(self.original_name),
-            release_date=nonempty_string_or_none(self.release_date)
-            or nonempty_string_or_none(self.first_air_date),
-            original_language_code=nonempty_string_or_none(self.original_language),
-            overview=nonempty_string_or_none(self.overview),
-            poster_path=nonempty_string_or_none(self.poster_path),
-            details_url=details_link(TMDbSummaryIdentity(entry_type=entry_type, tmdb_id=self.id)),
-        )
 
 
 class TMDbSearchResponse(AniShelfBaseModel):
@@ -181,6 +129,13 @@ class _TMDbSummaryBase(AniShelfBaseModel):
         return None
 
 
+def _metadata_with_updates(
+    metadata: LibraryEntryMetadata,
+    **updates: object,
+) -> LibraryEntryMetadata:
+    return metadata.with_updates(**updates)
+
+
 class TMDbMovieSummaryResponse(_TMDbSummaryBase):
     adult: bool | None = None
     # Keep rarely used nested TMDb detail blobs raw until a concrete metadata depth needs them.
@@ -204,8 +159,9 @@ class TMDbMovieSummaryResponse(_TMDbSummaryBase):
 
     def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
         runtime = strict_int_or_none(self.runtime)
-        return self._base_domain_metadata(identity).model_copy(
-            update={"runtime_minutes": runtime if runtime is not None and runtime > 0 else None}
+        return _metadata_with_updates(
+            self._base_domain_metadata(identity),
+            runtime_minutes=runtime if runtime is not None and runtime > 0 else None,
         )
 
 
@@ -238,15 +194,12 @@ class TMDbSeriesSummaryResponse(_TMDbSummaryBase):
     def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
         season_count = strict_int_or_none(self.number_of_seasons)
         episode_count = strict_int_or_none(self.number_of_episodes)
-        return self._base_domain_metadata(identity).model_copy(
-            update={
-                "season_count": (
-                    season_count if season_count is not None and season_count >= 0 else None
-                ),
-                "episode_count": (
-                    episode_count if episode_count is not None and episode_count >= 0 else None
-                ),
-            }
+        return _metadata_with_updates(
+            self._base_domain_metadata(identity),
+            season_count=season_count if season_count is not None and season_count >= 0 else None,
+            episode_count=(
+                episode_count if episode_count is not None and episode_count >= 0 else None
+            ),
         )
 
 
@@ -268,8 +221,9 @@ class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
         return nonempty_string_or_none(self.air_date)
 
     def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        return self._base_domain_metadata(identity).model_copy(
-            update={"episode_count": len(self.episodes)}
+        return _metadata_with_updates(
+            self._base_domain_metadata(identity),
+            episode_count=len(self.episodes),
         )
 
 

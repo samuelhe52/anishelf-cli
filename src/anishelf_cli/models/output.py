@@ -6,7 +6,7 @@ from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryModel
-from anishelf_cli.models.transport.tmdb import TMDbTitleSearchMatch
+from anishelf_cli.models.tmdb import TMDbTitleSearchMatch
 
 
 class LibraryGetItemError(AniShelfBaseModel):

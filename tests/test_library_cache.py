@@ -1624,7 +1624,7 @@ def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
     summary = _metadata_summary("movie", 55, name="Alien")
-    summary = summary.model_copy(update={"source_version": "tmdb.http.summary.v2"})
+    summary = summary.with_updates(source_version="tmdb.http.summary.v2")
     store.upsert_metadata_summary(summary)
 
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata

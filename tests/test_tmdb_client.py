@@ -3,17 +3,13 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
 from anishelf_cli.models.transport.tmdb import (
     TMDbMovieSummaryResponse,
     TMDbSeasonSummaryResponse,
     TMDbSeriesSummaryResponse,
 )
-from anishelf_cli.tmdb.client import (
-    TMDbClient,
-    TMDbRequestError,
-    TMDbSummaryIdentity,
-    TMDbTitleSearchQuery,
-)
+from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError, TMDbSummaryIdentity
 
 
 def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> None:

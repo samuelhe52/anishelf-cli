@@ -8,18 +8,23 @@ from typing import Literal, TypeVar
 import httpx
 from pydantic import ValidationError
 
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.core.output import emit_verbose
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
-from anishelf_cli.models.transport.tmdb import (
-    TMDbMovieSummaryResponse,
-    TMDbSearchResponse,
-    TMDbSeasonSummaryResponse,
-    TMDbSeriesSummaryResponse,
+from anishelf_cli.models.tmdb import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
     TMDbTitleSearchResult,
+)
+from anishelf_cli.models.transport.tmdb import (
+    TMDbMovieSummaryResponse,
+    TMDbSearchResponse,
+    TMDbSearchItem,
+    TMDbSeasonSummaryResponse,
+    TMDbSeriesSummaryResponse,
+    details_link,
 )
 
 ModelT = TypeVar("ModelT", bound=AniShelfBaseModel)
@@ -190,10 +195,31 @@ def _title_search_matches(
 ) -> tuple[TMDbTitleSearchMatch, ...]:
     matches: list[TMDbTitleSearchMatch] = []
     for item in response.results:
-        match = item.to_match(entry_type)
+        match = _title_search_match(entry_type, item)
         if match is not None:
             matches.append(match)
     return tuple(matches)
+
+
+def _title_search_match(
+    entry_type: Literal["movie", "series"],
+    item: TMDbSearchItem,
+) -> TMDbTitleSearchMatch | None:
+    if item.id is None:
+        return None
+    return TMDbTitleSearchMatch(
+        entry_type=entry_type,
+        tmdb_id=item.id,
+        title=nonempty_string_or_none(item.title) or nonempty_string_or_none(item.name),
+        original_title=nonempty_string_or_none(item.original_title)
+        or nonempty_string_or_none(item.original_name),
+        release_date=nonempty_string_or_none(item.release_date)
+        or nonempty_string_or_none(item.first_air_date),
+        original_language_code=nonempty_string_or_none(item.original_language),
+        overview=nonempty_string_or_none(item.overview),
+        poster_path=nonempty_string_or_none(item.poster_path),
+        details_url=details_link(TMDbSummaryIdentity(entry_type=entry_type, tmdb_id=item.id)),
+    )
 
 
 def _retryable_status(status_code: int) -> bool:

@@ -150,6 +150,29 @@ class LibraryEntryMetadata(AniShelfBaseModel):
             object.__setattr__(self, "genre_ids", tuple(genre.id for genre in self.genres))
         return self
 
+    @model_validator(mode="after")
+    def _validate_identity_context(self) -> Self:
+        identity_fields = (
+            self.entry_type,
+            self.tmdb_id,
+            self.parent_series_id,
+            self.season_number,
+        )
+        if all(field is None for field in identity_fields):
+            return self
+        if self.entry_type is None or self.tmdb_id is None:
+            raise ValueError("Library entry metadata identity fields are incomplete.")
+        try:
+            library_identity_from_fields(
+                self.entry_type,
+                self.tmdb_id,
+                self.parent_series_id,
+                self.season_number,
+            )
+        except ValueError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
+
     @field_serializer("name_translations", "overview_translations", when_used="json")
     def _serialize_translations(self, value: tuple[tuple[str, str], ...]) -> dict[str, str]:
         return dict(value)
@@ -187,6 +210,11 @@ class LibraryEntryMetadata(AniShelfBaseModel):
             exclude={"genre_ids"},
             context={"storage_payload": True},
         )
+
+    def with_updates(self, **updates: object) -> LibraryEntryMetadata:
+        payload = self.model_dump(mode="python", round_trip=True)
+        payload.update(updates)
+        return self.__class__.model_validate(payload)
 
 
 class _LibraryEntryBase(AniShelfBaseModel):
@@ -291,8 +319,34 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
             raise ValueError("Library entry episode_progresses value is invalid.")
         return value
 
+    @model_validator(mode="after")
+    def _validate_metadata_identity(self) -> Self:
+        if self.metadata is None:
+            return self
+        metadata_identity = (
+            self.metadata.entry_type,
+            self.metadata.tmdb_id,
+            self.metadata.parent_series_id,
+            self.metadata.season_number,
+        )
+        if all(field is None for field in metadata_identity):
+            return self
+        entry_identity = (
+            self.entry_type,
+            self.tmdb_id,
+            self.parent_series_id,
+            self.season_number,
+        )
+        if metadata_identity != entry_identity:
+            raise ValueError("Library entry metadata identity does not match entry.")
+        return self
+
     def with_metadata(self, metadata: LibraryEntryMetadata | None) -> LibraryEntrySnapshot:
-        return self.model_copy(update={"metadata": metadata})
+        if metadata is not None and not isinstance(metadata, LibraryEntryMetadata):
+            raise TypeError("Library entry metadata must be a LibraryEntryMetadata instance.")
+        payload = self.model_dump(mode="python", round_trip=True)
+        payload["metadata"] = metadata
+        return self.__class__.model_validate(payload)
 
     def without_metadata(self) -> LibraryEntrySnapshot:
         return self.with_metadata(None)

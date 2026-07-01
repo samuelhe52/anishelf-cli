@@ -13,14 +13,13 @@ from anishelf_cli.cli.root import _normalize_metadata_args, app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
-from anishelf_cli.secrets import cloudkit_web_auth_token_secret
-from anishelf_cli.tmdb.client import (
-    TMDbClient,
-    TMDbRequestError,
+from anishelf_cli.models.tmdb import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
     TMDbTitleSearchResult,
 )
+from anishelf_cli.secrets import cloudkit_web_auth_token_secret
+from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 from tests.support import MemorySecretStore, runner
 

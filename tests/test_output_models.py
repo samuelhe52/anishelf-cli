@@ -7,7 +7,7 @@ from anishelf_cli.models.output import (
     CacheStatusResult,
     TMDbSearchMatchResult,
 )
-from anishelf_cli.models.transport.tmdb import TMDbTitleSearchMatch
+from anishelf_cli.models.tmdb import TMDbTitleSearchMatch
 
 
 def test_cache_status_result_model_dump_preserves_public_json_shape() -> None:

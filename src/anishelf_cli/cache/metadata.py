@@ -28,11 +28,9 @@ def metadata_row(row: sqlite3.Row) -> LibraryEntryMetadata:
 
 
 def upsert_metadata_summary(db: sqlite3.Connection, summary: LibraryEntryMetadata) -> None:
-    stored_summary = summary.model_copy(
-        update={
-            "fetched_at": summary.fetched_at or _now_iso(),
-            "source_version": TMDB_SUMMARY_SOURCE_VERSION,
-        }
+    stored_summary = summary.with_updates(
+        fetched_at=summary.fetched_at or _now_iso(),
+        source_version=TMDB_SUMMARY_SOURCE_VERSION,
     )
     db.execute(
         """

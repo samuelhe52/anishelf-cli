@@ -12,8 +12,9 @@ from anishelf_cli.cli.presentation import (
     tmdb_search_payload,
 )
 from anishelf_cli.core.output import emit_error, emit_json
+from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
-from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError, TMDbTitleSearchQuery
+from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 tmdb_app = typer.Typer(

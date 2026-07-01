@@ -243,6 +243,34 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
     assert metadata.model_dump(mode="json") == payload
 
 
+def test_library_entry_metadata_rejects_incomplete_identity_fields() -> None:
+    with pytest.raises(ValueError, match="identity fields are incomplete"):
+        LibraryEntryMetadata.model_validate({"tmdb_id": 55})
+
+
+def test_library_entry_metadata_rejects_non_season_context_fields() -> None:
+    with pytest.raises(ValueError, match="movie identity cannot define"):
+        LibraryEntryMetadata.model_validate(
+            {
+                "entry_type": "movie",
+                "tmdb_id": 55,
+                "parent_series_id": 22,
+                "season_number": 1,
+            }
+        )
+
+
+def test_library_entry_metadata_requires_full_season_context() -> None:
+    with pytest.raises(ValueError, match="Season identity requires"):
+        LibraryEntryMetadata.model_validate(
+            {
+                "entry_type": "season",
+                "tmdb_id": 33,
+                "parent_series_id": 22,
+            }
+        )
+
+
 def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape() -> None:
     metadata = LibraryEntryMetadata.model_validate(
         {
@@ -289,6 +317,44 @@ def test_snapshot_library_entry_json_omits_missing_metadata() -> None:
 
     assert payload["identity"] == "movie:55"
     assert "metadata" not in payload
+
+
+def test_snapshot_with_metadata_revalidates_to_typed_model() -> None:
+    entry = validate_library_entry(_snapshot_payload())
+
+    updated = entry.with_metadata(
+        LibraryEntryMetadata.model_validate(
+            {
+                "entry_type": "movie",
+                "tmdb_id": 55,
+                "name": "Alien",
+            }
+        )
+    )
+
+    assert isinstance(updated.metadata, LibraryEntryMetadata)
+    assert updated.metadata.name == "Alien"
+
+
+def test_snapshot_with_metadata_rejects_mismatched_identity() -> None:
+    entry = validate_library_entry(_snapshot_payload())
+    metadata = LibraryEntryMetadata.model_validate(
+        {
+            "entry_type": "series",
+            "tmdb_id": 22,
+            "name": "Alien Nation",
+        }
+    )
+
+    with pytest.raises(ValueError, match="metadata identity does not match entry"):
+        entry.with_metadata(metadata)
+
+
+def test_snapshot_with_metadata_rejects_raw_dict_payload() -> None:
+    entry = validate_library_entry(_snapshot_payload())
+
+    with pytest.raises(TypeError, match="LibraryEntryMetadata instance"):
+        entry.with_metadata({"entry_type": "movie", "tmdb_id": 55, "name": "Alien"})  # type: ignore[arg-type]
 
 
 def test_current_user_json_payload_uses_authenticated_envelope() -> None:
