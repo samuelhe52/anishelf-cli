@@ -4,6 +4,7 @@ from typing import Annotated, Literal, cast
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 
+from anishelf_cli.models import CallbackStrategy
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryModel
 from anishelf_cli.models.tmdb import TMDbTitleSearchMatch
@@ -169,7 +170,7 @@ class ClearedCachePathsResult(AniShelfBaseModel):
 
 
 class LibraryClearCacheResult(AniShelfBaseModel):
-    status: Literal["cleared"]
+    status: Literal["cleared"] = "cleared"
     removed: RemovedCacheFilesResult
     paths: ClearedCachePathsResult
 
@@ -246,3 +247,84 @@ class TMDbSearchOutputResult(AniShelfBaseModel):
     query: TMDbSearchQueryResult
     summary: TMDbSearchSummaryResult
     results: TMDbSearchResultsResult
+
+
+class CurrentUserProfileResult(AniShelfBaseModel):
+    user_record_name: str
+    first_name: str | None = None
+    last_name: str | None = None
+    email: str | None = None
+
+
+class AuthLoginResult(AniShelfBaseModel):
+    status: Literal["logged-in"] = "logged-in"
+    storage: Literal["keychain"] = "keychain"
+    callback_strategy: CallbackStrategy
+    cloudkit_api_token_source: str
+    cloudkit_api_token_version: str | None = None
+
+
+class AuthLogoutCacheResult(AniShelfBaseModel):
+    status: Literal["cleared"] = "cleared"
+    cache_files: int
+    lock_files: int
+
+
+class AuthLogoutResult(AniShelfBaseModel):
+    status: Literal["logged-out"] = "logged-out"
+    cache: AuthLogoutCacheResult
+
+
+class AuthRefreshResult(AniShelfBaseModel):
+    status: Literal["refreshed"] = "refreshed"
+    user: CurrentUserProfileResult
+
+
+class LibraryDefaultsResult(AniShelfBaseModel):
+    metadata: str
+    display_fields: tuple[str, ...] | None = None
+
+
+class ConfigCloudKitResult(AniShelfBaseModel):
+    container: str
+    environment: str
+    database: str
+    app_auth_source: str
+    app_auth_version: str | None = None
+
+
+class ConfigCallbackResult(AniShelfBaseModel):
+    strategy: CallbackStrategy
+
+
+class ConfigTMDbResult(AniShelfBaseModel):
+    api_key_envs: tuple[str, ...]
+
+
+class ConfigLibraryResult(AniShelfBaseModel):
+    defaults: LibraryDefaultsResult
+
+
+class ConfigPathsResult(AniShelfBaseModel):
+    config_dir: str
+    config_file: str
+    cache_dir: str
+    data_dir: str
+
+
+class ConfigShowResult(AniShelfBaseModel):
+    cloudkit: ConfigCloudKitResult
+    callback: ConfigCallbackResult
+    tmdb: ConfigTMDbResult
+    library: ConfigLibraryResult
+    paths: ConfigPathsResult
+
+
+class ConfigSetDefaultsPayloadResult(AniShelfBaseModel):
+    library: LibraryDefaultsResult
+
+
+class ConfigSetDefaultsResult(AniShelfBaseModel):
+    status: Literal["stored"] = "stored"
+    defaults: ConfigSetDefaultsPayloadResult
+    path: str

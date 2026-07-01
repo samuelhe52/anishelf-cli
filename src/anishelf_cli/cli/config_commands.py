@@ -12,6 +12,17 @@ from anishelf_cli.cli.options import FieldListOption
 from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
 from anishelf_cli.core.output import HumanSection, emit_error, emit_human_blocks, emit_json
 from anishelf_cli.models import CallbackStrategy, MetadataDepth
+from anishelf_cli.models.output import (
+    ConfigCallbackResult,
+    ConfigCloudKitResult,
+    ConfigLibraryResult,
+    ConfigPathsResult,
+    ConfigSetDefaultsPayloadResult,
+    ConfigSetDefaultsResult,
+    ConfigShowResult,
+    ConfigTMDbResult,
+    LibraryDefaultsResult,
+)
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,
@@ -26,38 +37,36 @@ config_app = typer.Typer(
 )
 
 
-def _config_payload() -> dict[str, object]:
+def _config_payload() -> ConfigShowResult:
     api_token = resolve_cloudkit_api_token()
     defaults = _user_defaults_or_exit().library_read
-    return {
-        "cloudkit": {
-            "container": config.DEFAULT_CONTAINER,
-            "environment": config.DEFAULT_ENVIRONMENT,
-            "database": config.DEFAULT_DATABASE,
-            "app_auth_source": api_token.source,
-            "app_auth_version": api_token.version,
-        },
-        "callback": {
-            "strategy": CallbackStrategy.MANUAL_PASTE,
-        },
-        "tmdb": {
-            "api_key_envs": list(config.DEFAULT_TMDB_API_KEY_ENVS),
-        },
-        "library": {
-            "defaults": {
-                "metadata": defaults.metadata.value,
-                "display_fields": list(defaults.display_fields)
-                if defaults.display_fields is not None
-                else None,
-            }
-        },
-        "paths": {
-            "config_dir": str(config.config_dir()),
-            "config_file": str(config.user_config_file()),
-            "cache_dir": str(config.cache_dir()),
-            "data_dir": str(config.data_dir()),
-        },
-    }
+    return ConfigShowResult(
+        cloudkit=ConfigCloudKitResult(
+            container=config.DEFAULT_CONTAINER,
+            environment=config.DEFAULT_ENVIRONMENT,
+            database=config.DEFAULT_DATABASE,
+            app_auth_source=api_token.source,
+            app_auth_version=api_token.version,
+        ),
+        callback=ConfigCallbackResult(strategy=CallbackStrategy.MANUAL_PASTE),
+        tmdb=ConfigTMDbResult(api_key_envs=tuple(config.DEFAULT_TMDB_API_KEY_ENVS)),
+        library=ConfigLibraryResult(
+            defaults=LibraryDefaultsResult(
+                metadata=defaults.metadata.value,
+                display_fields=(
+                    tuple(defaults.display_fields)
+                    if defaults.display_fields is not None
+                    else None
+                ),
+            )
+        ),
+        paths=ConfigPathsResult(
+            config_dir=str(config.config_dir()),
+            config_file=str(config.user_config_file()),
+            cache_dir=str(config.cache_dir()),
+            data_dir=str(config.data_dir()),
+        ),
+    )
 
 
 @config_app.command("show", help="Show effective configuration and local paths.")
@@ -70,31 +79,17 @@ def config_show(
 ) -> None:
     payload = _config_payload()
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
-    cloudkit = payload["cloudkit"]
-    callback = payload["callback"]
-    tmdb = payload["tmdb"]
-    library = payload["library"]
-    paths = payload["paths"]
-    if not (
-        isinstance(cloudkit, dict)
-        and isinstance(callback, dict)
-        and isinstance(tmdb, dict)
-        and isinstance(library, dict)
-        and isinstance(paths, dict)
-    ):
-        raise RuntimeError("config payload was not initialized correctly")
-    library_defaults = library.get("defaults")
-    if not isinstance(library_defaults, dict):
-        raise RuntimeError("library defaults payload was not initialized correctly")
+    cloudkit = payload.cloudkit
+    library_defaults = payload.library.defaults
 
-    app_auth = str(cloudkit["app_auth_source"])
-    if cloudkit["app_auth_version"]:
-        app_auth += f", version {cloudkit['app_auth_version']}"
-    display_fields = library_defaults["display_fields"]
+    app_auth = cloudkit.app_auth_source
+    if cloudkit.app_auth_version:
+        app_auth += f", version {cloudkit.app_auth_version}"
+    display_fields = library_defaults.display_fields
     display_fields_label = (
-        "built-in" if display_fields is None else ", ".join(str(field) for field in display_fields)
+        "built-in" if display_fields is None else ", ".join(display_fields)
     )
 
     emit_human_blocks(
@@ -102,15 +97,15 @@ def config_show(
             HumanSection(
                 "CloudKit",
                 (
-                    ("Container", cloudkit["container"]),
-                    ("Environment", cloudkit["environment"]),
-                    ("Database", cloudkit["database"]),
+                    ("Container", cloudkit.container),
+                    ("Environment", cloudkit.environment),
+                    ("Database", cloudkit.database),
                     ("App auth", app_auth),
                 ),
             ),
             HumanSection(
                 "Callback",
-                (("Strategy", callback["strategy"]),),
+                (("Strategy", payload.callback.strategy),),
             ),
             HumanSection(
                 "TMDb",
@@ -119,17 +114,17 @@ def config_show(
             HumanSection(
                 "Library",
                 (
-                    ("Metadata", library_defaults["metadata"]),
+                    ("Metadata", library_defaults.metadata),
                     ("Display fields", display_fields_label),
                 ),
             ),
             HumanSection(
                 "Paths",
                 (
-                    ("Config", paths["config_dir"]),
-                    ("Config file", paths["config_file"]),
-                    ("Cache", paths["cache_dir"]),
-                    ("Data", paths["data_dir"]),
+                    ("Config", payload.paths.config_dir),
+                    ("Config file", payload.paths.config_file),
+                    ("Cache", payload.paths.cache_dir),
+                    ("Data", payload.paths.data_dir),
                 ),
             ),
         ]
@@ -189,20 +184,21 @@ def config_set_defaults(
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
 
-    payload = {
-        "status": "stored",
-        "defaults": {
-            "library": {
-                "metadata": library_defaults.metadata.value,
-                "display_fields": list(library_defaults.display_fields)
-                if library_defaults.display_fields is not None
-                else None,
-            }
-        },
-        "path": str(path),
-    }
+    payload = ConfigSetDefaultsResult(
+        defaults=ConfigSetDefaultsPayloadResult(
+            library=LibraryDefaultsResult(
+                metadata=library_defaults.metadata.value,
+                display_fields=(
+                    tuple(library_defaults.display_fields)
+                    if library_defaults.display_fields is not None
+                    else None
+                ),
+            )
+        ),
+        path=str(path),
+    )
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        emit_json(payload.model_dump(mode="json"))
         return
 
     display_fields = library_defaults.display_fields

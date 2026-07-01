@@ -33,6 +33,13 @@ from anishelf_cli.core.output import emit_error, emit_json, set_current_app_stat
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
 from anishelf_cli.models.domain import CurrentUser
+from anishelf_cli.models.output import (
+    AuthLoginResult,
+    AuthLogoutCacheResult,
+    AuthLogoutResult,
+    AuthRefreshResult,
+    CurrentUserProfileResult,
+)
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
     default_secret_store,
@@ -240,15 +247,13 @@ def login(
         emit_error(str(exc), redactor=redactor)
         raise typer.Exit(code=code) from exc
 
-    payload = {
-        "status": "logged-in",
-        "storage": "keychain",
-        "callback_strategy": strategy,
-        "cloudkit_api_token_source": api_token.source,
-        "cloudkit_api_token_version": api_token.version,
-    }
     if json_output_requested(ctx, json_output):
-        emit_json(payload)
+        payload = AuthLoginResult(
+            callback_strategy=strategy,
+            cloudkit_api_token_source=api_token.source,
+            cloudkit_api_token_version=api_token.version,
+        )
+        emit_json(payload.model_dump(mode="json"))
         return
 
     typer.echo("Logged in to CloudKit.")
@@ -275,16 +280,13 @@ def logout(
         raise typer.Exit(code=2) from exc
 
     if json_output_requested(ctx, json_output):
-        emit_json(
-            {
-                "status": "logged-out",
-                "cache": {
-                    "status": "cleared",
-                    "cache_files": removed.cache_files,
-                    "lock_files": removed.lock_files,
-                },
-            }
+        payload = AuthLogoutResult(
+            cache=AuthLogoutCacheResult(
+                cache_files=removed.cache_files,
+                lock_files=removed.lock_files,
+            )
         )
+        emit_json(payload.model_dump(mode="json"))
         return
 
     typer.echo("Removed CloudKit web auth token and cleared local library cache.")
@@ -316,9 +318,15 @@ def auth_refresh(
 ) -> None:
     current_user = _get_current_user_or_exit()
     if json_output_requested(ctx, json_output):
-        payload = current_user.model_dump(mode="json")
-        payload["status"] = "refreshed"
-        emit_json(payload)
+        payload = AuthRefreshResult(
+            user=CurrentUserProfileResult(
+                user_record_name=current_user.user_record_name,
+                first_name=current_user.first_name,
+                last_name=current_user.last_name,
+                email=current_user.email,
+            )
+        )
+        emit_json(payload.model_dump(mode="json"))
         return
 
     typer.echo("Refreshed CloudKit auth state.")
