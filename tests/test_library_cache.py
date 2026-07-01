@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from anishelf_cli.cache.records import entry_row_params
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cache.sync import LibraryCacheSync
@@ -26,7 +27,10 @@ from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.models.output import CacheMetadataStatusResult
-from anishelf_cli.models.transport.cloudkit import CloudKitZoneChangesResponse
+from anishelf_cli.models.transport.cloudkit import (
+    CloudKitLibraryEntrySnapshotFields,
+    CloudKitZoneChangesResponse,
+)
 from anishelf_cli.secrets import SecretStorageUnavailableError
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
@@ -123,6 +127,33 @@ def test_cloudkit_zone_changes_response_types_zone_ids() -> None:
     assert zone.records == ()
 
 
+def test_cloudkit_record_validate_fields_normalizes_library_entry_snapshot_values() -> None:
+    record = cloudkit_record(
+        live_record(
+            "movie:55",
+            "movie",
+            55,
+            on_display=False,
+            using_custom_poster=True,
+            custom_poster_path="/stale/custom.jpg",
+            custom_poster_url="https://image.tmdb.org/t/p/w342/current/custom.jpg",
+            episode_progresses='[{"seasonNumber":1,"watchedThroughEpisode":12,"updatedAt":799891200.0}]',
+        )
+    )
+
+    fields = record.validate_fields(CloudKitLibraryEntrySnapshotFields)
+
+    assert fields.on_display is False
+    assert fields.date_saved == "2026-05-01T00:00:00Z"
+    assert fields.using_custom_poster is True
+    assert fields.custom_poster_path == "/stale/custom.jpg"
+    assert fields.custom_poster_url == "https://image.tmdb.org/t/p/w342/current/custom.jpg"
+    assert len(fields.episode_progresses) == 1
+    assert fields.episode_progresses[0].season_number == 1
+    assert fields.episode_progresses[0].watched_through_episode == 12
+    assert fields.episode_progresses[0].updated_at == "2026-05-08T00:00:00Z"
+
+
 def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> None:
     scope = LibraryCacheScope.default_for_user("_user_a")
     store = create_cache_store(monkeypatch, tmp_path, user_record_name="_user_a")
@@ -197,6 +228,37 @@ def test_cache_preserves_raw_cloudkit_record_json_shape(tmp_path, monkeypatch) -
     assert row is not None
     assert json.loads(row[0]) == record
     assert row[1] == "tag-movie:55"
+
+
+def test_entry_row_params_preserves_sqlite_contract_for_snapshot_and_tombstone_rows() -> None:
+    snapshot = validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))
+    tombstone = validate_library_entry(
+        {
+            "identity": "movie:55",
+            "kind": "tombstone",
+            "entry_type": "movie",
+            "tmdb_id": 55,
+            "deleted_at": "2026-07-01T00:00:00Z",
+        }
+    )
+
+    snapshot_row = entry_row_params(snapshot, {"recordName": "movie:55"}, "tag-1")
+    tombstone_row = entry_row_params(tombstone, {"recordName": "movie:55"}, "tag-2")
+
+    assert snapshot_row["favorite"] == 0
+    assert snapshot_row["on_display"] == 1
+    assert snapshot_row["is_date_tracking_enabled"] == 0
+    assert snapshot_row["using_custom_poster"] == 0
+    assert snapshot_row["watch_status"] == "watched"
+    assert snapshot_row["deleted_at"] is None
+    assert json.loads(snapshot_row["decoded_json"])["kind"] == "snapshot"
+
+    assert tombstone_row["favorite"] is None
+    assert tombstone_row["on_display"] is None
+    assert tombstone_row["using_custom_poster"] is None
+    assert tombstone_row["watch_status"] is None
+    assert tombstone_row["deleted_at"] == "2026-07-01T00:00:00Z"
+    assert json.loads(tombstone_row["decoded_json"])["kind"] == "tombstone"
 
 
 def test_metadata_summary_is_stored_separately_and_attached_on_read(

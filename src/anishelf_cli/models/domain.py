@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
-from typing import Annotated, Any, Literal, Self
+from typing import Annotated, Any, Literal, Self, cast
 
 from pydantic import (
     Field,
     SerializationInfo,
+    SerializerFunctionWrapHandler,
     StrictBool,
     StrictFloat,
     StrictInt,
@@ -18,6 +19,7 @@ from pydantic.functional_validators import field_validator, model_validator
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
+from anishelf_cli.models.identity import library_identity_from_fields
 
 SNAPSHOT_KIND = "snapshot"
 TOMBSTONE_KIND = "tombstone"
@@ -165,8 +167,12 @@ class LibraryEntryMetadata(AniShelfBaseModel):
         return dict(self.overview_translations)
 
     @model_serializer(mode="wrap", when_used="json")
-    def _serialize_output(self, handler, info: SerializationInfo) -> dict[str, object]:
-        payload = handler(self)
+    def _serialize_output(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
         if isinstance(info.context, dict) and info.context.get("storage_payload"):
             return payload
         return {
@@ -200,10 +206,7 @@ class _LibraryEntryBase(AniShelfBaseModel):
 
     @model_validator(mode="after")
     def _validate_identity_fields(self) -> Self:
-        from anishelf_cli.library.identity import (
-            LibraryIdentityError,
-            library_identity_from_fields,
-        )
+        from anishelf_cli.models.identity import LibraryIdentityError
 
         try:
             library_identity_from_fields(
@@ -295,8 +298,8 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
         return self.with_metadata(None)
 
     @model_serializer(mode="wrap", when_used="json")
-    def _serialize_output(self, handler) -> dict[str, object]:
-        payload = handler(self)
+    def _serialize_output(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
         if self.metadata is None:
             payload.pop("metadata", None)
         return payload
@@ -362,10 +365,7 @@ class TMDbSummaryIdentity(AniShelfBaseModel):
 
     @model_validator(mode="after")
     def _validate_entry_context(self) -> Self:
-        from anishelf_cli.library.identity import (
-            LibraryIdentityError,
-            library_identity_from_fields,
-        )
+        from anishelf_cli.models.identity import LibraryIdentityError
 
         try:
             library_identity_from_fields(

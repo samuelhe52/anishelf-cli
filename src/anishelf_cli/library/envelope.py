@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.library.identity import (
+from anishelf_cli.library.records import LibraryRecordDecodeError, decode_library_entry_record
+from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.identity import (
     LibraryIdentity,
     LibraryIdentityError,
     parse_library_identity,
 )
-from anishelf_cli.library.records import LibraryRecordDecodeError, decode_library_entry_record
-from anishelf_cli.models.domain import LibraryEntryModel
 from anishelf_cli.models.output import (
     LibraryGetEnvelope,
     LibraryGetItemError,

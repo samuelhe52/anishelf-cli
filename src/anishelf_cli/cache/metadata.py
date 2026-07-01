@@ -13,8 +13,8 @@ from anishelf_cli.cache.schema import (
     LibraryCacheError,
 )
 from anishelf_cli.core.coercion import nonempty_string_or_none as optional_string
-from anishelf_cli.library.identity import LibraryIdentityError, library_identity_from_fields
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
+from anishelf_cli.models.identity import LibraryIdentityError, library_identity_from_fields
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
@@ -262,11 +262,14 @@ def _metadata_key_from_fields(
     season_number: int | None,
 ) -> str:
     try:
-        return library_identity_from_fields(
+        identity = library_identity_from_fields(
             entry_type,
             tmdb_id,
             parent_series_id,
             season_number,
-        ).raw
+        )
     except LibraryIdentityError as exc:
         raise LibraryCacheError(str(exc)) from exc
+    if identity.raw is None:
+        raise LibraryCacheError("Metadata identity is missing its canonical raw value.")
+    return identity.raw

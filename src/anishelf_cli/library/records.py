@@ -1,35 +1,34 @@
 from __future__ import annotations
 
-import base64
-import binascii
-import json
-from datetime import UTC, datetime, timedelta
-from typing import Any
 from urllib.parse import urlsplit
 
 from pydantic import ValidationError
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.library.identity import (
-    LibraryIdentity,
-    LibraryIdentityError,
-    library_identity_from_fields,
-)
 from anishelf_cli.models.domain import (
     WATCH_STATUS_VALUES as DOMAIN_WATCH_STATUS_VALUES,
 )
 from anishelf_cli.models.domain import (
-    EpisodeProgress,
     LibraryEntryModel,
     LibraryEntrySnapshot,
     LibraryEntryTombstone,
 )
-from anishelf_cli.models.transport.cloudkit import CloudKitRecord
+from anishelf_cli.models.identity import (
+    LibraryIdentity,
+    LibraryIdentityError,
+    library_identity_from_fields,
+)
+from anishelf_cli.models.transport.cloudkit import (
+    CloudKitLibraryEntryCommonFields,
+    CloudKitLibraryEntrySnapshotFields,
+    CloudKitLibraryEntryTombstoneFields,
+    CloudKitRecord,
+)
 
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
 SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION = 2
-SWIFT_REFERENCE_DATE = datetime(2001, 1, 1, tzinfo=UTC)
 WATCH_STATUS_VALUES = DOMAIN_WATCH_STATUS_VALUES
+
 
 class LibraryRecordDecodeError(ValueError):
     pass
@@ -47,66 +46,39 @@ def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:
     if not record.fields:
         raise LibraryRecordDecodeError("CloudKit record is missing fields.")
 
-    schema_version = _required_int(record, "schemaVersion")
-    if schema_version > SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION:
+    common_fields = _validated_record_fields(record, CloudKitLibraryEntryCommonFields)
+    if common_fields.schema_version > SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION:
         raise LibraryRecordDecodeError(
-            f"Unsupported LibraryEntry schema version {schema_version}; "
+            f"Unsupported LibraryEntry schema version {common_fields.schema_version}; "
             f"maximum supported is {SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION}."
         )
 
-    tmdb_id = _required_int(record, "tmdbID")
-    entry_type = _required_string(record, "entryType")
-    parent_series_id = _optional_int(record, "parentSeriesID")
-    season_number = _optional_int(record, "seasonNumber")
     identity = _validated_identity(
         record_name,
-        entry_type,
-        tmdb_id,
-        parent_series_id,
-        season_number,
+        common_fields.entry_type,
+        common_fields.tmdb_id,
+        common_fields.parent_series_id,
+        common_fields.season_number,
     )
-    deleted_at = _optional_datetime(record, "deletedAt")
-    if deleted_at is not None:
-        return _build_entry(
-            LibraryEntryTombstone,
-            kind="tombstone",
-            identity=identity.raw,
-            schema_version=schema_version,
-            tmdb_id=tmdb_id,
-            entry_type=entry_type,
-            parent_series_id=parent_series_id,
-            season_number=season_number,
-            deleted_at=deleted_at,
-        )
+    if common_fields.deleted_at is not None:
+        tombstone_fields = _validated_record_fields(record, CloudKitLibraryEntryTombstoneFields)
+        payload = tombstone_fields.model_dump(mode="python", by_alias=False)
+        payload.update(kind="tombstone", identity=identity.raw)
+        return _build_entry(LibraryEntryTombstone, **payload)
 
-    watch_status = _required_string(record, "watchStatus")
-    using_custom_poster = _required_bool(record, "usingCustomPoster")
-    custom_poster_path = _custom_poster_path(record) if using_custom_poster else None
-
-    return _build_entry(
-        LibraryEntrySnapshot,
-        kind="snapshot",
-        identity=identity.raw,
-        schema_version=schema_version,
-        tmdb_id=tmdb_id,
-        entry_type=entry_type,
-        parent_series_id=parent_series_id,
-        season_number=season_number,
-        on_display=_required_bool(record, "onDisplay"),
-        date_saved=_required_datetime(record, "dateSaved"),
-        watch_status=watch_status,
-        date_started=_optional_datetime(record, "dateStarted"),
-        date_finished=_optional_datetime(record, "dateFinished"),
-        is_date_tracking_enabled=_required_bool(record, "isDateTrackingEnabled"),
-        score=_optional_int(record, "score"),
-        favorite=_required_bool(record, "favorite"),
-        notes=_required_string(record, "notes", allow_empty=True),
-        using_custom_poster=using_custom_poster,
-        custom_poster_path=custom_poster_path,
-        episode_progresses=_required_episode_progresses(record, "episodeProgresses"),
-        library_updated_at=_optional_datetime(record, "libraryUpdatedAt"),
-        tracking_updated_at=_optional_datetime(record, "trackingUpdatedAt"),
+    snapshot_fields = _validated_record_fields(record, CloudKitLibraryEntrySnapshotFields)
+    payload = snapshot_fields.model_dump(mode="python", by_alias=False)
+    payload.pop("deleted_at", None)
+    payload.pop("custom_poster_url", None)
+    payload["custom_poster_path"] = (
+        _custom_poster_path(snapshot_fields) if snapshot_fields.using_custom_poster else None
     )
+    payload["episode_progresses"] = tuple(
+        progress.model_dump(mode="python", by_alias=False)
+        for progress in snapshot_fields.episode_progresses
+    )
+    payload.update(kind="snapshot", identity=identity.raw)
+    return _build_entry(LibraryEntrySnapshot, **payload)
 
 
 def _record_name(record: CloudKitRecord) -> str:
@@ -143,12 +115,22 @@ def _validated_identity(
         raise LibraryRecordDecodeError(str(exc)) from exc
 
 
-def _custom_poster_path(record: CloudKitRecord) -> str | None:
-    path_from_path = _optional_string_field(record, "customPosterPath")
+def _validated_record_fields[CloudKitFieldModelT: CloudKitLibraryEntryCommonFields](
+    record: CloudKitRecord,
+    model_type: type[CloudKitFieldModelT],
+) -> CloudKitFieldModelT:
+    try:
+        return record.validate_fields(model_type)
+    except ValidationError as exc:
+        raise _library_record_decode_error(exc) from exc
+
+
+def _custom_poster_path(fields: CloudKitLibraryEntrySnapshotFields) -> str | None:
+    path_from_path = fields.custom_poster_path
     if path_from_path:
         path_from_path = _storage_path(path_from_path)
 
-    poster_url = _optional_string_field(record, "customPosterURL")
+    poster_url = fields.custom_poster_url
     if not poster_url:
         return path_from_path
     path_from_url = _storage_path_from_url(poster_url)
@@ -180,157 +162,28 @@ def _build_entry(
     **payload: object,
 ) -> LibraryEntryModel:
     try:
-        return model_type(**payload)
+        return model_type.model_validate(payload)
     except ValidationError as exc:
-        first_error = exc.errors(include_url=False)[0]
-        raise LibraryRecordDecodeError(str(first_error["msg"])) from exc
+        raise _library_record_decode_error(exc) from exc
 
 
-def _required_episode_progresses(
-    record: CloudKitRecord,
-    field: str,
-) -> tuple[EpisodeProgress, ...]:
-    raw = _required_field_value(record, field)
-    if isinstance(raw, list):
-        decoded = raw
-    elif isinstance(raw, str):
-        decoded = _decode_episode_progress_string(raw)
-    else:
-        raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-    if not isinstance(decoded, list):
-        raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-    progresses: list[EpisodeProgress] = []
-    for item in decoded:
-        if not isinstance(item, dict):
-            raise LibraryRecordDecodeError(f"Invalid {field} item.")
-        progresses.append(
-            EpisodeProgress(
-                season_number=_int_from_raw(item.get("seasonNumber"), "seasonNumber"),
-                watched_through_episode=_int_from_raw(
-                    item.get("watchedThroughEpisode"),
-                    "watchedThroughEpisode",
-                ),
-                updated_at=_swift_reference_datetime_from_raw(
-                    item.get("updatedAt"),
-                    "updatedAt",
-                ),
-            )
-        )
-    return tuple(progresses)
+def _library_record_decode_error(exc: ValidationError) -> LibraryRecordDecodeError:
+    first_error = exc.errors(include_url=False)[0]
+    field = first_error["loc"][0] if first_error.get("loc") else None
+    message = _normalized_error_message(str(first_error["msg"]))
+    if message == "Field required" and isinstance(field, str):
+        return LibraryRecordDecodeError(f"Missing required field {field}.")
+    if message == "Corrupt episodeProgresses payload.":
+        return LibraryRecordDecodeError(message)
+    if message.startswith("Library entry "):
+        return LibraryRecordDecodeError(message)
+    if isinstance(field, str):
+        return LibraryRecordDecodeError(f"Invalid {field} value.")
+    return LibraryRecordDecodeError(message)
 
 
-def _decode_episode_progress_string(raw: str) -> Any:
-    try:
-        decoded_bytes = base64.b64decode(raw, validate=True)
-    except (binascii.Error, ValueError):
-        decoded_bytes = raw.encode()
-    try:
-        return json.loads(decoded_bytes.decode())
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise LibraryRecordDecodeError("Corrupt episodeProgresses payload.") from exc
-
-
-def _required_string(record: CloudKitRecord, field: str, *, allow_empty: bool = False) -> str:
-    raw = _required_field_value(record, field)
-    if not isinstance(raw, str) or (not allow_empty and not raw):
-        raise LibraryRecordDecodeError(f"Invalid {field} value.")
-    return raw
-
-
-def _optional_string_field(record: CloudKitRecord, field: str) -> str | None:
-    raw = _optional_field_value(record, field)
-    if raw is None:
-        return None
-    value = nonempty_string_or_none(raw)
-    if value is None:
-        raise LibraryRecordDecodeError(f"Invalid {field} value.")
-    return value
-
-
-def _required_int(record: CloudKitRecord, field: str) -> int:
-    return _int_from_raw(_required_field_value(record, field), field)
-
-
-def _optional_int(record: CloudKitRecord, field: str) -> int | None:
-    raw = _optional_field_value(record, field)
-    if raw is None:
-        return None
-    return _int_from_raw(raw, field)
-
-
-def _required_bool(record: CloudKitRecord, field: str) -> bool:
-    raw = _required_field_value(record, field)
-    if isinstance(raw, bool):
-        return raw
-    if isinstance(raw, int) and raw in (0, 1):
-        return bool(raw)
-    raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-
-def _required_datetime(record: CloudKitRecord, field: str) -> str:
-    return _datetime_from_raw(_required_field_value(record, field), field)
-
-
-def _optional_datetime(record: CloudKitRecord, field: str) -> str | None:
-    raw = _optional_field_value(record, field)
-    if raw is None:
-        return None
-    return _datetime_from_raw(raw, field)
-
-
-def _required_field_value(record: CloudKitRecord, field: str) -> Any:
-    raw_field = record.field(field)
-    if raw_field is None:
-        raise LibraryRecordDecodeError(f"Missing required field {field}.")
-    value = raw_field.value
-    if value is None:
-        raise LibraryRecordDecodeError(f"Missing required field {field}.")
-    return value
-
-
-def _optional_field_value(record: CloudKitRecord, field: str) -> Any:
-    raw_field = record.field(field)
-    if raw_field is None:
-        return None
-    return raw_field.value
-
-
-def _int_from_raw(raw: Any, field: str) -> int:
-    if isinstance(raw, bool):
-        raise LibraryRecordDecodeError(f"Invalid {field} value.")
-    if isinstance(raw, int):
-        return raw
-    if isinstance(raw, float) and raw.is_integer():
-        return int(raw)
-    raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-
-def _datetime_from_raw(raw: Any, field: str) -> str:
-    if isinstance(raw, str) and raw:
-        try:
-            parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-        except ValueError as exc:
-            raise LibraryRecordDecodeError(f"Invalid {field} value.") from exc
-        if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=UTC)
-        return _iso_z(parsed)
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
-        timestamp = float(raw)
-        if abs(timestamp) > 10_000_000_000:
-            timestamp /= 1000
-        return _iso_z(datetime.fromtimestamp(timestamp, UTC))
-    raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-
-def _swift_reference_datetime_from_raw(raw: Any, field: str) -> str:
-    if isinstance(raw, str):
-        return _datetime_from_raw(raw, field)
-    if isinstance(raw, int | float) and not isinstance(raw, bool):
-        return _iso_z(SWIFT_REFERENCE_DATE + timedelta(seconds=float(raw)))
-    raise LibraryRecordDecodeError(f"Invalid {field} value.")
-
-
-def _iso_z(value: datetime) -> str:
-    return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
+def _normalized_error_message(message: str) -> str:
+    prefix = "Value error, "
+    if message.startswith(prefix):
+        return message[len(prefix) :]
+    return message

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Literal
+from typing import Annotated, Literal, cast
 
-from pydantic import Field, model_serializer
+from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
 
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryModel
@@ -94,8 +94,8 @@ class LibraryEntriesResult(AniShelfBaseModel):
     query: LibrarySearchQueryResult | None = None
 
     @model_serializer(mode="wrap", when_used="json")
-    def _serialize(self, handler) -> dict[str, object]:
-        payload = handler(self)
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
         cache = payload.pop("cache")
         payload["summary"] = {"entries": len(self.entries), "cache": cache}
         if payload.get("metadata") is None:
@@ -140,8 +140,8 @@ class CacheStatusResult(AniShelfBaseModel):
     lock_files: int
 
     @model_serializer(mode="wrap", when_used="json")
-    def _serialize(self, handler) -> dict[str, object]:
-        payload = handler(self)
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
         return {
             "summary": {
                 "initialized": payload["initialized"],

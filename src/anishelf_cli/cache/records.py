@@ -7,18 +7,48 @@ from typing import Any
 
 from anishelf_cli.cache import metadata
 from anishelf_cli.cache.schema import LibraryCacheError
-from anishelf_cli.library import (
-    LibraryIdentityError,
-    decode_library_entry_record,
-    parse_library_identity,
-)
+from anishelf_cli.library import decode_library_entry_record
 from anishelf_cli.models.domain import (
     LibraryEntryModel,
     LibraryEntryTombstone,
     validate_library_entry_json,
 )
+from anishelf_cli.models.identity import (
+    LibraryIdentityError,
+    parse_library_identity,
+)
 from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
+
+ENTRY_MODEL_COLUMNS = (
+    "identity",
+    "kind",
+    "entry_type",
+    "tmdb_id",
+    "parent_series_id",
+    "season_number",
+    "watch_status",
+    "score",
+    "favorite",
+    "on_display",
+    "date_saved",
+    "date_started",
+    "date_finished",
+    "is_date_tracking_enabled",
+    "notes",
+    "using_custom_poster",
+    "custom_poster_path",
+    "library_updated_at",
+    "tracking_updated_at",
+    "deleted_at",
+    "schema_version",
+)
+ENTRY_BOOL_COLUMNS = (
+    "favorite",
+    "on_display",
+    "is_date_tracking_enabled",
+    "using_custom_poster",
+)
 
 
 def apply_record(db: sqlite3.Connection, table: str, record: CloudKitRecord) -> None:
@@ -155,39 +185,22 @@ def entry_row_params(
     raw_record: dict[str, Any],
     change_tag: str | None,
 ) -> dict[str, Any]:
-    return {
-        "identity": entry.identity,
-        "kind": entry.kind,
-        "entry_type": entry.entry_type,
-        "tmdb_id": entry.tmdb_id,
-        "parent_series_id": entry.parent_series_id,
-        "season_number": entry.season_number,
-        "watch_status": getattr(entry, "watch_status", None),
-        "score": getattr(entry, "score", None),
-        "favorite": optional_bool_int(getattr(entry, "favorite", None)),
-        "on_display": optional_bool_int(getattr(entry, "on_display", None)),
-        "date_saved": getattr(entry, "date_saved", None),
-        "date_started": getattr(entry, "date_started", None),
-        "date_finished": getattr(entry, "date_finished", None),
-        "is_date_tracking_enabled": optional_bool_int(
-            getattr(entry, "is_date_tracking_enabled", None)
-        ),
-        "notes": getattr(entry, "notes", None),
-        "using_custom_poster": optional_bool_int(getattr(entry, "using_custom_poster", None)),
-        "custom_poster_path": getattr(entry, "custom_poster_path", None),
-        "library_updated_at": getattr(entry, "library_updated_at", None),
-        "tracking_updated_at": getattr(entry, "tracking_updated_at", None),
-        "deleted_at": getattr(entry, "deleted_at", None),
-        "schema_version": entry.schema_version,
-        "record_change_tag": change_tag,
-        "raw_record_json": json.dumps(raw_record, sort_keys=True, separators=(",", ":")),
-        "decoded_json": entry.model_dump_json(
-            by_alias=False,
-            exclude_none=False,
-            round_trip=True,
-        ),
-        "cached_at": _now_iso(),
-    }
+    model_payload = entry.model_dump(
+        mode="json",
+        by_alias=False,
+        exclude_none=False,
+        round_trip=True,
+    )
+    row = {column: model_payload.get(column) for column in ENTRY_MODEL_COLUMNS}
+    for column in ENTRY_BOOL_COLUMNS:
+        row[column] = optional_bool_int(row[column])
+    row.update(
+        record_change_tag=change_tag,
+        raw_record_json=json.dumps(raw_record, sort_keys=True, separators=(",", ":")),
+        decoded_json=json.dumps(model_payload, sort_keys=True, separators=(",", ":")),
+        cached_at=_now_iso(),
+    )
+    return row
 
 
 def deleted_entry(record: CloudKitRecord) -> LibraryEntryModel:
@@ -196,6 +209,8 @@ def deleted_entry(record: CloudKitRecord) -> LibraryEntryModel:
         identity = parse_library_identity(name)
     except LibraryIdentityError as exc:
         raise LibraryCacheError(f"CloudKit deleted record has invalid identity {name}.") from exc
+    if identity.raw is None:
+        raise LibraryCacheError(f"CloudKit deleted record has invalid identity {name}.")
     deleted_at = deleted_timestamp(record)
     return LibraryEntryTombstone(
         kind="tombstone",
