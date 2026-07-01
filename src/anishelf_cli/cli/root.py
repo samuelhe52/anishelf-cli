@@ -300,7 +300,7 @@ def auth_status(
 ) -> None:
     current_user = _get_current_user_or_exit()
     if json_output_requested(ctx, json_output):
-        emit_json(current_user.to_json_payload())
+        emit_json(current_user.model_dump(mode="json"))
         return
 
     _emit_auth_status_human(current_user)
@@ -316,7 +316,7 @@ def auth_refresh(
 ) -> None:
     current_user = _get_current_user_or_exit()
     if json_output_requested(ctx, json_output):
-        payload = current_user.to_json_payload()
+        payload = current_user.model_dump(mode="json")
         payload["status"] = "refreshed"
         emit_json(payload)
         return

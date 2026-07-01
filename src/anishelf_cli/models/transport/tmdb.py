@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal, Self
+from typing import Any, Literal
 
-from pydantic import Field, StrictFloat, StrictInt, StrictStr, field_validator, model_validator
+from pydantic import Field, StrictFloat, StrictInt, StrictStr, field_validator
 
 from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -183,6 +183,7 @@ class _TMDbSummaryBase(AniShelfBaseModel):
 
 class TMDbMovieSummaryResponse(_TMDbSummaryBase):
     adult: bool | None = None
+    # Keep rarely used nested TMDb detail blobs raw until a concrete metadata depth needs them.
     belongs_to_collection: dict[str, Any] | None = None
     budget: StrictInt | None = None
     homepage: StrictStr | None = None
@@ -261,10 +262,6 @@ class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
         if value is None:
             return ()
         return value
-
-    @model_validator(mode="after")
-    def _mirror_name_to_title(self) -> Self:
-        return self
 
     @property
     def on_air_date(self) -> str | None:

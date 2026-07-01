@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
+from pydantic import (
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictFloat,
+    StrictInt,
+    StrictStr,
+    field_validator,
+    model_validator,
+)
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -40,13 +49,35 @@ class CloudKitCurrentUserResponse(AniShelfBaseModel):
         )
 
 
+class _CloudKitTypedNestedModel(AniShelfBaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="allow",
+        populate_by_name=False,
+        str_strip_whitespace=False,
+    )
+
+
+class CloudKitZoneID(_CloudKitTypedNestedModel):
+    zone_name: StrictStr | None = Field(
+        default=None,
+        validation_alias="zoneName",
+        serialization_alias="zoneName",
+    )
+    owner_record_name: StrictStr | None = Field(
+        default=None,
+        validation_alias="ownerRecordName",
+        serialization_alias="ownerRecordName",
+    )
+
+
 class CloudKitRecordID(AniShelfBaseModel):
     record_name: StrictStr | None = Field(
         default=None,
         validation_alias="recordName",
         serialization_alias="recordName",
     )
-    zone_id: dict[str, Any] | None = Field(
+    zone_id: CloudKitZoneID | None = Field(
         default=None,
         validation_alias="zoneID",
         serialization_alias="zoneID",
@@ -65,6 +96,20 @@ class CloudKitField(AniShelfBaseModel):
         if isinstance(value, dict):
             return value
         return {"value": value}
+
+
+class CloudKitUserTimestamp(_CloudKitTypedNestedModel):
+    timestamp: StrictInt | StrictFloat | None = None
+    user_record_name: StrictStr | None = Field(
+        default=None,
+        validation_alias="userRecordName",
+        serialization_alias="userRecordName",
+    )
+    device_id: StrictStr | None = Field(
+        default=None,
+        validation_alias="deviceID",
+        serialization_alias="deviceID",
+    )
 
 
 class CloudKitRecord(AniShelfBaseModel):
@@ -88,8 +133,8 @@ class CloudKitRecord(AniShelfBaseModel):
         validation_alias="recordChangeTag",
         serialization_alias="recordChangeTag",
     )
-    created: dict[str, Any] | None = None
-    modified: dict[str, Any] | None = None
+    created: CloudKitUserTimestamp | None = None
+    modified: CloudKitUserTimestamp | None = None
     deleted: StrictBool | None = None
     fields: dict[str, CloudKitField] = Field(default_factory=dict)
     server_error_code: StrictStr | None = Field(
@@ -113,14 +158,9 @@ class CloudKitRecord(AniShelfBaseModel):
 
     @property
     def modified_timestamp(self) -> int | float | None:
-        if not isinstance(self.modified, dict):
+        if self.modified is None:
             return None
-        timestamp = self.modified.get("timestamp")
-        if isinstance(timestamp, bool):
-            return None
-        if isinstance(timestamp, int | float):
-            return timestamp
-        return None
+        return self.modified.timestamp
 
     def field(self, name: str) -> CloudKitField | None:
         return self.fields.get(name)
@@ -160,7 +200,7 @@ class CloudKitLookupResponse(AniShelfBaseModel):
 
 
 class CloudKitZoneResult(AniShelfBaseModel):
-    zone_id: dict[str, Any] | None = Field(
+    zone_id: CloudKitZoneID | None = Field(
         default=None,
         validation_alias="zoneID",
         serialization_alias="zoneID",

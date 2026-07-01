@@ -3,12 +3,63 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from anishelf_cli.models.transport.tmdb import (
+    TMDbMovieSummaryResponse,
+    TMDbSeasonSummaryResponse,
+    TMDbSeriesSummaryResponse,
+)
 from anishelf_cli.tmdb.client import (
     TMDbClient,
     TMDbRequestError,
     TMDbSummaryIdentity,
     TMDbTitleSearchQuery,
 )
+
+
+def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> None:
+    movie = TMDbMovieSummaryResponse.model_validate(
+        {
+            "id": 55,
+            "title": "Alien",
+            "genres": [{"id": 878, "name": "Science Fiction"}],
+            "belongs_to_collection": {"id": 10, "name": "Alien Collection"},
+            "production_companies": [{"id": 1, "name": "Brandywine"}],
+            "spoken_languages": [{"english_name": "English", "iso_639_1": "en"}],
+        }
+    )
+    series = TMDbSeriesSummaryResponse.model_validate(
+        {
+            "id": 22,
+            "name": "Alien Nation",
+            "genres": [{"id": 18, "name": "Drama"}],
+            "last_episode_to_air": {"id": 7, "name": "Finale"},
+            "networks": [{"id": 2, "name": "FOX"}],
+            "seasons": [{"id": 33, "season_number": 1}],
+        }
+    )
+    season = TMDbSeasonSummaryResponse.model_validate(
+        {
+            "id": 33,
+            "name": "Season 1",
+            "episodes": [{"id": 1, "episode_number": 1}],
+        }
+    )
+
+    assert [genre.model_dump(mode="json") for genre in movie.genres] == [
+        {"id": 878, "name": "Science Fiction"}
+    ]
+    assert movie.belongs_to_collection == {"id": 10, "name": "Alien Collection"}
+    assert movie.production_companies == ({"id": 1, "name": "Brandywine"},)
+    assert movie.spoken_languages == ({"english_name": "English", "iso_639_1": "en"},)
+
+    assert [genre.model_dump(mode="json") for genre in series.genres] == [
+        {"id": 18, "name": "Drama"}
+    ]
+    assert series.last_episode_to_air == {"id": 7, "name": "Finale"}
+    assert series.networks == ({"id": 2, "name": "FOX"},)
+    assert series.seasons == ({"id": 33, "season_number": 1},)
+
+    assert season.episodes == ({"id": 1, "episode_number": 1},)
 
 
 def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:

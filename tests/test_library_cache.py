@@ -26,10 +26,12 @@ from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.models.output import CacheMetadataStatusResult
+from anishelf_cli.models.transport.cloudkit import CloudKitZoneChangesResponse
 from anishelf_cli.secrets import SecretStorageUnavailableError
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 from tests.support import (
+    cloudkit_record,
     create_cache_store,
     create_seeded_cache_store,
     live_record,
@@ -52,6 +54,73 @@ from tests.support import (
 from tests.support import (
     store_with_cloudkit_token as _store_with_cloudkit_token,
 )
+
+
+def test_cloudkit_record_types_nested_cloudkit_metadata() -> None:
+    payload = {
+        "recordID": {
+            "recordName": "movie:55",
+            "zoneID": {
+                "zoneName": "AniShelfLibrary",
+                "ownerRecordName": "_defaultOwner",
+            },
+        },
+        "recordType": "LibraryEntry",
+        "created": {
+            "timestamp": 1_779_000_000,
+            "userRecordName": "_creator",
+            "deviceID": "device-a",
+        },
+        "modified": {
+            "timestamp": 1_780_000_000,
+            "userRecordName": "_editor",
+            "deviceID": "device-b",
+        },
+        "fields": {},
+    }
+
+    record = cloudkit_record(payload)
+
+    assert record.effective_record_name == "movie:55"
+    assert record.record_id is not None
+    assert record.record_id.zone_id is not None
+    assert record.record_id.zone_id.zone_name == "AniShelfLibrary"
+    assert record.record_id.zone_id.owner_record_name == "_defaultOwner"
+    assert record.created is not None
+    assert record.created.timestamp == 1_779_000_000
+    assert record.created.user_record_name == "_creator"
+    assert record.created.device_id == "device-a"
+    assert record.modified is not None
+    assert record.modified.timestamp == 1_780_000_000
+    assert record.modified.user_record_name == "_editor"
+    assert record.modified.device_id == "device-b"
+    assert record.modified_timestamp == 1_780_000_000
+    assert record.to_cloudkit_payload() == payload
+
+
+def test_cloudkit_zone_changes_response_types_zone_ids() -> None:
+    response = CloudKitZoneChangesResponse.model_validate(
+        {
+            "zones": [
+                {
+                    "zoneID": {
+                        "zoneName": "AniShelfLibrary",
+                        "ownerRecordName": "_defaultOwner",
+                    },
+                    "records": None,
+                    "syncToken": "t1",
+                    "moreComing": False,
+                }
+            ]
+        }
+    )
+
+    zone = response.zones[0]
+
+    assert zone.zone_id is not None
+    assert zone.zone_id.zone_name == "AniShelfLibrary"
+    assert zone.zone_id.owner_record_name == "_defaultOwner"
+    assert zone.records == ()
 
 
 def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> None:

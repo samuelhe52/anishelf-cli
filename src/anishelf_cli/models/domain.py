@@ -5,21 +5,24 @@ from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     Field,
+    SerializationInfo,
     StrictBool,
     StrictFloat,
     StrictInt,
     StrictStr,
     TypeAdapter,
     field_serializer,
+    model_serializer,
 )
 from pydantic.functional_validators import field_validator, model_validator
 
-from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
 
 SNAPSHOT_KIND = "snapshot"
 TOMBSTONE_KIND = "tombstone"
 VALID_LIBRARY_ENTRY_KINDS = frozenset({SNAPSHOT_KIND, TOMBSTONE_KIND})
+WATCH_STATUS_VALUES = frozenset({"planToWatch", "watching", "watched", "dropped"})
 
 
 class EpisodeProgress(AniShelfBaseModel):
@@ -27,31 +30,10 @@ class EpisodeProgress(AniShelfBaseModel):
     watched_through_episode: StrictInt
     updated_at: StrictStr | None = None
 
-    @field_validator("season_number", "watched_through_episode")
-    @classmethod
-    def _validate_progress_int(cls, value: int, info: Any) -> int:
-        if strict_int_or_none(value) is None:
-            raise ValueError(f"Library entry {info.field_name} value is invalid.")
-        return value
-
-    @field_validator("updated_at")
-    @classmethod
-    def _validate_updated_at(cls, value: str | None) -> str | None:
-        if value is not None and not isinstance(value, str):
-            raise ValueError("Library entry updated_at value is invalid.")
-        return value
-
 
 class LibraryEntryMetadataGenre(AniShelfBaseModel):
     id: StrictInt
     name: StrictStr
-
-    @field_validator("id")
-    @classmethod
-    def _validate_id(cls, value: int) -> int:
-        if strict_int_or_none(value) is None:
-            raise ValueError("Library entry metadata genre id value is invalid.")
-        return value
 
     @field_validator("name")
     @classmethod
@@ -120,23 +102,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
             raise ValueError(f"Library entry metadata {info.field_name} value is invalid.")
         return value
 
-    @field_validator(
-        "tmdb_id",
-        "parent_series_id",
-        "season_number",
-        "runtime_minutes",
-        "season_count",
-        "episode_count",
-        "vote_count",
-    )
-    @classmethod
-    def _validate_optional_int(cls, value: int | None, info: Any) -> int | None:
-        if value is None:
-            return None
-        if strict_int_or_none(value) is None:
-            raise ValueError(f"Library entry metadata {info.field_name} value is invalid.")
-        return value
-
     @field_validator("genre_ids", mode="before")
     @classmethod
     def _validate_genre_ids(cls, value: object) -> object:
@@ -199,11 +164,23 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     def overview_translation_map(self) -> dict[str, str]:
         return dict(self.overview_translations)
 
-    def output_payload(self) -> dict[str, object]:
-        return self.model_dump(mode="json", include=self.model_fields_set)
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize_output(self, handler, info: SerializationInfo) -> dict[str, object]:
+        payload = handler(self)
+        if isinstance(info.context, dict) and info.context.get("storage_payload"):
+            return payload
+        return {
+            field_name: payload[field_name]
+            for field_name in self.__class__.model_fields
+            if field_name in self.model_fields_set and field_name in payload
+        }
 
     def storage_payload(self) -> dict[str, object]:
-        return self.model_dump(mode="json", exclude={"genre_ids"})
+        return self.model_dump(
+            mode="json",
+            exclude={"genre_ids"},
+            context={"storage_payload": True},
+        )
 
 
 class _LibraryEntryBase(AniShelfBaseModel):
@@ -221,37 +198,23 @@ class _LibraryEntryBase(AniShelfBaseModel):
             raise ValueError(f"Library entry {info.field_name} value is invalid.")
         return value
 
-    @field_validator("tmdb_id")
-    @classmethod
-    def _validate_required_int(cls, value: int, info: Any) -> int:
-        if strict_int_or_none(value) is None:
-            raise ValueError(f"Library entry {info.field_name} value is invalid.")
-        return value
-
-    @field_validator("parent_series_id", "season_number", "schema_version")
-    @classmethod
-    def _validate_optional_int(cls, value: int | None, info: Any) -> int | None:
-        if value is None:
-            return None
-        if strict_int_or_none(value) is None:
-            raise ValueError(f"Library entry {info.field_name} value is invalid.")
-        return value
-
     @model_validator(mode="after")
     def _validate_identity_fields(self) -> Self:
-        from anishelf_cli.library.identity import LibraryIdentityError, parse_library_identity
+        from anishelf_cli.library.identity import (
+            LibraryIdentityError,
+            library_identity_from_fields,
+        )
 
         try:
-            identity = parse_library_identity(self.identity)
+            library_identity_from_fields(
+                self.entry_type,
+                self.tmdb_id,
+                self.parent_series_id,
+                self.season_number,
+                raw_identity=self.identity,
+            )
         except LibraryIdentityError as exc:
             raise ValueError(str(exc)) from exc
-        if (
-            identity.entry_type != self.entry_type
-            or identity.tmdb_id != self.tmdb_id
-            or identity.parent_series_id != self.parent_series_id
-            or identity.season_number != self.season_number
-        ):
-            raise ValueError("Library entry identity does not match decoded fields.")
         return self
 
     @property
@@ -264,9 +227,6 @@ class _LibraryEntryBase(AniShelfBaseModel):
         if isinstance(metadata, LibraryEntryMetadata):
             return metadata.title
         return None
-
-    def output_payload(self) -> dict[str, object]:
-        return self.model_dump(mode="json")
 
 
 class LibraryEntrySnapshot(_LibraryEntryBase):
@@ -289,7 +249,6 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
 
     @field_validator(
         "date_saved",
-        "watch_status",
         "date_started",
         "date_finished",
         "custom_poster_path",
@@ -308,11 +267,16 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
             raise ValueError(f"Library entry {info.field_name} value is invalid.")
         return value
 
-    @field_validator("notes")
+    @field_validator("watch_status")
     @classmethod
-    def _validate_notes(cls, value: str) -> str:
-        if not isinstance(value, str):
-            raise ValueError("Library entry notes value is invalid.")
+    def _validate_watch_status(cls, value: str) -> str:
+        if nonempty_string_or_none(value) is None:
+            raise ValueError("Library entry watch_status value is invalid.")
+        if value not in WATCH_STATUS_VALUES:
+            valid = ", ".join(sorted(WATCH_STATUS_VALUES))
+            raise ValueError(
+                f"Library entry watch_status value is invalid. Expected one of: {valid}."
+            )
         return value
 
     @field_validator("episode_progresses", mode="before")
@@ -324,23 +288,15 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
             raise ValueError("Library entry episode_progresses value is invalid.")
         return value
 
-    @field_serializer("metadata", when_used="json")
-    def _serialize_metadata(
-        self,
-        metadata: LibraryEntryMetadata | None,
-    ) -> dict[str, object] | None:
-        if metadata is None:
-            return None
-        return metadata.output_payload()
-
     def with_metadata(self, metadata: LibraryEntryMetadata | None) -> LibraryEntrySnapshot:
         return self.model_copy(update={"metadata": metadata})
 
     def without_metadata(self) -> LibraryEntrySnapshot:
         return self.with_metadata(None)
 
-    def output_payload(self) -> dict[str, object]:
-        payload = super().output_payload()
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize_output(self, handler) -> dict[str, object]:
+        payload = handler(self)
         if self.metadata is None:
             payload.pop("metadata", None)
         return payload
@@ -385,7 +341,8 @@ class CurrentUser(AniShelfBaseModel):
         parts = [part for part in (self.first_name, self.last_name) if part]
         return " ".join(parts) if parts else None
 
-    def to_json_payload(self) -> dict[str, object]:
+    @model_serializer(mode="plain", when_used="json")
+    def _serialize_output(self) -> dict[str, object]:
         return {
             "status": "authenticated",
             "user": {
@@ -402,6 +359,24 @@ class TMDbSummaryIdentity(AniShelfBaseModel):
     tmdb_id: StrictInt
     parent_series_id: StrictInt | None = None
     season_number: StrictInt | None = None
+
+    @model_validator(mode="after")
+    def _validate_entry_context(self) -> Self:
+        from anishelf_cli.library.identity import (
+            LibraryIdentityError,
+            library_identity_from_fields,
+        )
+
+        try:
+            library_identity_from_fields(
+                self.entry_type,
+                self.tmdb_id,
+                self.parent_series_id,
+                self.season_number,
+            )
+        except LibraryIdentityError as exc:
+            raise ValueError(str(exc)) from exc
+        return self
 
 
 def validate_library_entry(value: object) -> LibraryEntryModel:

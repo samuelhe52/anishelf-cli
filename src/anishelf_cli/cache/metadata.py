@@ -13,6 +13,7 @@ from anishelf_cli.cache.schema import (
     LibraryCacheError,
 )
 from anishelf_cli.core.coercion import nonempty_string_or_none as optional_string
+from anishelf_cli.library.identity import LibraryIdentityError, library_identity_from_fields
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
@@ -187,7 +188,7 @@ def dedupe_summary_targets(targets: list[TMDbSummaryIdentity]) -> list[TMDbSumma
 def metadata_key_from_summary(summary: LibraryEntryMetadata) -> str:
     if summary.entry_type is None or summary.tmdb_id is None:
         raise LibraryCacheError("Metadata summary is missing identity fields.")
-    return _metadata_key(
+    return _metadata_key_from_fields(
         summary.entry_type,
         summary.tmdb_id,
         summary.parent_series_id,
@@ -196,7 +197,7 @@ def metadata_key_from_summary(summary: LibraryEntryMetadata) -> str:
 
 
 def metadata_key_from_entry(entry: LibraryEntryModel) -> str:
-    return _metadata_key(
+    return _metadata_key_from_fields(
         entry.entry_type,
         entry.tmdb_id,
         entry.parent_series_id,
@@ -205,7 +206,7 @@ def metadata_key_from_entry(entry: LibraryEntryModel) -> str:
 
 
 def metadata_key_from_target(target: TMDbSummaryIdentity) -> str:
-    return _metadata_key(
+    return _metadata_key_from_fields(
         target.entry_type,
         target.tmdb_id,
         target.parent_series_id,
@@ -246,8 +247,26 @@ def _metadata_key(
     parent_series_id: int | None,
     season_number: int | None,
 ) -> str:
-    if entry_type == "season":
-        if parent_series_id is None or season_number is None:
-            raise LibraryCacheError("Season metadata is missing parent series context.")
-        return f"season:{parent_series_id}:{season_number}:{tmdb_id}"
-    return f"{entry_type}:{tmdb_id}"
+    return _metadata_key_from_fields(
+        entry_type,
+        tmdb_id,
+        parent_series_id,
+        season_number,
+    )
+
+
+def _metadata_key_from_fields(
+    entry_type: str,
+    tmdb_id: int,
+    parent_series_id: int | None,
+    season_number: int | None,
+) -> str:
+    try:
+        return library_identity_from_fields(
+            entry_type,
+            tmdb_id,
+            parent_series_id,
+            season_number,
+        ).raw
+    except LibraryIdentityError as exc:
+        raise LibraryCacheError(str(exc)) from exc

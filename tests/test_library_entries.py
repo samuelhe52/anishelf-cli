@@ -4,6 +4,8 @@ import pytest
 
 from anishelf_cli.library.entries import EpisodeProgress, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
+from anishelf_cli.models.domain import CurrentUser
+from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
 def test_library_entry_rejects_unknown_kind() -> None:
@@ -90,6 +92,42 @@ def test_library_entry_rejects_invalid_metadata_shape() -> None:
         validate_library_entry(payload)
 
 
+def test_library_entry_rejects_unknown_watch_status_string() -> None:
+    payload = _snapshot_payload(watch_status="queued")
+
+    with pytest.raises(ValueError, match="watch_status value is invalid"):
+        validate_library_entry(payload)
+
+
+def test_library_entry_rejects_non_season_context_fields() -> None:
+    payload = _snapshot_payload(parent_series_id=22, season_number=1)
+
+    with pytest.raises(ValueError, match="movie identity cannot define"):
+        validate_library_entry(payload)
+
+
+def test_library_entry_rejects_season_without_full_context() -> None:
+    payload = _snapshot_payload(
+        identity="season:22:1:33",
+        entry_type="season",
+        tmdb_id=33,
+        parent_series_id=22,
+    )
+
+    with pytest.raises(ValueError, match="Season identity requires"):
+        validate_library_entry(payload)
+
+
+def test_tmdb_summary_identity_rejects_non_season_context_fields() -> None:
+    with pytest.raises(ValueError, match="movie identity cannot define"):
+        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55, parent_series_id=22, season_number=1)
+
+
+def test_tmdb_summary_identity_requires_full_season_context() -> None:
+    with pytest.raises(ValueError, match="Season identity requires"):
+        TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22)
+
+
 def test_library_entry_rejects_invalid_episode_progresses_shape() -> None:
     payload = _snapshot_payload(episode_progresses="bad")
 
@@ -155,7 +193,7 @@ def test_library_entry_metadata_uses_typed_fields_and_preserves_partial_payload_
         {"id": 878, "name": "Science Fiction"}
     ]
     assert metadata.vote_average == 8.2
-    assert metadata.model_dump(mode="json", include=metadata.model_fields_set) == {
+    assert metadata.model_dump(mode="json") == {
         "name": "Alien",
         "original_name": "Alien",
         "genres": [{"id": 878, "name": "Science Fiction"}],
@@ -202,7 +240,74 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
     assert metadata.genre_ids == (18,)
     assert metadata.season_count == 1
     assert metadata.episode_count == 22
-    assert metadata.model_dump(mode="json", include=metadata.model_fields_set) == payload
+    assert metadata.model_dump(mode="json") == payload
+
+
+def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape() -> None:
+    metadata = LibraryEntryMetadata.model_validate(
+        {
+            "entry_type": "movie",
+            "tmdb_id": 55,
+            "genres": [{"id": 878, "name": "Science Fiction"}],
+        }
+    )
+
+    assert metadata.storage_payload() == {
+        "entry_type": "movie",
+        "tmdb_id": 55,
+        "parent_series_id": None,
+        "season_number": None,
+        "language": None,
+        "name": None,
+        "name_translations": {},
+        "original_name": None,
+        "overview": None,
+        "overview_translations": {},
+        "poster_path": None,
+        "backdrop_path": None,
+        "logo_path": None,
+        "original_language_code": None,
+        "on_air_date": None,
+        "status": None,
+        "genres": [{"id": 878, "name": "Science Fiction"}],
+        "runtime_minutes": None,
+        "season_count": None,
+        "episode_count": None,
+        "vote_average": None,
+        "vote_count": None,
+        "popularity": None,
+        "link_to_details": None,
+        "fetched_at": None,
+        "source_version": None,
+    }
+
+
+def test_snapshot_library_entry_json_omits_missing_metadata() -> None:
+    entry = validate_library_entry(_snapshot_payload())
+
+    payload = entry.model_dump(mode="json")
+
+    assert payload["identity"] == "movie:55"
+    assert "metadata" not in payload
+
+
+def test_current_user_json_payload_uses_authenticated_envelope() -> None:
+    current_user = CurrentUser(
+        user_record_name="_user",
+        first_name="Ripley",
+        last_name="Scott",
+        email="ripley@example.com",
+    )
+
+    assert current_user.model_dump(mode="json") == {
+        "status": "authenticated",
+        "user": {
+            "user_record_name": "_user",
+            "first_name": "Ripley",
+            "last_name": "Scott",
+            "email": "ripley@example.com",
+        },
+    }
 
 
 def _snapshot_payload(**overrides: object) -> dict[str, object]:

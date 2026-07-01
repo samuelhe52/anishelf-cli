@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, field_serializer, model_serializer
+from pydantic import Field, model_serializer
 
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryModel
@@ -18,10 +18,6 @@ class LibraryGetItemFound(AniShelfBaseModel):
     identity: str
     status: Literal["found"] = "found"
     entry: LibraryEntryModel
-
-    @field_serializer("entry", when_used="json")
-    def _serialize_entry(self, entry: LibraryEntryModel) -> dict[str, object]:
-        return entry.output_payload()
 
 
 class LibraryGetItemErrorResult(AniShelfBaseModel):
@@ -90,23 +86,6 @@ class LibrarySearchQueryResult(AniShelfBaseModel):
     title: str
 
 
-class _LibraryEntriesSummaryResult(AniShelfBaseModel):
-    entries: int
-    cache: LibraryEntriesCacheResult
-
-
-class _LibraryEntriesEnvelope(AniShelfBaseModel):
-    summary: _LibraryEntriesSummaryResult
-    entries: tuple[LibraryEntryModel, ...]
-    metadata: LibraryEntriesMetadataResult | None = None
-    filters: LibraryListFiltersResult | None = None
-    query: LibrarySearchQueryResult | None = None
-
-    @field_serializer("entries", when_used="json")
-    def _serialize_entries(self, entries: tuple[LibraryEntryModel, ...]) -> list[dict[str, object]]:
-        return [entry.output_payload() for entry in entries]
-
-
 class LibraryEntriesResult(AniShelfBaseModel):
     entries: tuple[LibraryEntryModel, ...]
     cache: LibraryEntriesCacheResult
@@ -114,20 +93,16 @@ class LibraryEntriesResult(AniShelfBaseModel):
     filters: LibraryListFiltersResult | None = None
     query: LibrarySearchQueryResult | None = None
 
-    @model_serializer(mode="plain", when_used="json")
-    def _serialize(self) -> dict[str, object]:
-        payload = _LibraryEntriesEnvelope(
-            summary=_LibraryEntriesSummaryResult(entries=len(self.entries), cache=self.cache),
-            entries=self.entries,
-            metadata=self.metadata,
-            filters=self.filters,
-            query=self.query,
-        ).model_dump(mode="json")
-        if self.metadata is None:
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize(self, handler) -> dict[str, object]:
+        payload = handler(self)
+        cache = payload.pop("cache")
+        payload["summary"] = {"entries": len(self.entries), "cache": cache}
+        if payload.get("metadata") is None:
             payload.pop("metadata", None)
-        if self.filters is None:
+        if payload.get("filters") is None:
             payload.pop("filters", None)
-        if self.query is None:
+        if payload.get("query") is None:
             payload.pop("query", None)
         return payload
 
@@ -155,25 +130,6 @@ class CacheActiveResult(AniShelfBaseModel):
     metadata: CacheMetadataStatusResult
 
 
-class CacheStatusSummaryResult(AniShelfBaseModel):
-    initialized: bool
-    scope_count: int
-    cache_files: int
-    lock_files: int
-
-
-class CachePathsResult(AniShelfBaseModel):
-    path: str
-    lock_path: str
-
-
-class _CacheStatusEnvelope(AniShelfBaseModel):
-    summary: CacheStatusSummaryResult
-    active: CacheActiveResult
-    scopes: tuple[CacheScopeResult, ...]
-    cache: CachePathsResult
-
-
 class CacheStatusResult(AniShelfBaseModel):
     initialized: bool
     active: CacheActiveResult
@@ -183,22 +139,23 @@ class CacheStatusResult(AniShelfBaseModel):
     cache_files: int
     lock_files: int
 
-    @model_serializer(mode="plain", when_used="json")
-    def _serialize(self) -> dict[str, object]:
-        return _CacheStatusEnvelope(
-            summary=CacheStatusSummaryResult(
-                initialized=self.initialized,
-                scope_count=len(self.scopes),
-                cache_files=self.cache_files,
-                lock_files=self.lock_files,
-            ),
-            active=self.active,
-            scopes=self.scopes,
-            cache=CachePathsResult(
-                path=self.cache_path,
-                lock_path=self.lock_path,
-            ),
-        ).model_dump(mode="json")
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize(self, handler) -> dict[str, object]:
+        payload = handler(self)
+        return {
+            "summary": {
+                "initialized": payload["initialized"],
+                "scope_count": len(self.scopes),
+                "cache_files": payload["cache_files"],
+                "lock_files": payload["lock_files"],
+            },
+            "active": payload["active"],
+            "scopes": payload["scopes"],
+            "cache": {
+                "path": payload["cache_path"],
+                "lock_path": payload["lock_path"],
+            },
+        }
 
 
 class RemovedCacheFilesResult(AniShelfBaseModel):
@@ -267,7 +224,17 @@ class TMDbSearchMatchResult(AniShelfBaseModel):
 
     @classmethod
     def from_match(cls, match: TMDbTitleSearchMatch) -> TMDbSearchMatchResult:
-        return cls.model_validate(match.model_dump(mode="python"))
+        return cls(
+            entry_type=match.entry_type,
+            tmdb_id=match.tmdb_id,
+            title=match.title,
+            original_title=match.original_title,
+            release_date=match.release_date,
+            original_language_code=match.original_language_code,
+            overview=match.overview,
+            poster_path=match.poster_path,
+            details_url=match.details_url,
+        )
 
 
 class TMDbSearchResultsResult(AniShelfBaseModel):

@@ -7,8 +7,17 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
+
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.library.identity import LibraryIdentity
+from anishelf_cli.library.identity import (
+    LibraryIdentity,
+    LibraryIdentityError,
+    library_identity_from_fields,
+)
+from anishelf_cli.models.domain import (
+    WATCH_STATUS_VALUES as DOMAIN_WATCH_STATUS_VALUES,
+)
 from anishelf_cli.models.domain import (
     EpisodeProgress,
     LibraryEntryModel,
@@ -20,9 +29,7 @@ from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
 SUPPORTED_LIBRARY_ENTRY_SCHEMA_VERSION = 2
 SWIFT_REFERENCE_DATE = datetime(2001, 1, 1, tzinfo=UTC)
-
-WATCH_STATUS_VALUES = {"planToWatch", "watching", "watched", "dropped"}
-
+WATCH_STATUS_VALUES = DOMAIN_WATCH_STATUS_VALUES
 
 class LibraryRecordDecodeError(ValueError):
     pass
@@ -60,7 +67,8 @@ def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:
     )
     deleted_at = _optional_datetime(record, "deletedAt")
     if deleted_at is not None:
-        return LibraryEntryTombstone(
+        return _build_entry(
+            LibraryEntryTombstone,
             kind="tombstone",
             identity=identity.raw,
             schema_version=schema_version,
@@ -72,13 +80,11 @@ def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:
         )
 
     watch_status = _required_string(record, "watchStatus")
-    if watch_status not in WATCH_STATUS_VALUES:
-        raise LibraryRecordDecodeError(f"Invalid watchStatus value: {watch_status}.")
-
     using_custom_poster = _required_bool(record, "usingCustomPoster")
     custom_poster_path = _custom_poster_path(record) if using_custom_poster else None
 
-    return LibraryEntrySnapshot(
+    return _build_entry(
+        LibraryEntrySnapshot,
         kind="snapshot",
         identity=identity.raw,
         schema_version=schema_version,
@@ -121,26 +127,20 @@ def _validated_identity(
     parent_series_id: int | None,
     season_number: int | None,
 ) -> LibraryIdentity:
-    if entry_type == "movie":
-        if parent_series_id is not None or season_number is not None:
-            raise LibraryRecordDecodeError(f"Invalid identity fields for {record_name}.")
-        expected = f"movie:{tmdb_id}"
-    elif entry_type == "series":
-        if parent_series_id is not None or season_number is not None:
-            raise LibraryRecordDecodeError(f"Invalid identity fields for {record_name}.")
-        expected = f"series:{tmdb_id}"
-    elif entry_type == "season":
-        if parent_series_id is None or season_number is None:
-            raise LibraryRecordDecodeError(f"Invalid identity fields for {record_name}.")
-        expected = f"season:{parent_series_id}:{season_number}:{tmdb_id}"
-    else:
-        raise LibraryRecordDecodeError(f"Invalid entryType value: {entry_type}.")
-
-    if expected != record_name:
-        raise LibraryRecordDecodeError(
-            f"CloudKit record identity {record_name} does not match decoded fields."
+    try:
+        return library_identity_from_fields(
+            entry_type,
+            tmdb_id,
+            parent_series_id,
+            season_number,
+            raw_identity=record_name,
         )
-    return LibraryIdentity(record_name, entry_type, tmdb_id, parent_series_id, season_number)
+    except LibraryIdentityError as exc:
+        if str(exc) == "Library entry identity does not match decoded fields.":
+            raise LibraryRecordDecodeError(
+                f"CloudKit record identity {record_name} does not match decoded fields."
+            ) from exc
+        raise LibraryRecordDecodeError(str(exc)) from exc
 
 
 def _custom_poster_path(record: CloudKitRecord) -> str | None:
@@ -173,6 +173,17 @@ def _storage_path_from_url(value: str) -> str | None:
     if path_parts:
         return "/" + "/".join(path_parts)
     return None
+
+
+def _build_entry(
+    model_type: type[LibraryEntrySnapshot] | type[LibraryEntryTombstone],
+    **payload: object,
+) -> LibraryEntryModel:
+    try:
+        return model_type(**payload)
+    except ValidationError as exc:
+        first_error = exc.errors(include_url=False)[0]
+        raise LibraryRecordDecodeError(str(first_error["msg"])) from exc
 
 
 def _required_episode_progresses(
