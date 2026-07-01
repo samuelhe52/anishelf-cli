@@ -5,6 +5,11 @@ from dataclasses import dataclass, replace
 
 from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
 
+SNAPSHOT_KIND = "snapshot"
+TOMBSTONE_KIND = "tombstone"
+LEGACY_DELETED_KIND = "deleted"
+VALID_LIBRARY_ENTRY_KINDS = frozenset({SNAPSHOT_KIND, TOMBSTONE_KIND})
+
 
 @dataclass(frozen=True, slots=True)
 class EpisodeProgress:
@@ -17,7 +22,7 @@ class EpisodeProgress:
         return cls(
             season_number=_required_int(payload, "season_number"),
             watched_through_episode=_required_int(payload, "watched_through_episode"),
-            updated_at=nonempty_string_or_none(payload.get("updated_at")),
+            updated_at=_optional_string(payload, "updated_at"),
         )
 
     def to_payload(self) -> dict[str, object]:
@@ -91,40 +96,41 @@ class LibraryEntry:
         metadata_payload = payload.get("metadata")
         return cls(
             identity=_required_string(payload, "identity"),
-            kind=_required_string(payload, "kind"),
+            kind=_required_kind(payload),
             entry_type=_required_string(payload, "entry_type"),
             tmdb_id=_required_int(payload, "tmdb_id"),
-            parent_series_id=strict_int_or_none(payload.get("parent_series_id")),
-            season_number=strict_int_or_none(payload.get("season_number")),
-            schema_version=strict_int_or_none(payload.get("schema_version")),
-            deleted_at=nonempty_string_or_none(payload.get("deleted_at")),
+            parent_series_id=_optional_int(payload, "parent_series_id"),
+            season_number=_optional_int(payload, "season_number"),
+            schema_version=_optional_int(payload, "schema_version"),
+            deleted_at=_optional_string(payload, "deleted_at"),
             on_display=_optional_bool(payload.get("on_display")),
-            date_saved=nonempty_string_or_none(payload.get("date_saved")),
-            watch_status=nonempty_string_or_none(payload.get("watch_status")),
-            date_started=nonempty_string_or_none(payload.get("date_started")),
-            date_finished=nonempty_string_or_none(payload.get("date_finished")),
+            date_saved=_optional_string(payload, "date_saved"),
+            watch_status=_optional_string(payload, "watch_status"),
+            date_started=_optional_string(payload, "date_started"),
+            date_finished=_optional_string(payload, "date_finished"),
             is_date_tracking_enabled=_optional_bool(payload.get("is_date_tracking_enabled")),
-            score=strict_int_or_none(payload.get("score")),
+            score=_optional_int(payload, "score"),
             favorite=_optional_bool(payload.get("favorite")),
             notes=_string_or_empty(payload.get("notes")),
             using_custom_poster=_optional_bool(payload.get("using_custom_poster")),
-            custom_poster_path=nonempty_string_or_none(payload.get("custom_poster_path")),
+            custom_poster_path=_optional_string(payload, "custom_poster_path"),
             episode_progresses=_episode_progresses(episode_progresses),
-            library_updated_at=nonempty_string_or_none(payload.get("library_updated_at")),
-            tracking_updated_at=nonempty_string_or_none(payload.get("tracking_updated_at")),
+            library_updated_at=_optional_string(payload, "library_updated_at"),
+            tracking_updated_at=_optional_string(payload, "tracking_updated_at"),
             metadata=_metadata_or_none(metadata_payload),
         )
 
     def to_payload(self) -> dict[str, object]:
+        kind = _validate_kind(self.kind)
         payload: dict[str, object] = {
-            "kind": self.kind,
+            "kind": kind,
             "identity": self.identity,
             "entry_type": self.entry_type,
             "tmdb_id": self.tmdb_id,
             "parent_series_id": self.parent_series_id,
             "season_number": self.season_number,
         }
-        if self.kind == "snapshot":
+        if kind == SNAPSHOT_KIND:
             payload.update(
                 {
                     "schema_version": self.schema_version,
@@ -146,7 +152,7 @@ class LibraryEntry:
                     "tracking_updated_at": self.tracking_updated_at,
                 }
             )
-        else:
+        elif kind == TOMBSTONE_KIND:
             payload.update(
                 {
                     "schema_version": self.schema_version,
@@ -175,18 +181,23 @@ class LibraryEntry:
 
 
 def _episode_progresses(value: object) -> tuple[EpisodeProgress, ...]:
-    if not isinstance(value, list):
+    if value is None:
         return ()
+    if not isinstance(value, list):
+        raise ValueError("Library entry episode_progresses value is invalid.")
     progresses: list[EpisodeProgress] = []
     for item in value:
-        if isinstance(item, Mapping):
-            progresses.append(EpisodeProgress.from_payload(item))
+        if not isinstance(item, Mapping):
+            raise ValueError("Library entry episode_progresses item is invalid.")
+        progresses.append(EpisodeProgress.from_payload(item))
     return tuple(progresses)
 
 
 def _metadata_or_none(value: object) -> LibraryEntryMetadata | None:
-    if not isinstance(value, Mapping):
+    if value is None:
         return None
+    if not isinstance(value, Mapping):
+        raise ValueError("Library entry metadata value is invalid.")
     return LibraryEntryMetadata.from_payload(value)
 
 
@@ -204,13 +215,53 @@ def _required_int(payload: Mapping[str, object], key: str) -> int:
     return value
 
 
+def _required_kind(payload: Mapping[str, object]) -> str:
+    return _normalize_kind(_required_string(payload, "kind"))
+
+
+def _normalize_kind(value: str) -> str:
+    if value == LEGACY_DELETED_KIND:
+        return TOMBSTONE_KIND
+    return _validate_kind(value)
+
+
+def _validate_kind(value: str) -> str:
+    if value not in VALID_LIBRARY_ENTRY_KINDS:
+        raise ValueError(f"Unsupported library entry kind: {value}.")
+    return value
+
+
+def _optional_int(payload: Mapping[str, object], key: str) -> int | None:
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    value = strict_int_or_none(raw)
+    if value is None:
+        raise ValueError(f"Library entry {key} value is invalid.")
+    return value
+
+
+def _optional_string(payload: Mapping[str, object], key: str) -> str | None:
+    raw = payload.get(key)
+    if raw is None:
+        return None
+    value = nonempty_string_or_none(raw)
+    if value is None:
+        raise ValueError(f"Library entry {key} value is invalid.")
+    return value
+
+
 def _string_or_empty(value: object) -> str | None:
     if value is None:
         return None
     if isinstance(value, str):
         return value
     raise ValueError("Library entry notes value is invalid.")
+
+
 def _optional_bool(value: object) -> bool | None:
+    if value is None:
+        return None
     if isinstance(value, bool):
         return value
-    return None
+    raise ValueError("Library entry boolean value is invalid.")
