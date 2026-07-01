@@ -18,7 +18,11 @@ from pydantic import (
 from pydantic.functional_validators import field_validator, model_validator
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.models.common import AniShelfBaseModel
+from anishelf_cli.models.common import (
+    AniShelfBaseModel,
+    EmptyTupleForNone,
+    NonEmptyStr,
+)
 from anishelf_cli.models.identity import library_identity_from_fields
 
 SNAPSHOT_KIND = "snapshot"
@@ -35,81 +39,39 @@ class EpisodeProgress(AniShelfBaseModel):
 
 class LibraryEntryMetadataGenre(AniShelfBaseModel):
     id: StrictInt
-    name: StrictStr
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, value: str) -> str:
-        if nonempty_string_or_none(value) is None:
-            raise ValueError("Library entry metadata genre name value is invalid.")
-        return value
+    name: NonEmptyStr
 
 
 class LibraryEntryMetadata(AniShelfBaseModel):
     """Typed TMDb metadata attached to a library entry."""
 
-    entry_type: StrictStr | None = None
+    entry_type: NonEmptyStr | None = None
     tmdb_id: StrictInt | None = None
     parent_series_id: StrictInt | None = None
     season_number: StrictInt | None = None
-    language: StrictStr | None = None
-    name: StrictStr | None = None
+    language: NonEmptyStr | None = None
+    name: NonEmptyStr | None = None
     name_translations: tuple[tuple[str, str], ...] = ()
-    original_name: StrictStr | None = None
-    overview: StrictStr | None = None
+    original_name: NonEmptyStr | None = None
+    overview: NonEmptyStr | None = None
     overview_translations: tuple[tuple[str, str], ...] = ()
-    poster_path: StrictStr | None = None
-    backdrop_path: StrictStr | None = None
-    logo_path: StrictStr | None = None
-    original_language_code: StrictStr | None = None
-    on_air_date: StrictStr | None = None
-    status: StrictStr | None = None
-    genre_ids: tuple[StrictInt, ...] = ()
-    genres: tuple[LibraryEntryMetadataGenre, ...] = ()
+    poster_path: NonEmptyStr | None = None
+    backdrop_path: NonEmptyStr | None = None
+    logo_path: NonEmptyStr | None = None
+    original_language_code: NonEmptyStr | None = None
+    on_air_date: NonEmptyStr | None = None
+    status: NonEmptyStr | None = None
+    genre_ids: Annotated[tuple[StrictInt, ...], EmptyTupleForNone] = ()
+    genres: Annotated[tuple[LibraryEntryMetadataGenre, ...], EmptyTupleForNone] = ()
     runtime_minutes: StrictInt | None = None
     season_count: StrictInt | None = None
     episode_count: StrictInt | None = None
     vote_average: StrictFloat | StrictInt | None = None
     vote_count: StrictInt | None = None
     popularity: StrictFloat | StrictInt | None = None
-    link_to_details: StrictStr | None = None
-    fetched_at: StrictStr | None = None
-    source_version: StrictStr | None = None
-
-    @field_validator(
-        "entry_type",
-        "language",
-        "name",
-        "original_name",
-        "overview",
-        "poster_path",
-        "backdrop_path",
-        "logo_path",
-        "original_language_code",
-        "on_air_date",
-        "status",
-        "link_to_details",
-        "fetched_at",
-        "source_version",
-    )
-    @classmethod
-    def _validate_optional_nonempty_string(
-        cls,
-        value: str | None,
-        info: Any,
-    ) -> str | None:
-        if value is None:
-            return None
-        if nonempty_string_or_none(value) is None:
-            raise ValueError(f"Library entry metadata {info.field_name} value is invalid.")
-        return value
-
-    @field_validator("genre_ids", mode="before")
-    @classmethod
-    def _validate_genre_ids(cls, value: object) -> object:
-        if value is None:
-            return ()
-        return value
+    link_to_details: NonEmptyStr | None = None
+    fetched_at: NonEmptyStr | None = None
+    source_version: NonEmptyStr | None = None
 
     @field_validator("name_translations", "overview_translations", mode="before")
     @classmethod
@@ -136,13 +98,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
                 raise ValueError(f"Library entry {info.field_name} value is invalid.")
             normalized.append((key, parsed))
         return tuple(normalized)
-
-    @field_validator("genres", mode="before")
-    @classmethod
-    def _validate_genres(cls, value: object) -> object:
-        if value is None:
-            return ()
-        return value
 
     @model_validator(mode="after")
     def _derive_genre_ids(self) -> Self:
@@ -218,19 +173,12 @@ class LibraryEntryMetadata(AniShelfBaseModel):
 
 
 class _LibraryEntryBase(AniShelfBaseModel):
-    identity: StrictStr
-    entry_type: StrictStr
+    identity: NonEmptyStr
+    entry_type: NonEmptyStr
     tmdb_id: StrictInt
     parent_series_id: StrictInt | None = None
     season_number: StrictInt | None = None
     schema_version: StrictInt | None = None
-
-    @field_validator("identity", "entry_type")
-    @classmethod
-    def _validate_required_string(cls, value: str, info: Any) -> str:
-        if nonempty_string_or_none(value) is None:
-            raise ValueError(f"Library entry {info.field_name} value is invalid.")
-        return value
 
     @model_validator(mode="after")
     def _validate_identity_fields(self) -> Self:
@@ -263,60 +211,29 @@ class _LibraryEntryBase(AniShelfBaseModel):
 class LibraryEntrySnapshot(_LibraryEntryBase):
     kind: Literal["snapshot"] = "snapshot"
     on_display: StrictBool
-    date_saved: StrictStr
+    date_saved: NonEmptyStr
     watch_status: StrictStr
-    date_started: StrictStr | None = None
-    date_finished: StrictStr | None = None
+    date_started: NonEmptyStr | None = None
+    date_finished: NonEmptyStr | None = None
     is_date_tracking_enabled: StrictBool
     score: StrictInt | None = None
     favorite: StrictBool
     notes: StrictStr
     using_custom_poster: StrictBool
-    custom_poster_path: StrictStr | None = None
-    episode_progresses: tuple[EpisodeProgress, ...] = ()
-    library_updated_at: StrictStr | None = None
-    tracking_updated_at: StrictStr | None = None
+    custom_poster_path: NonEmptyStr | None = None
+    episode_progresses: Annotated[tuple[EpisodeProgress, ...], EmptyTupleForNone] = ()
+    library_updated_at: NonEmptyStr | None = None
+    tracking_updated_at: NonEmptyStr | None = None
     metadata: LibraryEntryMetadata | None = None
-
-    @field_validator(
-        "date_saved",
-        "date_started",
-        "date_finished",
-        "custom_poster_path",
-        "library_updated_at",
-        "tracking_updated_at",
-    )
-    @classmethod
-    def _validate_optional_snapshot_string(
-        cls,
-        value: str | None,
-        info: Any,
-    ) -> str | None:
-        if value is None:
-            return None
-        if nonempty_string_or_none(value) is None:
-            raise ValueError(f"Library entry {info.field_name} value is invalid.")
-        return value
 
     @field_validator("watch_status")
     @classmethod
     def _validate_watch_status(cls, value: str) -> str:
-        if nonempty_string_or_none(value) is None:
-            raise ValueError("Library entry watch_status value is invalid.")
         if value not in WATCH_STATUS_VALUES:
             valid = ", ".join(sorted(WATCH_STATUS_VALUES))
             raise ValueError(
                 f"Library entry watch_status value is invalid. Expected one of: {valid}."
             )
-        return value
-
-    @field_validator("episode_progresses", mode="before")
-    @classmethod
-    def _validate_episode_progresses(cls, value: object) -> object:
-        if value is None:
-            return ()
-        if not isinstance(value, list | tuple):
-            raise ValueError("Library entry episode_progresses value is invalid.")
         return value
 
     @model_validator(mode="after")
@@ -361,14 +278,7 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
 
 class LibraryEntryTombstone(_LibraryEntryBase):
     kind: Literal["tombstone"] = "tombstone"
-    deleted_at: StrictStr
-
-    @field_validator("deleted_at")
-    @classmethod
-    def _validate_deleted_at(cls, value: str) -> str:
-        if nonempty_string_or_none(value) is None:
-            raise ValueError("Library entry deleted_at value is invalid.")
-        return value
+    deleted_at: NonEmptyStr
 
     def with_metadata(self, metadata: LibraryEntryMetadata | None) -> LibraryEntryTombstone:
         if metadata is not None:

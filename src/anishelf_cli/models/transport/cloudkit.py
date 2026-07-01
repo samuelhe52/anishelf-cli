@@ -270,11 +270,13 @@ class CloudKitLibraryEntrySnapshotFields(CloudKitLibraryEntryCommonFields):
     )
     custom_poster_path: StrictStr | None = Field(
         default=None,
+        min_length=1,
         validation_alias="customPosterPath",
         serialization_alias="customPosterPath",
     )
     custom_poster_url: StrictStr | None = Field(
         default=None,
+        min_length=1,
         validation_alias="customPosterURL",
         serialization_alias="customPosterURL",
     )
@@ -293,16 +295,6 @@ class CloudKitLibraryEntrySnapshotFields(CloudKitLibraryEntryCommonFields):
         validation_alias="trackingUpdatedAt",
         serialization_alias="trackingUpdatedAt",
     )
-
-    @field_validator("custom_poster_path", "custom_poster_url")
-    @classmethod
-    def _validate_optional_nonempty_string(
-        cls,
-        value: str | None,
-    ) -> str | None:
-        if value is None or nonempty_string_or_none(value) is not None:
-            return value
-        raise ValueError("Invalid string value.")
 
     @field_validator("episode_progresses", mode="before")
     @classmethod

@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Literal, Self, cast
+from typing import Literal, Self
 
 from pydantic import ValidationError, field_validator, model_validator
 
-from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.models.common import AniShelfBaseModel
+from anishelf_cli.models.common import AniShelfBaseModel, NonEmptyStr
 
 VALID_LIBRARY_ENTRY_TYPES = frozenset({"movie", "series", "season"})
 LibraryEntryType = Literal["movie", "series", "season"]
@@ -16,30 +15,11 @@ class LibraryIdentityError(ValueError):
 
 
 class LibraryIdentity(AniShelfBaseModel):
-    raw: str | None = None
+    raw: NonEmptyStr | None = None
     entry_type: LibraryEntryType
     tmdb_id: int
     parent_series_id: int | None = None
     season_number: int | None = None
-
-    @field_validator("raw")
-    @classmethod
-    def _validate_optional_raw(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if nonempty_string_or_none(value) is None:
-            raise ValueError("Identity value is invalid.")
-        return value
-
-    @field_validator("entry_type")
-    @classmethod
-    def _validate_entry_type(cls, value: object) -> LibraryEntryType:
-        if not isinstance(value, str):
-            raise ValueError("entryType must be one of: movie, season, series.")
-        if value not in VALID_LIBRARY_ENTRY_TYPES:
-            valid = ", ".join(sorted(VALID_LIBRARY_ENTRY_TYPES))
-            raise ValueError(f"entryType must be one of: {valid}.")
-        return cast(LibraryEntryType, value)
 
     @field_validator("tmdb_id", mode="before")
     @classmethod

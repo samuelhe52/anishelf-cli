@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import Field, StrictFloat, StrictInt, StrictStr, field_validator
 
-from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import (
     LibraryEntryMetadata,
@@ -109,7 +109,7 @@ class _TMDbSummaryBase(AniShelfBaseModel):
             season_count=None,
             episode_count=None,
             vote_average=optional_number(self.vote_average),
-            vote_count=strict_int_or_none(self.vote_count),
+            vote_count=self.vote_count,
             popularity=optional_number(self.popularity),
             link_to_details=details_link(identity),
             source_version=TMDB_SUMMARY_SOURCE_VERSION,
@@ -158,7 +158,7 @@ class TMDbMovieSummaryResponse(_TMDbSummaryBase):
         return nonempty_string_or_none(self.release_date)
 
     def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        runtime = strict_int_or_none(self.runtime)
+        runtime = self.runtime
         return _metadata_with_updates(
             self._base_domain_metadata(identity),
             runtime_minutes=runtime if runtime is not None and runtime > 0 else None,
@@ -192,8 +192,8 @@ class TMDbSeriesSummaryResponse(_TMDbSummaryBase):
         return nonempty_string_or_none(self.first_air_date)
 
     def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        season_count = strict_int_or_none(self.number_of_seasons)
-        episode_count = strict_int_or_none(self.number_of_episodes)
+        season_count = self.number_of_seasons
+        episode_count = self.number_of_episodes
         return _metadata_with_updates(
             self._base_domain_metadata(identity),
             season_count=season_count if season_count is not None and season_count >= 0 else None,
