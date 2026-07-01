@@ -167,10 +167,6 @@ def metadata_summary_exists(db: sqlite3.Connection, target: TMDbSummaryIdentity)
     return row is not None
 
 
-def metadata_lookup_params(entries: list[LibraryEntryModel]) -> list[Any]:
-    return [metadata_key_from_entry(entry) for entry in entries]
-
-
 def dedupe_summary_targets(targets: list[TMDbSummaryIdentity]) -> list[TMDbSummaryIdentity]:
     seen: set[str] = set()
     deduped: list[TMDbSummaryIdentity] = []
@@ -237,20 +233,6 @@ def _now_iso() -> str:
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _metadata_key(
-    entry_type: str,
-    tmdb_id: int,
-    parent_series_id: int | None,
-    season_number: int | None,
-) -> str:
-    return _metadata_key_from_fields(
-        entry_type,
-        tmdb_id,
-        parent_series_id,
-        season_number,
-    )
 
 
 def _metadata_key_from_fields(

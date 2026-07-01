@@ -20,8 +20,8 @@ from anishelf_cli.models.tmdb import (
 )
 from anishelf_cli.models.transport.tmdb import (
     TMDbMovieSummaryResponse,
-    TMDbSearchResponse,
     TMDbSearchItem,
+    TMDbSearchResponse,
     TMDbSeasonSummaryResponse,
     TMDbSeriesSummaryResponse,
     details_link,
@@ -91,8 +91,6 @@ class TMDbClient:
             raise
         except Exception as exc:
             raise TMDbRequestError("TMDb summary metadata request failed.") from exc
-
-        raise TMDbRequestError(f"Unsupported TMDb entry type: {identity.entry_type}.")
 
     def _get_model(
         self,

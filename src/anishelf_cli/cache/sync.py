@@ -7,6 +7,7 @@ from typing import Protocol
 
 from pydantic import Field
 
+from anishelf_cli.cache.metadata import dedupe_summary_targets
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
@@ -225,7 +226,7 @@ class LibraryCacheSync:
         *,
         limit_targets: bool,
     ) -> list[TMDbSummaryIdentity]:
-        deduped = _dedupe_targets(new_targets)
+        deduped = dedupe_summary_targets(new_targets)
         if not limit_targets:
             return deduped
         if self.metadata_target_limit is None:
@@ -268,7 +269,7 @@ def hydrate_metadata_targets(
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
     progress_callback: LibraryCacheProgressCallback | None = None,
 ) -> MetadataHydrationResult:
-    targets_to_hydrate = _dedupe_targets(targets)
+    targets_to_hydrate = dedupe_summary_targets(targets)
     if not targets_to_hydrate:
         return MetadataHydrationResult(requested=0, hydrated=0, errors=0)
 
@@ -341,14 +342,3 @@ def fetch_metadata_summaries(
                 progress_callback(len(summaries) + errors, errors, len(targets))
 
     return summaries, errors
-
-
-def _dedupe_targets(targets: list[TMDbSummaryIdentity]) -> list[TMDbSummaryIdentity]:
-    seen: set[TMDbSummaryIdentity] = set()
-    deduped: list[TMDbSummaryIdentity] = []
-    for target in targets:
-        if target in seen:
-            continue
-        seen.add(target)
-        deduped.append(target)
-    return deduped
