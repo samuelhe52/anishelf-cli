@@ -174,15 +174,11 @@ def cache_summary_payload(
     refresh_result: LibraryCacheRefreshResult | None,
 ) -> LibraryEntriesCacheResult:
     scope = store.scope
+    if refresh_result is not None:
+        return refresh_result.cache_result(scope)
     return LibraryEntriesCacheResult(
-        mode="cached" if refresh_result is None else "updated",
-        updated=refresh_result is not None,
-        rebuilt=None if refresh_result is None else refresh_result.rebuilt,
-        pages=None if refresh_result is None else refresh_result.pages,
-        records=None if refresh_result is None else refresh_result.records,
-        metadata_requested=None if refresh_result is None else refresh_result.metadata_requested,
-        metadata_hydrated=None if refresh_result is None else refresh_result.metadata_hydrated,
-        metadata_errors=None if refresh_result is None else refresh_result.metadata_errors,
+        mode="cached",
+        updated=False,
         container=scope.container,
         environment=scope.environment,
         database=scope.database,

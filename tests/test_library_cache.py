@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
@@ -23,24 +24,33 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
+from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.models.output import CacheMetadataStatusResult
 from anishelf_cli.secrets import SecretStorageUnavailableError
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 from tests.support import (
-    MemorySecretStore,
     create_cache_store,
     create_seeded_cache_store,
-    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
-    isolate_paths as _isolate_paths,
     live_record,
-    metadata_summary as _metadata_summary,
     null_lock,
-    patch_library_read_store,
     runner,
-    snapshot_entry_payload as _snapshot_entry_payload,
-    store_with_cloudkit_token as _store_with_cloudkit_token,
     tombstone_record,
+)
+from tests.support import (
+    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
+)
+from tests.support import (
+    isolate_paths as _isolate_paths,
+)
+from tests.support import (
+    metadata_summary as _metadata_summary,
+)
+from tests.support import (
+    snapshot_entry_payload as _snapshot_entry_payload,
+)
+from tests.support import (
+    store_with_cloudkit_token as _store_with_cloudkit_token,
 )
 
 
@@ -103,6 +113,21 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
             "poster_path",
             "source_version",
         } <= metadata_columns
+
+
+def test_cache_preserves_raw_cloudkit_record_json_shape(tmp_path, monkeypatch) -> None:
+    record = _live_record("movie:55", "movie", 55)
+    store = create_seeded_cache_store(monkeypatch, tmp_path, record)
+
+    with sqlite3.connect(store.path) as db:
+        row = db.execute(
+            "SELECT raw_record_json, record_change_tag FROM library_entries WHERE identity = ?",
+            ("movie:55",),
+        ).fetchone()
+
+    assert row is not None
+    assert json.loads(row[0]) == record
+    assert row[1] == "tag-movie:55"
 
 
 def test_metadata_summary_is_stored_separately_and_attached_on_read(
@@ -1139,7 +1164,7 @@ def test_library_list_sync_refreshes_cache_before_reading(
     tmp_path,
     monkeypatch,
 ) -> None:
-    initialized_store = create_seeded_cache_store(
+    create_seeded_cache_store(
         monkeypatch,
         tmp_path,
         _live_record("movie:55", "movie", 55),
@@ -1486,7 +1511,11 @@ def test_library_export_attaches_cached_metadata_by_default(
     tmp_path,
     monkeypatch,
 ) -> None:
-    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("series:22", "series", 22))
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("series:22", "series", 22),
+    )
     store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
 
     result = runner.invoke(app, ["--json", "library", "export"])

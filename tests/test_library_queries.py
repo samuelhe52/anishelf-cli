@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from anishelf_cli.cache.sync import LibraryCacheRefreshResult
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.library.queries import (
@@ -49,6 +50,41 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
         "requested": "none",
         "attached": False,
         "source": None,
+    }
+
+
+def test_cache_summary_payload_uses_structured_refresh_result() -> None:
+    store = FakeQueryStore(
+        [_entry("movie:55", "movie", 55)],
+        metadata={},
+    )
+
+    result = cache_summary_payload(
+        store,
+        LibraryCacheRefreshResult(
+            rebuilt=False,
+            pages=2,
+            records=3,
+            metadata_requested=1,
+            metadata_hydrated=1,
+            metadata_errors=0,
+        ),
+    )
+
+    assert result.model_dump(mode="json") == {
+        "mode": "updated",
+        "updated": True,
+        "rebuilt": False,
+        "pages": 2,
+        "records": 3,
+        "metadata_requested": 1,
+        "metadata_hydrated": 1,
+        "metadata_errors": 0,
+        "container": "container",
+        "environment": "production",
+        "database": "private",
+        "zone": "zone",
+        "user_record_name": "_user",
     }
 
 

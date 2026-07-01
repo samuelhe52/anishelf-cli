@@ -199,6 +199,12 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     def overview_translation_map(self) -> dict[str, str]:
         return dict(self.overview_translations)
 
+    def output_payload(self) -> dict[str, object]:
+        return self.model_dump(mode="json", include=self.model_fields_set)
+
+    def storage_payload(self) -> dict[str, object]:
+        return self.model_dump(mode="json", exclude={"genre_ids"})
+
 
 class _LibraryEntryBase(AniShelfBaseModel):
     identity: StrictStr
@@ -259,6 +265,9 @@ class _LibraryEntryBase(AniShelfBaseModel):
             return metadata.title
         return None
 
+    def output_payload(self) -> dict[str, object]:
+        return self.model_dump(mode="json")
+
 
 class LibraryEntrySnapshot(_LibraryEntryBase):
     kind: Literal["snapshot"] = "snapshot"
@@ -315,11 +324,26 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
             raise ValueError("Library entry episode_progresses value is invalid.")
         return value
 
+    @field_serializer("metadata", when_used="json")
+    def _serialize_metadata(
+        self,
+        metadata: LibraryEntryMetadata | None,
+    ) -> dict[str, object] | None:
+        if metadata is None:
+            return None
+        return metadata.output_payload()
+
     def with_metadata(self, metadata: LibraryEntryMetadata | None) -> LibraryEntrySnapshot:
         return self.model_copy(update={"metadata": metadata})
 
     def without_metadata(self) -> LibraryEntrySnapshot:
         return self.with_metadata(None)
+
+    def output_payload(self) -> dict[str, object]:
+        payload = super().output_payload()
+        if self.metadata is None:
+            payload.pop("metadata", None)
+        return payload
 
 
 class LibraryEntryTombstone(_LibraryEntryBase):

@@ -7,7 +7,6 @@ from typing import Any
 
 from anishelf_cli.cache import metadata
 from anishelf_cli.cache.schema import LibraryCacheError
-from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.library import (
     LibraryIdentityError,
     decode_library_entry_record,
@@ -23,13 +22,19 @@ from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
 def apply_record(db: sqlite3.Connection, table: str, record: CloudKitRecord) -> None:
-    payload = _cloudkit_record_payload(record)
-    if record_deleted(payload):
-        upsert_decoded_entry(db, table, deleted_entry(payload), payload)
+    raw_record = record.to_cloudkit_payload()
+    if record_deleted(record):
+        upsert_decoded_entry(
+            db,
+            table,
+            deleted_entry(record),
+            raw_record,
+            record_change_tag(record),
+        )
         return
 
     decoded = decode_library_entry_record(record)
-    upsert_decoded_entry(db, table, decoded, payload)
+    upsert_decoded_entry(db, table, decoded, raw_record, record_change_tag(record))
 
 
 def summary_target_from_record(
@@ -37,8 +42,7 @@ def summary_target_from_record(
     table: str,
     record: CloudKitRecord,
 ) -> TMDbSummaryIdentity | None:
-    payload = _cloudkit_record_payload(record)
-    if record_deleted(payload):
+    if record_deleted(record):
         return None
     decoded = decode_library_entry_record(record)
     if decoded.kind != "snapshot":
@@ -58,6 +62,7 @@ def upsert_decoded_entry(
     table: str,
     entry: LibraryEntryModel,
     raw_record: dict[str, Any],
+    change_tag: str | None,
 ) -> None:
     db.execute(
         f"""
@@ -141,11 +146,15 @@ def upsert_decoded_entry(
             decoded_json = excluded.decoded_json,
             cached_at = excluded.cached_at
         """,
-        entry_row_params(entry, raw_record),
+        entry_row_params(entry, raw_record, change_tag),
     )
 
 
-def entry_row_params(entry: LibraryEntryModel, raw_record: dict[str, Any]) -> dict[str, Any]:
+def entry_row_params(
+    entry: LibraryEntryModel,
+    raw_record: dict[str, Any],
+    change_tag: str | None,
+) -> dict[str, Any]:
     return {
         "identity": entry.identity,
         "kind": entry.kind,
@@ -170,7 +179,7 @@ def entry_row_params(entry: LibraryEntryModel, raw_record: dict[str, Any]) -> di
         "tracking_updated_at": getattr(entry, "tracking_updated_at", None),
         "deleted_at": getattr(entry, "deleted_at", None),
         "schema_version": entry.schema_version,
-        "record_change_tag": record_change_tag(raw_record),
+        "record_change_tag": change_tag,
         "raw_record_json": json.dumps(raw_record, sort_keys=True, separators=(",", ":")),
         "decoded_json": entry.model_dump_json(
             by_alias=False,
@@ -181,7 +190,7 @@ def entry_row_params(entry: LibraryEntryModel, raw_record: dict[str, Any]) -> di
     }
 
 
-def deleted_entry(record: dict[str, Any]) -> LibraryEntryModel:
+def deleted_entry(record: CloudKitRecord) -> LibraryEntryModel:
     name = record_name(record)
     try:
         identity = parse_library_identity(name)
@@ -199,34 +208,27 @@ def deleted_entry(record: dict[str, Any]) -> LibraryEntryModel:
     )
 
 
-def record_deleted(record: dict[str, Any]) -> bool:
-    return record.get("deleted") is True
+def record_deleted(record: CloudKitRecord) -> bool:
+    return record.is_deleted
 
 
-def record_name(record: dict[str, Any]) -> str:
-    if name := nonempty_string_or_none(record.get("recordName")):
-        return name
-    record_id = record.get("recordID")
-    if isinstance(record_id, dict) and (
-        name := nonempty_string_or_none(record_id.get("recordName"))
-    ):
+def record_name(record: CloudKitRecord) -> str:
+    if name := record.effective_record_name:
         return name
     raise LibraryCacheError("CloudKit deleted record is missing recordName.")
 
 
-def record_change_tag(record: dict[str, Any]) -> str | None:
-    return nonempty_string_or_none(record.get("recordChangeTag"))
+def record_change_tag(record: CloudKitRecord) -> str | None:
+    return record.record_change_tag
 
 
-def deleted_timestamp(record: dict[str, Any]) -> str:
-    modified = record.get("modified")
-    if isinstance(modified, dict):
-        timestamp = modified.get("timestamp")
-        if isinstance(timestamp, int | float) and not isinstance(timestamp, bool):
-            value = float(timestamp)
-            if abs(value) > 10_000_000_000:
-                value /= 1000
-            return _iso_z(datetime.fromtimestamp(value, UTC))
+def deleted_timestamp(record: CloudKitRecord) -> str:
+    timestamp = record.modified_timestamp
+    if timestamp is not None:
+        value = float(timestamp)
+        if abs(value) > 10_000_000_000:
+            value /= 1000
+        return _iso_z(datetime.fromtimestamp(value, UTC))
     return _now_iso()
 
 
@@ -249,7 +251,3 @@ def _now_iso() -> str:
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
-
-
-def _cloudkit_record_payload(record: CloudKitRecord) -> dict[str, Any]:
-    return record.to_cloudkit_payload()

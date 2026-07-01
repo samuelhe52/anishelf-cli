@@ -101,37 +101,28 @@ def upsert_metadata_summary(db: sqlite3.Connection, summary: LibraryEntryMetadat
 
 
 def metadata_summary_params(summary: LibraryEntryMetadata) -> dict[str, Any]:
-    payload = _metadata_payload(summary)
-    metadata_json = _metadata_json(summary)
+    payload = summary.storage_payload()
     return {
         "metadata_key": metadata_key_from_summary(summary),
         "entry_type": summary.entry_type,
         "tmdb_id": summary.tmdb_id,
         "parent_series_id": summary.parent_series_id,
         "season_number": summary.season_number,
-        "language": summary.language or "",
-        "name": summary.name,
-        "name_translations_json": json.dumps(
-            payload["name_translations"],
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        "original_name": summary.original_name,
-        "overview": summary.overview,
-        "overview_translations_json": json.dumps(
-            payload["overview_translations"],
-            sort_keys=True,
-            separators=(",", ":"),
-        ),
-        "poster_path": summary.poster_path,
-        "backdrop_path": summary.backdrop_path,
-        "logo_path": summary.logo_path,
-        "original_language_code": summary.original_language_code,
-        "on_air_date": summary.on_air_date,
-        "link_to_details": summary.link_to_details,
-        "fetched_at": summary.fetched_at,
-        "source_version": summary.source_version,
-        "metadata_json": metadata_json,
+        "language": payload["language"] or "",
+        "name": payload["name"],
+        "name_translations_json": _stable_json(payload["name_translations"]),
+        "original_name": payload["original_name"],
+        "overview": payload["overview"],
+        "overview_translations_json": _stable_json(payload["overview_translations"]),
+        "poster_path": payload["poster_path"],
+        "backdrop_path": payload["backdrop_path"],
+        "logo_path": payload["logo_path"],
+        "original_language_code": payload["original_language_code"],
+        "on_air_date": payload["on_air_date"],
+        "link_to_details": payload["link_to_details"],
+        "fetched_at": payload["fetched_at"],
+        "source_version": payload["source_version"],
+        "metadata_json": _stable_json(payload),
     }
 
 
@@ -237,39 +228,8 @@ def placeholders(values: set[int] | list[str] | list[dict[str, Any]]) -> str:
     return ", ".join("?" for _ in values)
 
 
-def _metadata_json(summary: LibraryEntryMetadata) -> str:
-    return json.dumps(_metadata_payload(summary), sort_keys=True, separators=(",", ":"))
-
-
-def _metadata_payload(summary: LibraryEntryMetadata) -> dict[str, Any]:
-    return {
-        "entry_type": summary.entry_type,
-        "tmdb_id": summary.tmdb_id,
-        "parent_series_id": summary.parent_series_id,
-        "season_number": summary.season_number,
-        "language": summary.language or None,
-        "name": summary.name,
-        "name_translations": summary.name_translation_map,
-        "original_name": summary.original_name,
-        "overview": summary.overview,
-        "overview_translations": summary.overview_translation_map,
-        "poster_path": summary.poster_path,
-        "backdrop_path": summary.backdrop_path,
-        "logo_path": summary.logo_path,
-        "original_language_code": summary.original_language_code,
-        "on_air_date": summary.on_air_date,
-        "status": summary.status,
-        "genres": [genre.model_dump(mode="json") for genre in summary.genres],
-        "runtime_minutes": summary.runtime_minutes,
-        "season_count": summary.season_count,
-        "episode_count": summary.episode_count,
-        "vote_average": summary.vote_average,
-        "vote_count": summary.vote_count,
-        "popularity": summary.popularity,
-        "link_to_details": summary.link_to_details,
-        "fetched_at": summary.fetched_at,
-        "source_version": summary.source_version,
-    }
+def _stable_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
 def _now_iso() -> str:

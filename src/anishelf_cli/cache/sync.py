@@ -2,30 +2,69 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass
 from typing import Protocol
+
+from pydantic import Field
 
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata
+from anishelf_cli.models.output import LibraryEntriesCacheResult
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 
 
-@dataclass(frozen=True, slots=True)
-class LibraryCacheRefreshResult:
+class LibraryCacheResultScope(Protocol):
+    @property
+    def container(self) -> str: ...
+
+    @property
+    def environment(self) -> str: ...
+
+    @property
+    def database(self) -> str: ...
+
+    @property
+    def zone(self) -> str: ...
+
+    @property
+    def user_record_name(self) -> str: ...
+
+
+class LibraryCacheRefreshResult(AniShelfBaseModel):
     rebuilt: bool
     pages: int
     records: int
     metadata_requested: int = 0
     metadata_hydrated: int = 0
     metadata_errors: int = 0
-    metadata_targets: tuple[TMDbSummaryIdentity, ...] = field(
+    metadata_targets: tuple[TMDbSummaryIdentity, ...] = Field(
         default_factory=tuple,
+        exclude=True,
         repr=False,
-        compare=False,
     )
+
+    def cache_result(
+        self,
+        scope: LibraryCacheResultScope,
+    ) -> LibraryEntriesCacheResult:
+        return LibraryEntriesCacheResult(
+            mode="updated",
+            updated=True,
+            rebuilt=self.rebuilt,
+            pages=self.pages,
+            records=self.records,
+            metadata_requested=self.metadata_requested,
+            metadata_hydrated=self.metadata_hydrated,
+            metadata_errors=self.metadata_errors,
+            container=scope.container,
+            environment=scope.environment,
+            database=scope.database,
+            zone=scope.zone,
+            user_record_name=scope.user_record_name,
+        )
 
 
 MAX_METADATA_HYDRATION_WORKERS = 8
@@ -89,11 +128,12 @@ class LibraryCacheSync:
             max_workers=self.metadata_workers,
             progress_callback=self.progress_callback,
         )
-        return replace(
-            refresh_result,
-            metadata_requested=hydration_result.requested,
-            metadata_hydrated=hydration_result.hydrated,
-            metadata_errors=hydration_result.errors,
+        return refresh_result.model_copy(
+            update={
+                "metadata_requested": hydration_result.requested,
+                "metadata_hydrated": hydration_result.hydrated,
+                "metadata_errors": hydration_result.errors,
+            }
         )
 
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:

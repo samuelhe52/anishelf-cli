@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import pytest
 from keyring.errors import PasswordDeleteError, PasswordSetError
-from tests.support import MemorySecretStore
 
 from anishelf_cli import secrets as secrets_module
 from anishelf_cli.cloudkit import api_token as cloudkit_api_token_module
@@ -22,6 +21,7 @@ from anishelf_cli.secrets import (
     tmdb_api_key_secret,
 )
 from anishelf_cli.tmdb.tokens import resolve_tmdb_api_token
+from tests.support import MemorySecretStore
 
 
 class FailingSecretStore:

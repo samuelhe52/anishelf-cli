@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field, StrictBool, StrictStr, field_validator
+from pydantic import Field, StrictBool, StrictStr, field_validator, model_validator
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -53,6 +53,20 @@ class CloudKitRecordID(AniShelfBaseModel):
     )
 
 
+class CloudKitField(AniShelfBaseModel):
+    type: StrictStr | None = None
+    value: Any = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _wrap_raw_value(cls, value: object) -> object:
+        if isinstance(value, cls):
+            return value
+        if isinstance(value, dict):
+            return value
+        return {"value": value}
+
+
 class CloudKitRecord(AniShelfBaseModel):
     record_name: StrictStr | None = Field(
         default=None,
@@ -77,7 +91,7 @@ class CloudKitRecord(AniShelfBaseModel):
     created: dict[str, Any] | None = None
     modified: dict[str, Any] | None = None
     deleted: StrictBool | None = None
-    fields: dict[str, Any] = Field(default_factory=dict)
+    fields: dict[str, CloudKitField] = Field(default_factory=dict)
     server_error_code: StrictStr | None = Field(
         default=None,
         validation_alias="serverErrorCode",
@@ -92,6 +106,30 @@ class CloudKitRecord(AniShelfBaseModel):
         if self.record_id is not None:
             return nonempty_string_or_none(self.record_id.record_name)
         return None
+
+    @property
+    def is_deleted(self) -> bool:
+        return self.deleted is True
+
+    @property
+    def modified_timestamp(self) -> int | float | None:
+        if not isinstance(self.modified, dict):
+            return None
+        timestamp = self.modified.get("timestamp")
+        if isinstance(timestamp, bool):
+            return None
+        if isinstance(timestamp, int | float):
+            return timestamp
+        return None
+
+    def field(self, name: str) -> CloudKitField | None:
+        return self.fields.get(name)
+
+    def field_value(self, name: str) -> Any | None:
+        field = self.field(name)
+        if field is None:
+            return None
+        return field.value
 
     def to_cloudkit_payload(self) -> dict[str, Any]:
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
