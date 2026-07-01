@@ -13,6 +13,7 @@ from filelock import FileLock
 from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.auth import database_endpoint_url, successor_web_auth_token
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.core.output import emit_verbose
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.secrets import (
@@ -354,7 +355,7 @@ def _current_user_from_payload(
     payload: dict[str, Any],
     redactor: SecretRedactor,
 ) -> CurrentUser:
-    user_record_name = _optional_string(payload.get("userRecordName"))
+    user_record_name = nonempty_string_or_none(payload.get("userRecordName"))
     if not user_record_name:
         raise CloudKitUnexpectedResponseError(
             "CloudKit whoami response did not include userRecordName.",
@@ -363,9 +364,9 @@ def _current_user_from_payload(
 
     return CurrentUser(
         user_record_name=user_record_name,
-        first_name=_optional_string(payload.get("firstName")),
-        last_name=_optional_string(payload.get("lastName")),
-        email=_optional_string(payload.get("email")),
+        first_name=nonempty_string_or_none(payload.get("firstName")),
+        last_name=nonempty_string_or_none(payload.get("lastName")),
+        email=nonempty_string_or_none(payload.get("email")),
     )
 
 
@@ -381,7 +382,7 @@ def _zone_changes_page_from_payload(
         )
 
     zone_result = zones[0]
-    if code := _optional_string(zone_result.get("serverErrorCode")):
+    if code := nonempty_string_or_none(zone_result.get("serverErrorCode")):
         message = _zone_error_message(code, zone_result)
         if _is_change_token_expired_code(code):
             raise CloudKitChangeTokenExpiredError(message, redactor=redactor)
@@ -399,7 +400,7 @@ def _zone_changes_page_from_payload(
             redactor=redactor,
         )
 
-    sync_token = _optional_string(zone_result.get("syncToken"))
+    sync_token = nonempty_string_or_none(zone_result.get("syncToken"))
     if not sync_token:
         raise CloudKitUnexpectedResponseError(
             "CloudKit zone changes response did not include syncToken.",
@@ -411,10 +412,6 @@ def _zone_changes_page_from_payload(
         sync_token=sync_token,
         more_coming=bool(zone_result.get("moreComing")),
     )
-
-
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
 
 
 def _is_authentication_failure(response: httpx.Response, payload: dict[str, Any]) -> bool:
@@ -454,9 +451,9 @@ def _cloudkit_failure_message(
     payload: dict[str, Any],
 ) -> str:
     details = [f"HTTP {response.status_code}"]
-    if code := _optional_string(payload.get("serverErrorCode")):
+    if code := nonempty_string_or_none(payload.get("serverErrorCode")):
         details.append(code)
-    if reason := _optional_string(payload.get("reason")):
+    if reason := nonempty_string_or_none(payload.get("reason")):
         details.append(reason)
     return f"{prefix} ({': '.join(details)})."
 
@@ -466,9 +463,9 @@ def _cloudkit_payload_log(response: httpx.Response, payload: dict[str, Any]) -> 
         "CloudKit payload <- "
         f"HTTP {response.status_code} {response.request.method} {response.request.url}"
     ]
-    if code := _optional_string(payload.get("serverErrorCode")):
+    if code := nonempty_string_or_none(payload.get("serverErrorCode")):
         parts.append(f"serverErrorCode={code}")
-    if reason := _optional_string(payload.get("reason")):
+    if reason := nonempty_string_or_none(payload.get("reason")):
         parts.append(f"reason={reason}")
     zones = payload.get("zones")
     if isinstance(zones, list) and len(zones) == 1 and isinstance(zones[0], dict):
@@ -490,7 +487,7 @@ def _safe_lock_name(value: str) -> str:
 
 def _zone_error_message(code: str, zone_result: dict[str, Any]) -> str:
     details = [code]
-    if reason := _optional_string(zone_result.get("reason")):
+    if reason := nonempty_string_or_none(zone_result.get("reason")):
         details.append(reason)
     return f"CloudKit zone changes request failed ({': '.join(details)})."
 

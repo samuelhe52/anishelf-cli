@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
 from anishelf_cli.core.output import emit_verbose
 from anishelf_cli.core.redaction import SecretRedactor
 
@@ -200,14 +201,15 @@ def _title_search_matches(
             TMDbTitleSearchMatch(
                 entry_type=entry_type,
                 tmdb_id=raw_id,
-                title=_optional_string(item.get("title")) or _optional_string(item.get("name")),
-                original_title=_optional_string(item.get("original_title"))
-                or _optional_string(item.get("original_name")),
-                release_date=_optional_string(item.get("release_date"))
-                or _optional_string(item.get("first_air_date")),
-                original_language_code=_optional_string(item.get("original_language")),
-                overview=_optional_string(item.get("overview")),
-                poster_path=_optional_string(item.get("poster_path")),
+                title=nonempty_string_or_none(item.get("title"))
+                or nonempty_string_or_none(item.get("name")),
+                original_title=nonempty_string_or_none(item.get("original_title"))
+                or nonempty_string_or_none(item.get("original_name")),
+                release_date=nonempty_string_or_none(item.get("release_date"))
+                or nonempty_string_or_none(item.get("first_air_date")),
+                original_language_code=nonempty_string_or_none(item.get("original_language")),
+                overview=nonempty_string_or_none(item.get("overview")),
+                poster_path=nonempty_string_or_none(item.get("poster_path")),
                 details_url=_details_link(
                     TMDbSummaryIdentity(
                         entry_type=entry_type,
@@ -220,14 +222,16 @@ def _title_search_matches(
 
 
 def _summary_payload(identity: TMDbSummaryIdentity, payload: dict[str, Any]) -> dict[str, Any]:
-    name = _optional_string(payload.get("title")) or _optional_string(payload.get("name"))
-    original_name = _optional_string(payload.get("original_title")) or _optional_string(
-        payload.get("original_name")
+    name = nonempty_string_or_none(payload.get("title")) or nonempty_string_or_none(
+        payload.get("name")
+    )
+    original_name = nonempty_string_or_none(payload.get("original_title")) or (
+        nonempty_string_or_none(payload.get("original_name"))
     )
     on_air_date = (
-        _optional_string(payload.get("release_date"))
-        or _optional_string(payload.get("first_air_date"))
-        or _optional_string(payload.get("air_date"))
+        nonempty_string_or_none(payload.get("release_date"))
+        or nonempty_string_or_none(payload.get("first_air_date"))
+        or nonempty_string_or_none(payload.get("air_date"))
     )
     return {
         "entry_type": identity.entry_type,
@@ -238,20 +242,20 @@ def _summary_payload(identity: TMDbSummaryIdentity, payload: dict[str, Any]) -> 
         "name": name,
         "name_translations": {},
         "original_name": original_name,
-        "overview": _optional_string(payload.get("overview")),
+        "overview": nonempty_string_or_none(payload.get("overview")),
         "overview_translations": {},
-        "poster_path": _optional_string(payload.get("poster_path")),
-        "backdrop_path": _optional_string(payload.get("backdrop_path")),
+        "poster_path": nonempty_string_or_none(payload.get("poster_path")),
+        "backdrop_path": nonempty_string_or_none(payload.get("backdrop_path")),
         "logo_path": None,
-        "original_language_code": _optional_string(payload.get("original_language")),
+        "original_language_code": nonempty_string_or_none(payload.get("original_language")),
         "on_air_date": on_air_date,
-        "status": _optional_string(payload.get("status")),
+        "status": nonempty_string_or_none(payload.get("status")),
         "genres": _genres(payload.get("genres")),
         "runtime_minutes": _runtime_minutes(identity.entry_type, payload),
         "season_count": _season_count(identity.entry_type, payload),
         "episode_count": _episode_count(identity.entry_type, payload),
         "vote_average": _optional_number(payload.get("vote_average")),
-        "vote_count": _optional_int(payload.get("vote_count")),
+        "vote_count": strict_int_or_none(payload.get("vote_count")),
         "popularity": _optional_number(payload.get("popularity")),
         "link_to_details": _details_link(identity),
         "source_version": "tmdb.http.summary.v2",
@@ -268,16 +272,6 @@ def _details_link(identity: TMDbSummaryIdentity) -> str:
     return f"https://www.themoviedb.org/tv/{identity.tmdb_id}"
 
 
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
-def _optional_int(value: object) -> int | None:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return None
-
-
 def _optional_number(value: object) -> float | None:
     if isinstance(value, int | float) and not isinstance(value, bool):
         return float(value)
@@ -292,8 +286,8 @@ def _genres(value: object) -> list[dict[str, int | str]]:
     for item in value:
         if not isinstance(item, dict):
             continue
-        genre_id = _optional_int(item.get("id"))
-        name = _optional_string(item.get("name"))
+        genre_id = strict_int_or_none(item.get("id"))
+        name = nonempty_string_or_none(item.get("name"))
         if genre_id is None or name is None:
             continue
         genres.append({"id": genre_id, "name": name})
@@ -303,7 +297,7 @@ def _genres(value: object) -> list[dict[str, int | str]]:
 def _runtime_minutes(entry_type: str, payload: dict[str, Any]) -> int | None:
     if entry_type != "movie":
         return None
-    runtime = _optional_int(payload.get("runtime"))
+    runtime = strict_int_or_none(payload.get("runtime"))
     if runtime is None or runtime <= 0:
         return None
     return runtime
@@ -312,7 +306,7 @@ def _runtime_minutes(entry_type: str, payload: dict[str, Any]) -> int | None:
 def _season_count(entry_type: str, payload: dict[str, Any]) -> int | None:
     if entry_type != "series":
         return None
-    count = _optional_int(payload.get("number_of_seasons"))
+    count = strict_int_or_none(payload.get("number_of_seasons"))
     if count is None or count < 0:
         return None
     return count
@@ -320,7 +314,7 @@ def _season_count(entry_type: str, payload: dict[str, Any]) -> int | None:
 
 def _episode_count(entry_type: str, payload: dict[str, Any]) -> int | None:
     if entry_type == "series":
-        count = _optional_int(payload.get("number_of_episodes"))
+        count = strict_int_or_none(payload.get("number_of_episodes"))
         if count is None or count < 0:
             return None
         return count

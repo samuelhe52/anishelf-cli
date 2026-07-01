@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.library.identity import (
     LibraryIdentity,
     LibraryIdentityError,
@@ -39,7 +40,7 @@ def library_get_envelope(
         if result is None:
             items[index] = _error_item(raw_identity, "not_found", "Library entry not found.")
             continue
-        if code := _optional_string(result.get("serverErrorCode")):
+        if code := nonempty_string_or_none(result.get("serverErrorCode")):
             items[index] = _error_item(
                 raw_identity,
                 _item_error_code(code),
@@ -145,21 +146,17 @@ def _item_error_code(server_error_code: str) -> str:
 
 
 def _cloudkit_item_error_message(result: dict[str, Any]) -> str:
-    if reason := _optional_string(result.get("reason")):
+    if reason := nonempty_string_or_none(result.get("reason")):
         return reason
-    if code := _optional_string(result.get("serverErrorCode")):
+    if code := nonempty_string_or_none(result.get("serverErrorCode")):
         return code
     return "CloudKit returned an item-level error."
 
 
 def _record_name_or_none(record: dict[str, Any]) -> str | None:
-    if record_name := _optional_string(record.get("recordName")):
+    if record_name := nonempty_string_or_none(record.get("recordName")):
         return record_name
     record_id = record.get("recordID")
     if isinstance(record_id, dict):
-        return _optional_string(record_id.get("recordName"))
+        return nonempty_string_or_none(record_id.get("recordName"))
     return None
-
-
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None

@@ -59,6 +59,8 @@ def _normalize_metadata_args(args: list[str]) -> list[str]:
             index += 1
             continue
 
+        # Support `--metadata none` alongside `--metadata=none`. Positional
+        # tokens that collide with metadata levels can still be passed after `--`.
         next_arg = args[index + 1] if index + 1 < len(args) else None
         if next_arg in _METADATA_DEPTH_VALUES:
             normalized.append(f"--metadata={next_arg}")

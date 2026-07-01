@@ -3,6 +3,8 @@ from __future__ import annotations
 from collections.abc import Mapping
 from dataclasses import dataclass, replace
 
+from anishelf_cli.core.coercion import nonempty_string_or_none, strict_int_or_none
+
 
 @dataclass(frozen=True, slots=True)
 class EpisodeProgress:
@@ -15,7 +17,7 @@ class EpisodeProgress:
         return cls(
             season_number=_required_int(payload, "season_number"),
             watched_through_episode=_required_int(payload, "watched_through_episode"),
-            updated_at=_optional_string(payload.get("updated_at")),
+            updated_at=nonempty_string_or_none(payload.get("updated_at")),
         )
 
     def to_payload(self) -> dict[str, object]:
@@ -38,7 +40,7 @@ class LibraryEntryMetadata:
         return dict(self.payload)
 
     def string_field(self, key: str) -> str | None:
-        return _optional_string(self.payload.get(key))
+        return nonempty_string_or_none(self.payload.get(key))
 
     @property
     def name(self) -> str | None:
@@ -92,24 +94,24 @@ class LibraryEntry:
             kind=_required_string(payload, "kind"),
             entry_type=_required_string(payload, "entry_type"),
             tmdb_id=_required_int(payload, "tmdb_id"),
-            parent_series_id=_optional_int(payload.get("parent_series_id")),
-            season_number=_optional_int(payload.get("season_number")),
-            schema_version=_optional_int(payload.get("schema_version")),
-            deleted_at=_optional_string(payload.get("deleted_at")),
+            parent_series_id=strict_int_or_none(payload.get("parent_series_id")),
+            season_number=strict_int_or_none(payload.get("season_number")),
+            schema_version=strict_int_or_none(payload.get("schema_version")),
+            deleted_at=nonempty_string_or_none(payload.get("deleted_at")),
             on_display=_optional_bool(payload.get("on_display")),
-            date_saved=_optional_string(payload.get("date_saved")),
-            watch_status=_optional_string(payload.get("watch_status")),
-            date_started=_optional_string(payload.get("date_started")),
-            date_finished=_optional_string(payload.get("date_finished")),
+            date_saved=nonempty_string_or_none(payload.get("date_saved")),
+            watch_status=nonempty_string_or_none(payload.get("watch_status")),
+            date_started=nonempty_string_or_none(payload.get("date_started")),
+            date_finished=nonempty_string_or_none(payload.get("date_finished")),
             is_date_tracking_enabled=_optional_bool(payload.get("is_date_tracking_enabled")),
-            score=_optional_int(payload.get("score")),
+            score=strict_int_or_none(payload.get("score")),
             favorite=_optional_bool(payload.get("favorite")),
             notes=_string_or_empty(payload.get("notes")),
             using_custom_poster=_optional_bool(payload.get("using_custom_poster")),
-            custom_poster_path=_optional_string(payload.get("custom_poster_path")),
+            custom_poster_path=nonempty_string_or_none(payload.get("custom_poster_path")),
             episode_progresses=_episode_progresses(episode_progresses),
-            library_updated_at=_optional_string(payload.get("library_updated_at")),
-            tracking_updated_at=_optional_string(payload.get("tracking_updated_at")),
+            library_updated_at=nonempty_string_or_none(payload.get("library_updated_at")),
+            tracking_updated_at=nonempty_string_or_none(payload.get("tracking_updated_at")),
             metadata=_metadata_or_none(metadata_payload),
         )
 
@@ -189,21 +191,17 @@ def _metadata_or_none(value: object) -> LibraryEntryMetadata | None:
 
 
 def _required_string(payload: Mapping[str, object], key: str) -> str:
-    value = _optional_string(payload.get(key))
+    value = nonempty_string_or_none(payload.get(key))
     if value is None:
         raise ValueError(f"Library entry payload is missing {key}.")
     return value
 
 
 def _required_int(payload: Mapping[str, object], key: str) -> int:
-    value = _optional_int(payload.get(key))
+    value = strict_int_or_none(payload.get(key))
     if value is None:
         raise ValueError(f"Library entry payload is missing {key}.")
     return value
-
-
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
 
 
 def _string_or_empty(value: object) -> str | None:
@@ -212,14 +210,6 @@ def _string_or_empty(value: object) -> str | None:
     if isinstance(value, str):
         return value
     raise ValueError("Library entry notes value is invalid.")
-
-
-def _optional_int(value: object) -> int | None:
-    if isinstance(value, int) and not isinstance(value, bool):
-        return value
-    return None
-
-
 def _optional_bool(value: object) -> bool | None:
     if isinstance(value, bool):
         return value

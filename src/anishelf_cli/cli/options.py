@@ -11,9 +11,10 @@ MetadataOption = Annotated[
     typer.Option(
         "--metadata",
         help=(
-            "Include TMDb metadata. Bare --metadata uses the default summary level; "
-            "explicit values are none, summary, details, or full. Use none to "
-            "disable TMDb requests."
+            "Include TMDb metadata. Bare --metadata uses summary; explicit values may "
+            "be passed as --metadata none or --metadata=none (also summary/details/full). "
+            "Use -- before a positional identity or title named none, summary, details, "
+            "or full."
         ),
         show_default=False,
     ),

@@ -103,7 +103,11 @@ Hydration should be explicit and optional.
 The CLI decision is to keep metadata on library commands instead of exposing a
 separate top-level hydration pass. Bare `--metadata` should request the default
 summary level, while explicit `none`, `summary`, `details`, and `full` values
-should control the TMDb depth as implemented. `none` means no TMDb request.
+should control the TMDb depth as implemented. Both `--metadata none` and
+`--metadata=none` should behave the same. If a positional identity or title is
+literally `none`, `summary`, `details`, or `full`, require `--` before that
+positional argument so it is not consumed as the metadata level. `none` means
+no TMDb request.
 
 Exact hydrated metadata fields for each depth should be finalized alongside the
 first implemented metadata-enrichment path.

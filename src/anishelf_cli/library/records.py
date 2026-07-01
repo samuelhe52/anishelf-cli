@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.parse import urlsplit
 
+from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.library.identity import LibraryIdentity
 
 LIBRARY_ENTRY_RECORD_TYPE = "LibraryEntry"
@@ -22,7 +23,7 @@ class LibraryRecordDecodeError(ValueError):
 
 def decode_library_entry_record(record: dict[str, Any]) -> dict[str, Any]:
     record_name = _record_name(record)
-    record_type = _optional_string(record.get("recordType"))
+    record_type = nonempty_string_or_none(record.get("recordType"))
     if record_type != LIBRARY_ENTRY_RECORD_TYPE:
         actual_type = record_type or "missing record type"
         raise LibraryRecordDecodeError(
@@ -104,11 +105,11 @@ def _record_name(record: dict[str, Any]) -> str:
 
 
 def _record_name_or_none(record: dict[str, Any]) -> str | None:
-    if record_name := _optional_string(record.get("recordName")):
+    if record_name := nonempty_string_or_none(record.get("recordName")):
         return record_name
     record_id = record.get("recordID")
     if isinstance(record_id, dict):
-        return _optional_string(record_id.get("recordName"))
+        return nonempty_string_or_none(record_id.get("recordName"))
     return None
 
 
@@ -227,7 +228,7 @@ def _optional_string_field(fields: dict[str, Any], field: str) -> str | None:
     raw = _optional_field_value(fields, field)
     if raw is None:
         return None
-    value = _optional_string(raw)
+    value = nonempty_string_or_none(raw)
     if value is None:
         raise LibraryRecordDecodeError(f"Invalid {field} value.")
     return value
@@ -322,7 +323,3 @@ def _swift_reference_datetime_from_raw(raw: Any, field: str) -> str:
 
 def _iso_z(value: datetime) -> str:
     return value.astimezone(UTC).isoformat().replace("+00:00", "Z")
-
-
-def _optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None

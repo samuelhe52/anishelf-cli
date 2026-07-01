@@ -10,6 +10,7 @@ from anishelf_cli.cache.schema import (
     TMDB_SUMMARY_SOURCE_VERSION,
     LibraryCacheError,
 )
+from anishelf_cli.core.coercion import nonempty_string_or_none as optional_string
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
@@ -264,12 +265,6 @@ def metadata_target_from_entry(entry: dict[str, Any]) -> TMDbSummaryIdentity | N
 
 def placeholders(values: set[int] | list[str] | list[dict[str, Any]]) -> str:
     return ", ".join("?" for _ in values)
-
-
-def optional_string(value: object) -> str | None:
-    return value if isinstance(value, str) and value else None
-
-
 def metadata_optional_int(value: object) -> int | None:
     if isinstance(value, int) and not isinstance(value, bool):
         return value

@@ -167,6 +167,18 @@ def test_normalize_metadata_args_preserves_none_level() -> None:
     ]
 
 
+def test_normalize_metadata_args_preserves_matching_positional_after_separator() -> None:
+    args = ["library", "get", "--metadata", "--", "none"]
+
+    assert _normalize_metadata_args(args) == [
+        "library",
+        "get",
+        "--metadata=summary",
+        "--",
+        "none",
+    ]
+
+
 def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
@@ -195,6 +207,19 @@ def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload["summary"]["entries"] == 0
+
+
+def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> None:
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
+
+    result = runner.invoke(app, ["--json", "library", "get", "--metadata", "--", "none"])
+
+    assert result.exit_code == 1
+    payload = json.loads(result.stdout)
+    assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
+    assert payload["items"][0]["identity"] == "none"
+    assert payload["items"][0]["status"] == "error"
+    assert payload["items"][0]["error"]["code"] == "invalid_identity"
 
 
 def test_library_list_help_mentions_sync_and_not_refresh_meta_flag() -> None:
