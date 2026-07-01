@@ -19,7 +19,8 @@ from anishelf_cli.cache.sync import (
     LibraryCacheProgress,
     LibraryCacheRefreshResult,
     LibraryCacheSync,
-    fetch_metadata_summaries,
+    MetadataHydrationResult,
+    hydrate_metadata_targets,
 )
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError, LockFactory
@@ -57,20 +58,6 @@ class CacheStatusResult:
                 "path": self.cache_path,
                 "lock_path": self.lock_path,
             },
-        }
-
-
-@dataclass(frozen=True, slots=True)
-class MetadataRefreshResult:
-    requested: int
-    hydrated: int
-    errors: int
-
-    def to_payload(self) -> dict[str, int]:
-        return {
-            "requested": self.requested,
-            "hydrated": self.hydrated,
-            "errors": self.errors,
         }
 
 
@@ -119,7 +106,7 @@ class LibraryCommandService:
         targets: list[TMDbSummaryIdentity],
         *,
         emit_progress_updates: bool = False,
-    ) -> MetadataRefreshResult:
+    ) -> MetadataHydrationResult:
         return refresh_metadata_targets(
             store,
             tmdb_client,
@@ -236,38 +223,17 @@ def refresh_metadata_targets(
     targets: list[TMDbSummaryIdentity],
     *,
     emit_progress_updates: bool = False,
-) -> MetadataRefreshResult:
-    last_emitted_completed = 0
-
-    def progress_update(completed: int, errors: int, requested: int) -> None:
-        nonlocal last_emitted_completed
-        if not emit_progress_updates:
-            return
-        if requested == 0:
-            return
-        should_emit = (
-            completed == requested or completed == 1 or completed - last_emitted_completed >= 25
-        )
-        if not should_emit:
-            return
-        last_emitted_completed = completed
-        emit_progress(f"TMDb summary metadata {completed}/{requested} complete ({errors} errors).")
-
-    if emit_progress_updates and targets:
-        emit_progress(f"Hydrating TMDb summary metadata for {len(targets)} entries.")
-    summaries, errors = fetch_metadata_summaries(
+) -> MetadataHydrationResult:
+    progress_callback = emit_library_cache_progress if emit_progress_updates else None
+    result = hydrate_metadata_targets(
+        store,
         tmdb_client,
         targets,
-        progress_callback=progress_update,
+        progress_callback=progress_callback,
     )
-    store.upsert_metadata_summaries(summaries)
-    if len(targets) == 1 and errors:
+    if result.requested == 1 and result.errors:
         emit_error("TMDb summary metadata request failed.")
-    return MetadataRefreshResult(
-        requested=len(targets),
-        hydrated=len(summaries),
-        errors=errors,
-    )
+    return result
 
 
 def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:

@@ -48,6 +48,20 @@ class LibraryCacheProgress:
 type LibraryCacheProgressCallback = Callable[[LibraryCacheProgress], None]
 
 
+@dataclass(frozen=True, slots=True)
+class MetadataHydrationResult:
+    requested: int
+    hydrated: int
+    errors: int
+
+    def to_payload(self) -> dict[str, int]:
+        return {
+            "requested": self.requested,
+            "hydrated": self.hydrated,
+            "errors": self.errors,
+        }
+
+
 @dataclass(slots=True)
 class LibraryCacheSync:
     store: LibraryCacheStore
@@ -57,12 +71,6 @@ class LibraryCacheSync:
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
     metadata_target_limit: int | None = None
     progress_callback: LibraryCacheProgressCallback | None = None
-    _last_emitted_metadata_completed: int = field(
-        init=False,
-        default=0,
-        repr=False,
-        compare=False,
-    )
 
     def refresh(self) -> LibraryCacheRefreshResult:
         with self.store.locked():
@@ -80,12 +88,18 @@ class LibraryCacheSync:
         if self.tmdb_client is None or not targets_to_hydrate:
             return refresh_result
 
-        hydrated, errors = self._hydrate_metadata_targets(targets_to_hydrate)
+        hydration_result = hydrate_metadata_targets(
+            self.store,
+            self.tmdb_client,
+            targets_to_hydrate,
+            max_workers=self.metadata_workers,
+            progress_callback=self.progress_callback,
+        )
         return replace(
             refresh_result,
-            metadata_requested=len(targets_to_hydrate),
-            metadata_hydrated=hydrated,
-            metadata_errors=errors,
+            metadata_requested=hydration_result.requested,
+            metadata_hydrated=hydration_result.hydrated,
+            metadata_errors=hydration_result.errors,
         )
 
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
@@ -179,37 +193,6 @@ class LibraryCacheSync:
             return deduped
         return deduped[: self.metadata_target_limit]
 
-    def _hydrate_metadata_targets(self, targets: list[TMDbSummaryIdentity]) -> tuple[int, int]:
-        if not targets or self.tmdb_client is None:
-            return 0, 0
-
-        self._last_emitted_metadata_completed = 0
-        self._emit_progress("metadata-started", metadata_requested=len(targets))
-        summaries, errors = fetch_metadata_summaries(
-            self.tmdb_client,
-            targets,
-            max_workers=self.metadata_workers,
-            progress_callback=self._metadata_progress,
-        )
-        self.store.upsert_metadata_summaries(summaries)
-        return len(summaries), errors
-
-    def _metadata_progress(self, completed: int, errors: int, requested: int) -> None:
-        should_emit = (
-            completed == requested
-            or completed == 1
-            or completed - self._last_emitted_metadata_completed >= 25
-        )
-        if not should_emit:
-            return
-        self._last_emitted_metadata_completed = completed
-        self._emit_progress(
-            "metadata-progress",
-            metadata_requested=requested,
-            metadata_completed=completed,
-            metadata_errors=errors,
-        )
-
     def _emit_progress(
         self,
         phase: str,
@@ -238,6 +221,62 @@ class LibraryCacheSync:
         )
 
 
+def hydrate_metadata_targets(
+    store: LibraryCacheStore,
+    tmdb_client: TMDbSummaryClient,
+    targets: list[TMDbSummaryIdentity],
+    *,
+    max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
+    progress_callback: LibraryCacheProgressCallback | None = None,
+) -> MetadataHydrationResult:
+    targets_to_hydrate = _dedupe_targets(targets)
+    if not targets_to_hydrate:
+        return MetadataHydrationResult(requested=0, hydrated=0, errors=0)
+
+    last_emitted_metadata_completed = 0
+    if progress_callback is not None:
+        progress_callback(
+            LibraryCacheProgress(
+                phase="metadata-started",
+                metadata_requested=len(targets_to_hydrate),
+            )
+        )
+
+    def metadata_progress(completed: int, errors: int, requested: int) -> None:
+        nonlocal last_emitted_metadata_completed
+        should_emit = (
+            completed == requested
+            or completed == 1
+            or completed - last_emitted_metadata_completed >= 25
+        )
+        if not should_emit:
+            return
+        last_emitted_metadata_completed = completed
+        if progress_callback is None:
+            return
+        progress_callback(
+            LibraryCacheProgress(
+                phase="metadata-progress",
+                metadata_requested=requested,
+                metadata_completed=completed,
+                metadata_errors=errors,
+            )
+        )
+
+    summaries, errors = fetch_metadata_summaries(
+        tmdb_client,
+        targets_to_hydrate,
+        max_workers=max_workers,
+        progress_callback=metadata_progress,
+    )
+    store.upsert_metadata_summaries(summaries)
+    return MetadataHydrationResult(
+        requested=len(targets_to_hydrate),
+        hydrated=len(summaries),
+        errors=errors,
+    )
+
+
 def fetch_metadata_summaries(
     tmdb_client: TMDbSummaryClient,
     targets: list[TMDbSummaryIdentity],
@@ -263,6 +302,7 @@ def fetch_metadata_summaries(
                 progress_callback(len(summaries) + errors, errors, len(targets))
 
     return summaries, errors
+
 
 def _dedupe_targets(targets: list[TMDbSummaryIdentity]) -> list[TMDbSummaryIdentity]:
     seen: set[TMDbSummaryIdentity] = set()
