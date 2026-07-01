@@ -3,48 +3,35 @@ from __future__ import annotations
 import base64
 import json
 import sqlite3
-from collections.abc import Generator
-from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from typer.testing import CliRunner
 
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cli import library_commands
 from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.executor import ZoneChangesPage
-from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
-from anishelf_cli.library.metadata import LibraryEntryMetadata
-from anishelf_cli.models.transport.cloudkit import CloudKitRecord
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
-
-runner = CliRunner()
-
-
-class MemorySecretStore:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service: str, account: str) -> str | None:
-        return self.values.get((service, account))
-
-    def set_password(self, service: str, account: str, password: str) -> None:
-        self.values[(service, account)] = password
-
-    def delete_password(self, service: str, account: str) -> None:
-        self.values.pop((service, account), None)
-
-
-@contextmanager
-def null_lock(path: Path) -> Generator[None]:
-    _ = path
-    yield
+from tests.support import (
+    MemorySecretStore,
+    cloudkit_record as _cloudkit_record,
+    create_seeded_cache_store,
+    episode_progresses_bytes,
+    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
+    isolate_paths as _isolate_paths,
+    live_record,
+    metadata_summary as _metadata_summary,
+    null_lock,
+    patch_library_read_store,
+    runner,
+    store_with_cloudkit_token as _store_with_cloudkit_token,
+    tombstone_record,
+)
 
 
 def test_library_get_requires_init_before_lookup(tmp_path, monkeypatch) -> None:
@@ -345,16 +332,10 @@ def test_library_get_sync_refreshes_cache_before_lookup(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    initialized_store.initialize()
-    initialized_store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
     )
     secret_store = _store_with_cloudkit_token("web-secret-token")
     requests: list[httpx.Request] = []
@@ -425,19 +406,11 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[
-                _live_record("movie:55", "movie", 55),
-                _live_record("series:22", "series", 22),
-            ],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("series:22", "series", 22),
     )
     requested: list[tuple[str, int]] = []
     monkeypatch.setattr(
@@ -881,171 +854,22 @@ def _install_cached_entry(
     monkeypatch: pytest.MonkeyPatch,
     record: dict[str, Any],
 ) -> LibraryCacheStore:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(records=[record], sync_token="t1", more_coming=False),
-        staging=False,
-    )
-    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: store)
-    return store
-
-
-def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
-
-
-def _metadata_summary(entry_type: str, tmdb_id: int, *, name: str) -> LibraryEntryMetadata:
-    return LibraryEntryMetadata.model_validate(
-        {
-            "entry_type": entry_type,
-            "tmdb_id": tmdb_id,
-            "language": None,
-            "name": name,
-            "name_translations": {},
-            "original_name": name,
-            "overview": f"{name} overview.",
-            "overview_translations": {},
-            "poster_path": "/poster.jpg",
-            "backdrop_path": "/backdrop.jpg",
-            "logo_path": None,
-            "original_language_code": "en",
-            "on_air_date": "1979-05-25",
-            "status": "Released" if entry_type == "movie" else "Returning Series",
-            "genres": [{"id": 878, "name": "Science Fiction"}],
-            "runtime_minutes": 117 if entry_type == "movie" else None,
-            "season_count": 3 if entry_type == "series" else None,
-            "episode_count": 22 if entry_type == "series" else None,
-            "vote_average": 8.2,
-            "vote_count": 15432,
-            "popularity": 44.5,
-            "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-            "source_version": "test",
-        }
-    )
-
-
-def _cloudkit_record(record: dict[str, Any]) -> CloudKitRecord:
-    return CloudKitRecord.model_validate(record)
-
-
-def _insert_legacy_v1_metadata_summary(
-    store: LibraryCacheStore,
-    *,
-    metadata_key: str,
-    entry_type: str,
-    tmdb_id: int,
-) -> None:
-    with sqlite3.connect(store.path) as db:
-        db.execute(
-            """
-            INSERT INTO tmdb_metadata_summary (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                parent_series_id,
-                season_number,
-                language,
-                name,
-                name_translations_json,
-                original_name,
-                overview,
-                overview_translations_json,
-                poster_path,
-                backdrop_path,
-                logo_path,
-                original_language_code,
-                on_air_date,
-                link_to_details,
-                fetched_at,
-                source_version,
-                metadata_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                None,
-                None,
-                "",
-                "Alien",
-                "{}",
-                "Alien",
-                "Legacy overview.",
-                "{}",
-                "/poster.jpg",
-                "/backdrop.jpg",
-                None,
-                "en",
-                "1979-05-25",
-                f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-                "2026-06-30T00:00:00Z",
-                "tmdbsummary.v1",
-                json.dumps(
-                    {
-                        "entry_type": entry_type,
-                        "tmdb_id": tmdb_id,
-                        "language": None,
-                        "name": "Alien",
-                        "name_translations": {},
-                        "original_name": "Alien",
-                        "overview": "Legacy overview.",
-                        "overview_translations": {},
-                        "poster_path": "/poster.jpg",
-                        "backdrop_path": "/backdrop.jpg",
-                        "logo_path": None,
-                        "original_language_code": "en",
-                        "on_air_date": "1979-05-25",
-                        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-                        "fetched_at": "2026-06-30T00:00:00Z",
-                        "source_version": "tmdbsummary.v1",
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            ),
-        )
-        db.commit()
-
-
-def _store_with_cloudkit_token(token: str) -> MemorySecretStore:
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, KEYCHAIN_ACCOUNT, token)
+    store = create_seeded_cache_store(monkeypatch, tmp_path, record)
+    patch_library_read_store(monkeypatch, library_commands, store)
     return store
 
 
 def _live_record(identity: str, entry_type: str, tmdb_id: int) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "schemaVersion": 2,
-        "tmdbID": tmdb_id,
-        "entryType": entry_type,
-        "onDisplay": False,
-        "dateSaved": "2026-05-01T00:00:00Z",
-        "watchStatus": "watched",
-        "dateStarted": "2026-05-02T00:00:00Z",
-        "dateFinished": "2026-05-09T00:00:00Z",
-        "isDateTrackingEnabled": False,
-        "score": 4,
-        "favorite": True,
-        "notes": "Round trip",
-        "usingCustomPoster": True,
-        "customPosterPath": "/stale/custom.jpg",
-        "customPosterURL": "https://image.tmdb.org/t/p/w342/current/custom.jpg",
-        "episodeProgresses": _episode_progresses_bytes(),
-        "libraryUpdatedAt": "2026-05-10T00:00:00Z",
-        "trackingUpdatedAt": "2026-05-11T00:00:00Z",
-    }
-    if entry_type == "season":
-        parts = identity.split(":")
-        fields["parentSeriesID"] = int(parts[1])
-        fields["seasonNumber"] = int(parts[2])
-    return _record(identity, fields)
+    return live_record(
+        identity,
+        entry_type,
+        tmdb_id,
+        on_display=False,
+        using_custom_poster=True,
+        custom_poster_path="/stale/custom.jpg",
+        custom_poster_url="https://image.tmdb.org/t/p/w342/current/custom.jpg",
+        episode_progresses=episode_progresses_bytes(),
+    )
 
 
 def _tombstone_record(
@@ -1056,36 +880,10 @@ def _tombstone_record(
     parent_series_id: int | None = None,
     season_number: int | None = None,
 ) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "schemaVersion": 2,
-        "tmdbID": tmdb_id,
-        "entryType": entry_type,
-        "deletedAt": "2026-05-12T00:00:00Z",
-    }
-    if parent_series_id is not None:
-        fields["parentSeriesID"] = parent_series_id
-    if season_number is not None:
-        fields["seasonNumber"] = season_number
-    return _record(identity, fields)
-
-
-def _record(identity: str, fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "recordName": identity,
-        "recordType": "LibraryEntry",
-        "fields": {name: {"value": value} for name, value in fields.items()},
-    }
-
-
-def _episode_progresses_bytes() -> str:
-    payload = json.dumps(
-        [
-            {
-                "seasonNumber": 1,
-                "watchedThroughEpisode": 12,
-                "updatedAt": 799891200.0,
-            }
-        ],
-        sort_keys=True,
-    ).encode()
-    return base64.b64encode(payload).decode()
+    return tombstone_record(
+        identity,
+        entry_type,
+        tmdb_id,
+        parent_series_id=parent_series_id,
+        season_number=season_number,
+    )

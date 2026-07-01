@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 from keyring.errors import PasswordDeleteError, PasswordSetError
+from tests.support import MemorySecretStore
 
 from anishelf_cli import secrets as secrets_module
 from anishelf_cli.cloudkit import api_token as cloudkit_api_token_module
@@ -21,20 +22,6 @@ from anishelf_cli.secrets import (
     tmdb_api_key_secret,
 )
 from anishelf_cli.tmdb.tokens import resolve_tmdb_api_token
-
-
-class MemorySecretStore:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service: str, account: str) -> str | None:
-        return self.values.get((service, account))
-
-    def set_password(self, service: str, account: str, password: str) -> None:
-        self.values[(service, account)] = password
-
-    def delete_password(self, service: str, account: str) -> None:
-        self.values.pop((service, account), None)
 
 
 class FailingSecretStore:

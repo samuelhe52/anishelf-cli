@@ -6,7 +6,6 @@ from io import StringIO
 
 import httpx
 import pytest
-from typer.testing import CliRunner
 
 from anishelf_cli.cli import root
 from anishelf_cli.cli.root import app
@@ -22,22 +21,7 @@ from anishelf_cli.cloudkit.auth import (
     successor_web_auth_token,
 )
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
-
-runner = CliRunner()
-
-
-class MemorySecretStore:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service: str, account: str) -> str | None:
-        return self.values.get((service, account))
-
-    def set_password(self, service: str, account: str, password: str) -> None:
-        self.values[(service, account)] = password
-
-    def delete_password(self, service: str, account: str) -> None:
-        self.values.pop((service, account), None)
+from tests.support import MemorySecretStore, runner
 
 
 def test_login_initiation_calls_private_current_user_with_api_token_only() -> None:

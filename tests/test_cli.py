@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import httpx
-from typer.testing import CliRunner
+import pytest
 
 from anishelf_cli import config
 from anishelf_cli.cli import config_commands, groups, library_commands, root, tmdb_commands
@@ -22,22 +22,7 @@ from anishelf_cli.tmdb.client import (
     TMDbTitleSearchResult,
 )
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
-
-runner = CliRunner()
-
-
-class MemorySecretStore:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service: str, account: str) -> str | None:
-        return self.values.get((service, account))
-
-    def set_password(self, service: str, account: str, password: str) -> None:
-        self.values[(service, account)] = password
-
-    def delete_password(self, service: str, account: str) -> None:
-        self.values.pop((service, account), None)
+from tests.support import MemorySecretStore, runner
 
 
 def _fake_store() -> object:
@@ -53,6 +38,87 @@ def _fake_store() -> object:
         list_entry_models_filtered=lambda **kwargs: [],
         search_entry_models_by_title=lambda title: [],
         attach_metadata_summary_models=lambda entries: entries,
+    )
+
+
+def _tmdb_match(
+    entry_type: str,
+    tmdb_id: int,
+    title: str,
+    *,
+    release_date: str,
+    overview: str,
+    poster_path: str,
+) -> TMDbTitleSearchMatch:
+    return TMDbTitleSearchMatch(
+        entry_type=entry_type,
+        tmdb_id=tmdb_id,
+        title=title,
+        original_title=title,
+        release_date=release_date,
+        original_language_code="en",
+        overview=overview,
+        poster_path=poster_path,
+        details_url=(
+            f"https://www.themoviedb.org/movie/{tmdb_id}"
+            if entry_type == "movie"
+            else f"https://www.themoviedb.org/tv/{tmdb_id}"
+        ),
+    )
+
+
+def _install_tmdb_search_client(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    expected_query: TMDbTitleSearchQuery,
+    movies: tuple[TMDbTitleSearchMatch, ...] = (),
+    series: tuple[TMDbTitleSearchMatch, ...] = (),
+    error: Exception | None = None,
+) -> None:
+    class FakeTMDbClient:
+        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
+            assert query == expected_query
+            if error is not None:
+                raise error
+            return TMDbTitleSearchResult(movies=movies, series=series)
+
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+
+
+def _assert_help(
+    args: list[str],
+    *,
+    contains: tuple[str, ...] = (),
+    absent: tuple[str, ...] = (),
+) -> None:
+    result = runner.invoke(app, [*args, "--help"])
+    assert result.exit_code == 0
+    for text in contains:
+        assert text in result.stdout
+    for text in absent:
+        assert text not in result.stdout
+
+
+def _store_with_web_auth_token(token: str = "web-secret-token") -> MemorySecretStore:
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, token)
+    return store
+
+
+def _install_root_auth_store(monkeypatch: pytest.MonkeyPatch, store: MemorySecretStore) -> None:
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+
+
+def _install_root_http_client(
+    monkeypatch: pytest.MonkeyPatch,
+    handler,
+) -> None:
+    monkeypatch.setattr(
+        root,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
 
@@ -102,104 +168,70 @@ def test_command_tree_registers_public_groups() -> None:
     assert groups.tmdb_app is tmdb_commands.tmdb_app
 
 
-def test_non_user_command_groups_are_removed() -> None:
-    for command in ("zones", "records", "changes", "settings", "schema"):
-        result = runner.invoke(app, [command, "--help"])
-        assert result.exit_code == 2
-        assert "No such command" in result.stderr
-
-
-def test_metadata_command_group_is_removed() -> None:
-    result = runner.invoke(app, ["metadata", "--help"])
+@pytest.mark.parametrize("command", ("zones", "records", "changes", "settings", "schema"))
+def test_non_user_command_groups_are_removed(command: str) -> None:
+    result = runner.invoke(app, [command, "--help"])
 
     assert result.exit_code == 2
-    assert "No such command 'metadata'." in result.stderr
+    assert "No such command" in result.stderr
 
 
-def test_library_get_help_mentions_metadata_option() -> None:
-    result = runner.invoke(app, ["library", "get", "--help"])
-
-    assert result.exit_code == 0
-    assert "--metadata" in result.stdout
-    assert "--live-meta" in result.stdout
-    assert "none" in result.stdout
-    assert "summary" in result.stdout
-    assert "details" in result.stdout
-    assert "full" in result.stdout
-
-
-def test_normalize_metadata_args_uses_summary_for_bare_flag() -> None:
-    args = ["library", "get", "--metadata", "movie:55"]
-
-    assert _normalize_metadata_args(args) == [
-        "library",
-        "get",
-        "--metadata=summary",
-        "movie:55",
-    ]
-
-
-def test_normalize_metadata_args_preserves_explicit_level() -> None:
-    args = ["library", "list", "--metadata", "details", "--json"]
-
-    assert _normalize_metadata_args(args) == [
-        "library",
-        "list",
-        "--metadata=details",
-        "--json",
-    ]
+@pytest.mark.parametrize(
+    ("args", "expected"),
+    [
+        (
+            ["library", "get", "--metadata", "movie:55"],
+            ["library", "get", "--metadata=summary", "movie:55"],
+        ),
+        (
+            ["library", "list", "--metadata", "details", "--json"],
+            ["library", "list", "--metadata=details", "--json"],
+        ),
+        (
+            ["library", "export", "--metadata", "none"],
+            ["library", "export", "--metadata=none"],
+        ),
+        (
+            ["library", "get", "--metadata", "--", "none"],
+            ["library", "get", "--metadata=summary", "--", "none"],
+        ),
+    ],
+)
+def test_normalize_metadata_args(args: list[str], expected: list[str]) -> None:
+    assert _normalize_metadata_args(args) == expected
 
 
-def test_normalize_metadata_args_preserves_none_level() -> None:
-    args = ["library", "export", "--metadata", "none"]
-
-    assert _normalize_metadata_args(args) == [
-        "library",
-        "export",
-        "--metadata=none",
-    ]
-
-
-def test_normalize_metadata_args_preserves_matching_positional_after_separator() -> None:
-    args = ["library", "get", "--metadata", "--", "none"]
-
-    assert _normalize_metadata_args(args) == [
-        "library",
-        "get",
-        "--metadata=summary",
-        "--",
-        "none",
-    ]
-
-
-def test_library_list_accepts_bare_metadata_flag(monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("args", "expected_exit", "stdout_entries", "stderr_fragment"),
+    [
+        (["--json", "library", "list", "--metadata"], 0, 0, None),
+        (
+            ["--json", "library", "list", "--metadata", "full"],
+            2,
+            None,
+            "reserved until TMDb detail metadata caching exists",
+        ),
+        (["--json", "library", "list", "--metadata", "none"], 0, 0, None),
+    ],
+)
+def test_library_list_metadata_flag_handling(
+    monkeypatch,
+    args: list[str],
+    expected_exit: int,
+    stdout_entries: int | None,
+    stderr_fragment: str | None,
+) -> None:
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
-    result = runner.invoke(app, ["--json", "library", "list", "--metadata"])
+    result = runner.invoke(app, args)
 
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["summary"]["entries"] == 0
-
-
-def test_library_list_rejects_reserved_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
-
-    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "full"])
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "reserved until TMDb detail metadata caching exists" in result.stderr
-
-
-def test_library_list_accepts_none_metadata_level(monkeypatch) -> None:
-    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
-
-    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "none"])
-
-    assert result.exit_code == 0
-    payload = json.loads(result.stdout)
-    assert payload["summary"]["entries"] == 0
+    assert result.exit_code == expected_exit
+    if stdout_entries is not None:
+        assert json.loads(result.stdout)["summary"]["entries"] == stdout_entries
+    else:
+        assert result.stdout == ""
+    if stderr_fragment is not None:
+        assert stderr_fragment in result.stderr
 
 
 def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> None:
@@ -215,102 +247,30 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
     assert payload["items"][0]["error"]["code"] == "invalid_identity"
 
 
-def test_library_list_help_mentions_sync_and_not_refresh_meta_flag() -> None:
-    result = runner.invoke(app, ["library", "list", "--help"])
-
-    assert result.exit_code == 0
-    assert "--sync" in result.stdout
-    assert "--refresh-meta" not in result.stdout
-
-
-def test_library_help_lists_refresh_meta_and_not_changes() -> None:
-    result = runner.invoke(app, ["library", "--help"])
-
-    assert result.exit_code == 0
-    assert "refresh-meta" in result.stdout
-    assert "changes" not in result.stdout
-
-
-def test_lib_alias_shows_library_commands() -> None:
-    result = runner.invoke(app, ["lib", "--help"])
-
-    assert result.exit_code == 0
-    assert "AniShelf library commands." in result.stdout
-    assert "get" in result.stdout
-    assert "refresh-meta" in result.stdout
-
-
-def test_library_refresh_meta_help_mentions_json() -> None:
-    result = runner.invoke(app, ["library", "refresh-meta", "--help"])
-
-    assert result.exit_code == 0
-    assert "--json" in result.stdout
-
-
-def test_library_get_help_mentions_sync() -> None:
-    result = runner.invoke(app, ["library", "get", "--help"])
-
-    assert result.exit_code == 0
-    assert "--sync" in result.stdout
-
-
-def test_library_search_help_mentions_sync() -> None:
-    result = runner.invoke(app, ["library", "search", "--help"])
-
-    assert result.exit_code == 0
-    assert "--sync" in result.stdout
-
-
-def test_library_export_help_mentions_sync() -> None:
-    result = runner.invoke(app, ["library", "export", "--help"])
-
-    assert result.exit_code == 0
-    assert "--sync" in result.stdout
-
-
-def test_tmdb_search_help_mentions_title_and_json() -> None:
-    result = runner.invoke(app, ["tmdb", "search", "--help"])
-
-    assert result.exit_code == 0
-    assert "--title" in result.stdout
-    assert "--type" in result.stdout
-    assert "--year" in result.stdout
-    assert "--json" in result.stdout
-
-
-def test_library_init_help_mentions_json() -> None:
-    result = runner.invoke(app, ["library", "init", "--help"])
-
-    assert result.exit_code == 0
-    assert "--json" in result.stdout
-
-
-def test_library_sync_help_mentions_json() -> None:
-    result = runner.invoke(app, ["library", "sync", "--help"])
-
-    assert result.exit_code == 0
-    assert "--json" in result.stdout
-
-
-def test_library_status_help_mentions_json() -> None:
-    result = runner.invoke(app, ["library", "status", "--help"])
-
-    assert result.exit_code == 0
-    assert "--json" in result.stdout
-
-
-def test_library_clear_cache_help_mentions_confirmation_bypass() -> None:
-    result = runner.invoke(app, ["library", "clear-cache", "--help"])
-
-    assert result.exit_code == 0
-    assert "--yes" in result.stdout
-
-
-def test_auth_logout_help_mentions_cache_clear() -> None:
-    result = runner.invoke(app, ["auth", "logout", "--help"])
-
-    assert result.exit_code == 0
-    assert "clear local library cache files" in result.stdout
+@pytest.mark.parametrize(
+    ("args", "contains", "absent"),
+    [
+        (
+            ["library", "get"],
+            ("--metadata", "--live-meta", "none", "summary", "details", "full", "--sync"),
+            (),
+        ),
+        (["library", "list"], ("--sync",), ("--refresh-meta",)),
+        (["library"], ("refresh-meta",), ("changes",)),
+        (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
+        (["library", "refresh-meta"], ("--json",), ()),
+        (["library", "search"], ("--sync",), ()),
+        (["library", "export"], ("--sync",), ()),
+        (["tmdb", "search"], ("--title", "--type", "--year", "--json"), ()),
+        (["library", "init"], ("--json",), ()),
+        (["library", "sync"], ("--json",), ()),
+        (["library", "status"], ("--json",), ()),
+        (["library", "clear-cache"], ("--yes",), ()),
+        (["auth", "logout"], ("clear local library cache files",), ()),
+    ],
+)
+def test_help_text(args: list[str], contains: tuple[str, ...], absent: tuple[str, ...]) -> None:
+    _assert_help(args, contains=contains, absent=absent)
 
 
 def test_unknown_command_error_uses_plain_formatting() -> None:
@@ -472,14 +432,6 @@ def test_config_show_human_output_uses_readable_sections() -> None:
     assert "  Config file" in result.stdout
     assert "api" not in result.stdout
 
-
-def test_config_status_command_is_removed() -> None:
-    result = runner.invoke(app, ["config", "status"])
-
-    assert result.exit_code == 2
-    assert "No such command" in result.stderr
-
-
 def test_default_posix_app_paths_use_dotdir(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(config.sys, "platform", "darwin")
     monkeypatch.setattr(config.Path, "home", lambda: tmp_path)
@@ -509,18 +461,25 @@ def test_path_overrides_are_preserved(monkeypatch, tmp_path) -> None:
     assert config.data_dir() == tmp_path / "data-override"
 
 
-def test_profile_command_group_is_removed() -> None:
-    result = runner.invoke(app, ["profile", "status"])
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["metadata", "--help"], "No such command 'metadata'."),
+        (["config", "status"], "No such command"),
+        (["profile", "status"], "No such command"),
+        (["login"], "No such command"),
+        (["logout"], "No such command"),
+        (["whoami"], "No such command"),
+        (["--profile", "prod", "config", "show"], "No such option"),
+        (["config", "set-tmdb-token", "--help"], "No such command"),
+        (["config", "set-cloudkit-token", "--help"], "No such command"),
+    ],
+)
+def test_removed_commands_and_options(args: list[str], message: str) -> None:
+    result = runner.invoke(app, args)
 
     assert result.exit_code == 2
-    assert "No such command" in result.stderr
-
-
-def test_profile_option_is_removed() -> None:
-    result = runner.invoke(app, ["--profile", "prod", "config", "show"])
-
-    assert result.exit_code == 2
-    assert "No such option" in result.stderr
+    assert message in result.stderr
 
 
 def test_config_show_does_not_persist_profile_json(tmp_path, monkeypatch) -> None:
@@ -616,71 +575,61 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     }
 
 
-def test_config_set_defaults_rejects_reserved_metadata_level(tmp_path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("args", "config_text", "message", "extra"),
+    [
+        (
+            ["config", "set-defaults", "--metadata", "details"],
+            None,
+            "reserved until TMDb detail metadata caching exists",
+            None,
+        ),
+        (
+            ["config", "set-defaults", "--fields", "title,bogus"],
+            None,
+            "Invalid display field 'bogus'",
+            None,
+        ),
+        (
+            ["config", "show"],
+            'unexpected = "value"\n',
+            "Unsupported top-level config key(s)",
+            "'unexpected'",
+        ),
+        (
+            ["config", "show"],
+            '[library]\nmetadata = "none"\nauto_sync = true\n',
+            "Unsupported library defaults key(s)",
+            "'auto_sync'",
+        ),
+        (
+            ["config", "show"],
+            'library = "bad"\n',
+            "must be a TOML table",
+            None,
+        ),
+    ],
+)
+def test_config_validation_errors(
+    tmp_path,
+    monkeypatch,
+    args: list[str],
+    config_text: str | None,
+    message: str,
+    extra: str | None,
+) -> None:
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    if config_text is not None:
+        (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "config" / "config.toml").write_text(config_text)
 
-    result = runner.invoke(
-        app,
-        ["config", "set-defaults", "--metadata", "details"],
-    )
+    result = runner.invoke(app, args, env={"ANI_CLOUDKIT_API_TOKEN": "api"})
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    stderr = " ".join(result.stderr.split())
-    assert "reserved until TMDb detail metadata caching exists" in stderr
-
-
-def test_config_set_defaults_rejects_invalid_display_field(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-
-    result = runner.invoke(
-        app,
-        ["config", "set-defaults", "--fields", "title,bogus"],
-    )
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "Invalid display field 'bogus'" in result.stderr
-
-
-def test_config_show_rejects_unknown_top_level_key(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "config.toml").write_text('unexpected = "value"\n')
-
-    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "Unsupported top-level config key(s)" in result.stderr
-    assert "'unexpected'" in result.stderr
-
-
-def test_config_show_rejects_unknown_library_key(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "config.toml").write_text(
-        '[library]\nmetadata = "none"\nauto_sync = true\n'
-    )
-
-    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "Unsupported library defaults key(s)" in result.stderr
-    assert "'auto_sync'" in result.stderr
-
-
-def test_config_show_rejects_malformed_library_shape(tmp_path, monkeypatch) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-    (tmp_path / "config" / "config.toml").write_text('library = "bad"\n')
-
-    result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
-
-    assert result.exit_code == 2
-    assert result.stdout == ""
-    assert "must be a TOML table" in result.stderr
+    assert message in " ".join(result.stderr.split())
+    if extra is not None:
+        assert extra in result.stderr
 
 
 def test_config_set_defaults_can_recover_from_malformed_config_with_replacements(
@@ -736,47 +685,31 @@ def test_config_set_tmdb_api_key_stores_without_echoing_secret(monkeypatch) -> N
     assert ("anishelf-cli.tmdb-api-key", KEYCHAIN_ACCOUNT) in store.values
 
 
-def test_config_has_no_tmdb_token_command() -> None:
-    result = runner.invoke(app, ["config", "set-tmdb-token", "--help"])
-
-    assert result.exit_code == 2
-    assert "No such command" in result.stderr
-
-
 def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
-            return TMDbTitleSearchResult(
-                movies=(
-                    TMDbTitleSearchMatch(
-                        entry_type="movie",
-                        tmdb_id=55,
-                        title="Alien",
-                        original_title="Alien",
-                        release_date="1979-05-25",
-                        original_language_code="en",
-                        overview="A space horror film.",
-                        poster_path="/poster.jpg",
-                        details_url="https://www.themoviedb.org/movie/55",
-                    ),
-                ),
-                series=(
-                    TMDbTitleSearchMatch(
-                        entry_type="series",
-                        tmdb_id=95,
-                        title="Alien Nation",
-                        original_title="Alien Nation",
-                        release_date="1989-09-18",
-                        original_language_code="en",
-                        overview="A sci-fi police series.",
-                        poster_path="/series.jpg",
-                        details_url="https://www.themoviedb.org/tv/95",
-                    ),
-                ),
-            )
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+        series=(
+            _tmdb_match(
+                "series",
+                95,
+                "Alien Nation",
+                release_date="1989-09-18",
+                overview="A sci-fi police series.",
+                poster_path="/series.jpg",
+            ),
+        ),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien", "--json"])
 
@@ -817,27 +750,20 @@ def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
 
 
 def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
-            return TMDbTitleSearchResult(
-                movies=(
-                    TMDbTitleSearchMatch(
-                        entry_type="movie",
-                        tmdb_id=55,
-                        title="Alien",
-                        original_title="Alien",
-                        release_date="1979-05-25",
-                        original_language_code="en",
-                        overview="A space horror film.",
-                        poster_path="/poster.jpg",
-                        details_url="https://www.themoviedb.org/movie/55",
-                    ),
-                ),
-                series=(),
-            )
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+    )
 
     result = runner.invoke(app, ["--json", "tmdb", "search", "--title", "Alien"])
 
@@ -866,27 +792,20 @@ def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
 
 
 def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
-            return TMDbTitleSearchResult(
-                movies=(
-                    TMDbTitleSearchMatch(
-                        entry_type="movie",
-                        tmdb_id=55,
-                        title="Alien",
-                        original_title="Alien",
-                        release_date="1979-05-25",
-                        original_language_code="en",
-                        overview="A space horror film.",
-                        poster_path="/poster.jpg",
-                        details_url="https://www.themoviedb.org/movie/55",
-                    ),
-                ),
-                series=(),
-            )
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
@@ -901,27 +820,20 @@ def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
 
 
 def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title=None, year=None, entry_type="all")
-            return TMDbTitleSearchResult(
-                movies=(),
-                series=(
-                    TMDbTitleSearchMatch(
-                        entry_type="series",
-                        tmdb_id=1399,
-                        title="Game of Thrones",
-                        original_title="Game of Thrones",
-                        release_date="2011-04-17",
-                        original_language_code="en",
-                        overview="Noble families fight for control.",
-                        poster_path="/got.jpg",
-                        details_url="https://www.themoviedb.org/tv/1399",
-                    ),
-                ),
-            )
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title=None, year=None, entry_type="all"),
+        series=(
+            _tmdb_match(
+                "series",
+                1399,
+                "Game of Thrones",
+                release_date="2011-04-17",
+                overview="Noble families fight for control.",
+                poster_path="/got.jpg",
+            ),
+        ),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--json"])
 
@@ -934,12 +846,10 @@ def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:
 
 
 def test_tmdb_search_treats_whitespace_title_as_discover_query(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title=None, year=None, entry_type="all")
-            return TMDbTitleSearchResult(movies=(), series=())
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title=None, year=None, entry_type="all"),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "   ", "--json"])
 
@@ -950,27 +860,20 @@ def test_tmdb_search_treats_whitespace_title_as_discover_query(monkeypatch) -> N
 
 
 def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title=None, year=1979, entry_type="movie")
-            return TMDbTitleSearchResult(
-                movies=(
-                    TMDbTitleSearchMatch(
-                        entry_type="movie",
-                        tmdb_id=55,
-                        title="Alien",
-                        original_title="Alien",
-                        release_date="1979-05-25",
-                        original_language_code="en",
-                        overview="A space horror film.",
-                        poster_path="/poster.jpg",
-                        details_url="https://www.themoviedb.org/movie/55",
-                    ),
-                ),
-                series=(),
-            )
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title=None, year=1979, entry_type="movie"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--type", "movie", "--year", "1979", "--json"])
 
@@ -983,12 +886,10 @@ def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -
 
 
 def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            assert query == TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all")
-            return TMDbTitleSearchResult(movies=(), series=())
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
@@ -1017,25 +918,17 @@ def test_tmdb_search_requires_configured_tmdb_api_key(monkeypatch) -> None:
 
 
 def test_tmdb_search_reports_request_errors(monkeypatch) -> None:
-    class FakeTMDbClient:
-        def search_titles(self, query: TMDbTitleSearchQuery) -> TMDbTitleSearchResult:
-            _ = query
-            raise TMDbRequestError("TMDb title search failed.")
-
-    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: FakeTMDbClient())
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        error=TMDbRequestError("TMDb title search failed."),
+    )
 
     result = runner.invoke(app, ["tmdb", "search", "--title", "Alien"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
     assert "TMDb title search failed." in result.stderr
-
-
-def test_config_has_no_cloudkit_api_token_storage_command() -> None:
-    result = runner.invoke(app, ["config", "set-cloudkit-token", "--help"])
-
-    assert result.exit_code == 2
-    assert "No such command" in result.stderr
 
 
 def test_auth_group_lists_auth_commands() -> None:
@@ -1079,17 +972,9 @@ def test_auth_status_accepts_command_level_json(monkeypatch) -> None:
     assert "web-secret-token" not in result.stdout + result.stderr
 
 
-def test_auth_commands_are_not_top_level() -> None:
-    for command in ("login", "logout", "whoami"):
-        result = runner.invoke(app, [command])
-        assert result.exit_code == 2
-        assert "No such command" in result.stderr
-
-
 def test_logout_deletes_web_auth_token(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token()
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
     monkeypatch.setattr(root, "default_secret_store", lambda: store)
     monkeypatch.setattr(
         root.LibraryCacheStore,
@@ -1113,9 +998,7 @@ def test_logout_deletes_web_auth_token(monkeypatch) -> None:
 
 def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> None:
     events: list[str] = []
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    store = _store_with_web_auth_token()
     monkeypatch.setattr(root, "default_secret_store", lambda: store)
     original_delete_password = store.delete_password
 
@@ -1155,13 +1038,10 @@ def test_logout_deletes_web_auth_token_before_releasing_lock(monkeypatch) -> Non
 
 
 def test_whoami_success_json_uses_authenticated_current_user(monkeypatch) -> None:
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    store = _store_with_web_auth_token()
     requests: list[httpx.Request] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    _install_root_auth_store(monkeypatch, store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -1175,8 +1055,7 @@ def test_whoami_success_json_uses_authenticated_current_user(monkeypatch) -> Non
             },
         )
 
-    client = httpx.Client(transport=httpx.MockTransport(handler))
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+    _install_root_http_client(monkeypatch, handler)
 
     result = runner.invoke(app, ["--json", "auth", "status"])
 
@@ -1202,25 +1081,19 @@ def test_whoami_success_json_uses_authenticated_current_user(monkeypatch) -> Non
 
 
 def test_auth_refresh_json_uses_authenticated_current_user(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token()
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
-
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
-
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "userRecordName": "_abc123",
-                    "webAuthToken": "new-web-secret-token",
-                },
-            )
-        )
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json={
+                "userRecordName": "_abc123",
+                "webAuthToken": "new-web-secret-token",
+            },
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["--json", "auth", "refresh"])
 
@@ -1235,25 +1108,19 @@ def test_auth_refresh_json_uses_authenticated_current_user(monkeypatch) -> None:
 
 
 def test_whoami_human_output(monkeypatch) -> None:
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
-
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "userRecordName": "_abc123",
-                    "firstName": "Ani",
-                    "lastName": "Shelf",
-                },
-            )
-        )
+    store = _store_with_web_auth_token()
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json={
+                "userRecordName": "_abc123",
+                "firstName": "Ani",
+                "lastName": "Shelf",
+            },
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["auth", "status"])
 
@@ -1268,17 +1135,10 @@ def test_whoami_missing_login_tells_user_to_login_without_network(monkeypatch) -
     store = MemorySecretStore()
     requests: list[httpx.Request] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
-
-    monkeypatch.setattr(
-        root,
-        "_make_http_client",
-        lambda: httpx.Client(
-            transport=httpx.MockTransport(
-                lambda request: requests.append(request) or httpx.Response(500)
-            )
-        ),
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: requests.append(request) or httpx.Response(500),
     )
 
     result = runner.invoke(app, ["--json", "auth", "status"])
@@ -1291,13 +1151,11 @@ def test_whoami_missing_login_tells_user_to_login_without_network(monkeypatch) -
 
 
 def test_whoami_saves_successor_token_before_releasing_lock(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token("old-web-secret-token")
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "old-web-secret-token")
     events: list[str] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    _install_root_auth_store(monkeypatch, store)
     original_set_password = store.set_password
 
     def set_password(service: str, account: str, password: str) -> None:
@@ -1317,18 +1175,16 @@ def test_whoami_saves_successor_token_before_releasing_lock(monkeypatch) -> None
 
     monkeypatch.setattr(root, "whoami_lock_factory", lambda path: recording_lock(path))
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                200,
-                json={
-                    "userRecordName": "_abc123",
-                    "webAuthToken": "new-web-secret-token",
-                },
-            )
-        )
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            json={
+                "userRecordName": "_abc123",
+                "webAuthToken": "new-web-secret-token",
+            },
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["--json", "auth", "status"])
 
@@ -1339,13 +1195,11 @@ def test_whoami_saves_successor_token_before_releasing_lock(monkeypatch) -> None
 
 
 def test_whoami_auth_failure_clears_login_and_redacts_tokens(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token("bad-web-secret-token")
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "bad-web-secret-token")
     deleted: list[tuple[str, str]] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    _install_root_auth_store(monkeypatch, store)
     original_delete_password = store.delete_password
 
     def delete_password(service: str, account: str) -> None:
@@ -1354,23 +1208,21 @@ def test_whoami_auth_failure_clears_login_and_redacts_tokens(monkeypatch) -> Non
 
     store.delete_password = delete_password  # type: ignore[method-assign]
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                401,
-                json={
-                    "serverErrorCode": "AUTHENTICATION_FAILED",
-                    "reason": (
-                        "ckWebAuthToken=bad-web-secret-token "
-                        "ckAPIToken=api-secret-token "
-                        "https://callback.example/done?ckWebAuthToken=callback-secret-token"
-                    ),
-                    "webAuthToken": "successor-secret-token",
-                },
-            )
-        )
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            401,
+            json={
+                "serverErrorCode": "AUTHENTICATION_FAILED",
+                "reason": (
+                    "ckWebAuthToken=bad-web-secret-token "
+                    "ckAPIToken=api-secret-token "
+                    "https://callback.example/done?ckWebAuthToken=callback-secret-token"
+                ),
+                "webAuthToken": "successor-secret-token",
+            },
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["--json", "auth", "status"])
 
@@ -1388,13 +1240,11 @@ def test_whoami_auth_failure_clears_login_and_redacts_tokens(monkeypatch) -> Non
 
 
 def test_whoami_non_json_403_preserves_login(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token()
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
     deleted: list[tuple[str, str]] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    _install_root_auth_store(monkeypatch, store)
     original_delete_password = store.delete_password
 
     def delete_password(service: str, account: str) -> None:
@@ -1403,16 +1253,14 @@ def test_whoami_non_json_403_preserves_login(monkeypatch) -> None:
 
     store.delete_password = delete_password  # type: ignore[method-assign]
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                403,
-                content=b"<html><body>forbidden</body></html>",
-                request=request,
-            )
-        )
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            403,
+            content=b"<html><body>forbidden</body></html>",
+            request=request,
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["auth", "status"])
 
@@ -1426,13 +1274,11 @@ def test_whoami_non_json_403_preserves_login(monkeypatch) -> None:
 
 
 def test_whoami_unclassified_json_403_preserves_login(monkeypatch) -> None:
-    store = MemorySecretStore()
+    store = _store_with_web_auth_token()
     descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
     deleted: list[tuple[str, str]] = []
 
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    _install_root_auth_store(monkeypatch, store)
     original_delete_password = store.delete_password
 
     def delete_password(service: str, account: str) -> None:
@@ -1441,16 +1287,14 @@ def test_whoami_unclassified_json_403_preserves_login(monkeypatch) -> None:
 
     store.delete_password = delete_password  # type: ignore[method-assign]
 
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                403,
-                json={"reason": "interstitial blocked request"},
-                request=request,
-            )
-        )
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            403,
+            json={"reason": "interstitial blocked request"},
+            request=request,
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["auth", "status"])
 
@@ -1466,29 +1310,22 @@ def test_whoami_unclassified_json_403_preserves_login(monkeypatch) -> None:
 
 
 def test_whoami_redacts_non_auth_cloudkit_error_details(monkeypatch) -> None:
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
-
-    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
-
-    client = httpx.Client(
-        transport=httpx.MockTransport(
-            lambda request: httpx.Response(
-                400,
-                json={
-                    "serverErrorCode": "BAD_REQUEST",
-                    "reason": (
-                        "failed URL https://callback.example/done?"
-                        "ckWebAuthToken=web-secret-token&ckAPIToken=api-secret-token"
-                    ),
-                    "webAuthToken": "successor-secret-token",
-                },
-            )
-        )
+    store = _store_with_web_auth_token()
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            400,
+            json={
+                "serverErrorCode": "BAD_REQUEST",
+                "reason": (
+                    "failed URL https://callback.example/done?"
+                    "ckWebAuthToken=web-secret-token&ckAPIToken=api-secret-token"
+                ),
+                "webAuthToken": "successor-secret-token",
+            },
+        ),
     )
-    monkeypatch.setattr(root, "_make_http_client", lambda: client)
 
     result = runner.invoke(app, ["auth", "status"])
 

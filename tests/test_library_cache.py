@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
-from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 import httpx
 import pytest
-from typer.testing import CliRunner
 
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import LibraryCacheStore
@@ -23,49 +21,38 @@ from anishelf_cli.cloudkit.executor import (
     CloudKitExecutor,
     ZoneChangesPage,
 )
-from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
-from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.models.output import CacheMetadataStatusResult
-from anishelf_cli.secrets import SecretStorageUnavailableError, cloudkit_web_auth_token_secret
+from anishelf_cli.secrets import SecretStorageUnavailableError
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
-
-runner = CliRunner()
-
-
-class MemorySecretStore:
-    def __init__(self) -> None:
-        self.values: dict[tuple[str, str], str] = {}
-
-    def get_password(self, service: str, account: str) -> str | None:
-        return self.values.get((service, account))
-
-    def set_password(self, service: str, account: str, password: str) -> None:
-        self.values[(service, account)] = password
-
-    def delete_password(self, service: str, account: str) -> None:
-        self.values.pop((service, account), None)
-
-
-@contextmanager
-def null_lock(path: Path) -> Generator[None]:
-    _ = path
-    yield
+from tests.support import (
+    MemorySecretStore,
+    create_cache_store,
+    create_seeded_cache_store,
+    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
+    isolate_paths as _isolate_paths,
+    live_record,
+    metadata_summary as _metadata_summary,
+    null_lock,
+    patch_library_read_store,
+    runner,
+    snapshot_entry_payload as _snapshot_entry_payload,
+    store_with_cloudkit_token as _store_with_cloudkit_token,
+    tombstone_record,
+)
 
 
 def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
     scope = LibraryCacheScope.default_for_user("_user_a")
-    store = LibraryCacheStore.for_scope(scope)
+    store = create_cache_store(monkeypatch, tmp_path, user_record_name="_user_a")
     page = ZoneChangesPage(
         records=[_live_record("movie:55", "movie", 55)],
         sync_token="t1",
         more_coming=False,
     )
 
-    store.initialize()
     store.apply_page(page, staging=False)
     store.apply_page(page, staging=False)
 
@@ -79,10 +66,7 @@ def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> Non
 
 
 def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-
-    store.initialize()
+    store = create_cache_store(monkeypatch, tmp_path)
 
     with sqlite3.connect(store.path) as db:
         index_names = {row[1] for row in db.execute("PRAGMA index_list(library_entries)")}
@@ -125,18 +109,7 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
-
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     raw_entry = store.list_entry_models()[0]
@@ -160,17 +133,7 @@ def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     _insert_legacy_v1_metadata_summary(
         store,
         metadata_key="movie:55",
@@ -195,17 +158,7 @@ def test_attach_metadata_summary_preserves_dict_compatibility(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     raw_entry = store.list_entry_models()[0]
@@ -223,17 +176,7 @@ def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     _insert_legacy_v1_metadata_summary(
         store,
         metadata_key="movie:55",
@@ -260,8 +203,7 @@ def test_cache_sync_hydrates_tmdb_summary_for_new_entries_only(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store = create_cache_store(monkeypatch, tmp_path)
 
     class FakeExecutor:
         def __init__(self) -> None:
@@ -319,17 +261,7 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     _insert_legacy_v1_metadata_summary(
         store,
         metadata_key="movie:55",
@@ -380,17 +312,7 @@ def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
     class FakeExecutor:
         def fetch_zone_changes(
@@ -429,8 +351,7 @@ def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store = create_cache_store(monkeypatch, tmp_path)
     both_started = threading.Event()
     first_can_finish = threading.Event()
 
@@ -493,8 +414,7 @@ def test_cache_sync_does_not_retry_old_metadata_failures_without_new_entries(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store = create_cache_store(monkeypatch, tmp_path)
 
     class FakeExecutor:
         def fetch_zone_changes(
@@ -539,8 +459,7 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store = create_cache_store(monkeypatch, tmp_path)
 
     class FakeExecutor:
         def fetch_zone_changes(
@@ -585,8 +504,7 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
 
 
 def test_cache_excludes_tombstones_by_default(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
+    store = create_cache_store(monkeypatch, tmp_path)
     page = ZoneChangesPage(
         records=[
             _live_record("movie:55", "movie", 55),
@@ -597,7 +515,6 @@ def test_cache_excludes_tombstones_by_default(tmp_path, monkeypatch) -> None:
         more_coming=False,
     )
 
-    store.initialize()
     store.apply_page(page, staging=False)
 
     assert [entry.identity for entry in store.list_entry_models()] == ["movie:55"]
@@ -612,21 +529,13 @@ def test_cache_search_matches_movies_series_and_seasons_in_saved_order(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[
-                _live_record("movie:55", "movie", 55, date_saved="2026-05-01T00:00:00Z"),
-                _live_record("series:22", "series", 22, date_saved="2026-05-03T00:00:00Z"),
-                _live_record("season:22:1:33", "season", 33, date_saved="2026-05-02T00:00:00Z"),
-                _tombstone_record("series:99", "series", 99),
-            ],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, date_saved="2026-05-01T00:00:00Z"),
+        _live_record("series:22", "series", 22, date_saved="2026-05-03T00:00:00Z"),
+        _live_record("season:22:1:33", "season", 33, date_saved="2026-05-02T00:00:00Z"),
+        _tombstone_record("series:99", "series", 99),
     )
 
     entries = store.search_cached_entry_models(movie_ids={55}, series_ids={22, 99})
@@ -639,9 +548,7 @@ def test_cache_search_matches_movies_series_and_seasons_in_saved_order(
 
 
 def test_cache_does_not_advance_token_when_apply_fails(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
+    store = create_cache_store(monkeypatch, tmp_path)
     page = ZoneChangesPage(
         records=[{"recordName": "bad", "recordType": "LibraryEntry"}],
         sync_token="t1",
@@ -659,16 +566,11 @@ def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="old",
-            more_coming=False,
-        ),
-        staging=False,
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        sync_token="old",
     )
 
     class FakeExecutor:
@@ -956,17 +858,7 @@ def test_library_init_rejects_existing_cache_and_points_to_sync(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     secret_store = _store_with_cloudkit_token("web-secret-token")
 
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
@@ -997,16 +889,10 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    initialized_store.initialize()
-    initialized_store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    initialized_store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
     )
     secret_store = _store_with_cloudkit_token("web-secret-token")
     requests: list[httpx.Request] = []
@@ -1053,16 +939,10 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    initialized_store.initialize()
-    initialized_store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    initialized_store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
     )
     secret_store = _store_with_cloudkit_token("web-secret-token")
 
@@ -1211,19 +1091,11 @@ def test_library_export_excludes_tombstones_from_public_output(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[
-                _live_record("movie:55", "movie", 55),
-                _tombstone_record("series:22", "series", 22),
-            ],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _tombstone_record("series:22", "series", 22),
     )
 
     result = runner.invoke(
@@ -1242,17 +1114,7 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
         library_commands,
@@ -1277,16 +1139,10 @@ def test_library_list_sync_refreshes_cache_before_reading(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    initialized_store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    initialized_store.initialize()
-    initialized_store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    initialized_store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
     )
     secret_store = _store_with_cloudkit_token("web-secret-token")
     requests: list[httpx.Request] = []
@@ -1332,17 +1188,7 @@ def test_library_export_reads_existing_cache_without_cloudkit_update(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
         library_commands,
@@ -1367,17 +1213,7 @@ def test_library_list_attaches_cached_metadata_by_default_and_none_suppresses_it
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     with_metadata = runner.invoke(app, ["--json", "library", "list"])
@@ -1412,16 +1248,7 @@ def test_library_list_uses_configured_metadata_none_by_default(
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["--json", "library", "list"])
@@ -1446,18 +1273,11 @@ def test_library_list_title_sort_uses_cached_metadata_when_output_metadata_is_di
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[
-                _live_record("movie:55", "movie", 55),
-                _live_record("movie:66", "movie", 66),
-            ],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("movie:66", "movie", 66),
     )
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
@@ -1482,16 +1302,7 @@ def test_library_list_metadata_flag_overrides_configured_default(
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["--json", "library", "list", "--metadata", "summary"])
@@ -1503,41 +1314,33 @@ def test_library_list_metadata_flag_overrides_configured_default(
 
 
 def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[
-                _live_record(
-                    "movie:55",
-                    "movie",
-                    55,
-                    date_saved="2026-05-01T00:00:00Z",
-                    watch_status="watching",
-                    on_display=False,
-                ),
-                _live_record(
-                    "series:22",
-                    "series",
-                    22,
-                    date_saved="2026-05-03T00:00:00Z",
-                    watch_status="watched",
-                    on_display=True,
-                ),
-                _live_record(
-                    "movie:66",
-                    "movie",
-                    66,
-                    date_saved="2026-05-02T00:00:00Z",
-                    watch_status="watching",
-                    on_display=False,
-                ),
-            ],
-            sync_token="t1",
-            more_coming=False,
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record(
+            "movie:55",
+            "movie",
+            55,
+            date_saved="2026-05-01T00:00:00Z",
+            watch_status="watching",
+            on_display=False,
         ),
-        staging=False,
+        _live_record(
+            "series:22",
+            "series",
+            22,
+            date_saved="2026-05-03T00:00:00Z",
+            watch_status="watched",
+            on_display=True,
+        ),
+        _live_record(
+            "movie:66",
+            "movie",
+            66,
+            date_saved="2026-05-02T00:00:00Z",
+            watch_status="watching",
+            on_display=False,
+        ),
     )
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
@@ -1576,16 +1379,7 @@ def test_library_list_uses_configured_display_fields_for_human_output(
     (tmp_path / "config" / "config.toml").write_text(
         '[library]\ndisplay_fields = ["title", "saved"]\n'
     )
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["library", "list"])
@@ -1606,16 +1400,7 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
     (tmp_path / "config" / "config.toml").write_text(
         '[library]\ndisplay_fields = ["title", "saved"]\n'
     )
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["library", "list", "--fields", "identity,status"])
@@ -1627,17 +1412,7 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
 
 
 def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
     result = runner.invoke(app, ["--json", "library", "list", "--fields", "title"])
 
@@ -1650,17 +1425,7 @@ def test_library_refresh_meta_updates_full_library_cache(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     monkeypatch.setattr(
         library_commands,
         "resolve_tmdb_api_token",
@@ -1700,17 +1465,7 @@ def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
     summary = _metadata_summary("movie", 55, name="Alien")
     summary = summary.model_copy(update={"source_version": "tmdb.http.summary.v2"})
@@ -1731,17 +1486,7 @@ def test_library_export_attaches_cached_metadata_by_default(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _isolate_paths(monkeypatch, tmp_path)
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("series:22", "series", 22)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("series:22", "series", 22))
     store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
 
     result = runner.invoke(app, ["--json", "library", "export"])
@@ -1759,16 +1504,7 @@ def test_library_export_does_not_sync_from_config_by_default(
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "summary"\n')
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("series:22", "series", 22)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("series:22", "series", 22))
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
         library_commands,
@@ -1853,16 +1589,7 @@ def test_library_search_human_uses_cached_titles_when_configured_metadata_defaul
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["library", "search", "--title", "Alien"])
@@ -1880,16 +1607,7 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     (tmp_path / "config" / "config.toml").write_text(
         '[library]\ndisplay_fields = ["identity", "status"]\n'
     )
-    store = LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user"))
-    store.initialize()
-    store.apply_page(
-        ZoneChangesPage(
-            records=[_live_record("movie:55", "movie", 55)],
-            sync_token="t1",
-            more_coming=False,
-        ),
-        staging=False,
-    )
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["library", "search", "--title", "Alien"])
@@ -1898,19 +1616,6 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     assert "Identity" in result.stdout
     assert "Status" in result.stdout
     assert "Title" not in result.stdout
-
-
-def _isolate_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
-    monkeypatch.setenv("ANISHELF_CLI_CACHE_DIR", str(tmp_path / "cache"))
-    monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
-
-
-def _store_with_cloudkit_token(token: str) -> MemorySecretStore:
-    store = MemorySecretStore()
-    descriptor = cloudkit_web_auth_token_secret()
-    store.set_password(descriptor.service, KEYCHAIN_ACCOUNT, token)
-    return store
 
 
 def _index_columns(db: sqlite3.Connection, index_name: str) -> list[str]:
@@ -1954,161 +1659,6 @@ def _fake_search_store() -> object:
 
     return FakeStore()
 
-
-def _metadata_summary(
-    entry_type: str,
-    tmdb_id: int,
-    *,
-    name: str,
-    parent_series_id: int | None = None,
-    season_number: int | None = None,
-) -> LibraryEntryMetadata:
-    return LibraryEntryMetadata.model_validate(
-        {
-            "entry_type": entry_type,
-            "tmdb_id": tmdb_id,
-            "parent_series_id": parent_series_id,
-            "season_number": season_number,
-            "language": None,
-            "name": name,
-            "name_translations": {},
-            "original_name": name,
-            "overview": f"{name} overview.",
-            "overview_translations": {},
-            "poster_path": "/poster.jpg",
-            "backdrop_path": "/backdrop.jpg",
-            "logo_path": None,
-            "original_language_code": "en",
-            "on_air_date": "1979-05-25",
-            "status": "Released" if entry_type == "movie" else "Returning Series",
-            "genres": [{"id": 878, "name": "Science Fiction"}],
-            "runtime_minutes": 117 if entry_type == "movie" else None,
-            "season_count": 3 if entry_type == "series" else None,
-            "episode_count": 22
-            if entry_type == "series"
-            else 10
-            if entry_type == "season"
-            else None,
-            "vote_average": 8.2,
-            "vote_count": 15432,
-            "popularity": 44.5,
-            "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-            "source_version": "test",
-        }
-    )
-
-
-def _snapshot_entry_payload(
-    identity: str,
-    entry_type: str,
-    tmdb_id: int,
-    *,
-    parent_series_id: int | None = None,
-    season_number: int | None = None,
-) -> dict[str, object]:
-    payload: dict[str, object] = {
-        "identity": identity,
-        "kind": "snapshot",
-        "entry_type": entry_type,
-        "tmdb_id": tmdb_id,
-        "schema_version": 2,
-        "on_display": True,
-        "date_saved": "2026-05-01T00:00:00Z",
-        "watch_status": "watched",
-        "is_date_tracking_enabled": False,
-        "favorite": False,
-        "notes": "",
-        "using_custom_poster": False,
-        "episode_progresses": [],
-    }
-    if parent_series_id is not None:
-        payload["parent_series_id"] = parent_series_id
-    if season_number is not None:
-        payload["season_number"] = season_number
-    return payload
-
-
-def _insert_legacy_v1_metadata_summary(
-    store: LibraryCacheStore,
-    *,
-    metadata_key: str,
-    entry_type: str,
-    tmdb_id: int,
-) -> None:
-    with sqlite3.connect(store.path) as db:
-        db.execute(
-            """
-            INSERT INTO tmdb_metadata_summary (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                parent_series_id,
-                season_number,
-                language,
-                name,
-                name_translations_json,
-                original_name,
-                overview,
-                overview_translations_json,
-                poster_path,
-                backdrop_path,
-                logo_path,
-                original_language_code,
-                on_air_date,
-                link_to_details,
-                fetched_at,
-                source_version,
-                metadata_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                None,
-                None,
-                "",
-                "Alien",
-                "{}",
-                "Alien",
-                "Legacy overview.",
-                "{}",
-                "/poster.jpg",
-                "/backdrop.jpg",
-                None,
-                "en",
-                "1979-05-25",
-                f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-                "2026-06-30T00:00:00Z",
-                "tmdbsummary.v1",
-                json.dumps(
-                    {
-                        "entry_type": entry_type,
-                        "tmdb_id": tmdb_id,
-                        "language": None,
-                        "name": "Alien",
-                        "name_translations": {},
-                        "original_name": "Alien",
-                        "overview": "Legacy overview.",
-                        "overview_translations": {},
-                        "poster_path": "/poster.jpg",
-                        "backdrop_path": "/backdrop.jpg",
-                        "logo_path": None,
-                        "original_language_code": "en",
-                        "on_air_date": "1979-05-25",
-                        "link_to_details": f"https://www.themoviedb.org/{entry_type}/{tmdb_id}",
-                        "fetched_at": "2026-06-30T00:00:00Z",
-                        "source_version": "tmdbsummary.v1",
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            ),
-        )
-        db.commit()
-
-
 def _live_record(
     identity: str,
     entry_type: str,
@@ -2118,45 +1668,15 @@ def _live_record(
     watch_status: str = "watched",
     on_display: bool = True,
 ) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "schemaVersion": 2,
-        "tmdbID": tmdb_id,
-        "entryType": entry_type,
-        "onDisplay": on_display,
-        "dateSaved": date_saved,
-        "watchStatus": watch_status,
-        "dateStarted": "2026-05-02T00:00:00Z",
-        "dateFinished": "2026-05-09T00:00:00Z",
-        "isDateTrackingEnabled": False,
-        "score": 4,
-        "favorite": True,
-        "notes": "Round trip",
-        "usingCustomPoster": False,
-        "episodeProgresses": [],
-        "libraryUpdatedAt": "2026-05-10T00:00:00Z",
-        "trackingUpdatedAt": "2026-05-11T00:00:00Z",
-    }
-    if entry_type == "season":
-        parts = identity.split(":")
-        fields["parentSeriesID"] = int(parts[1])
-        fields["seasonNumber"] = int(parts[2])
-    return _record(identity, fields)
+    return live_record(
+        identity,
+        entry_type,
+        tmdb_id,
+        date_saved=date_saved,
+        watch_status=watch_status,
+        on_display=on_display,
+    )
 
 
 def _tombstone_record(identity: str, entry_type: str, tmdb_id: int) -> dict[str, Any]:
-    fields: dict[str, Any] = {
-        "schemaVersion": 2,
-        "tmdbID": tmdb_id,
-        "entryType": entry_type,
-        "deletedAt": "2026-05-12T00:00:00Z",
-    }
-    return _record(identity, fields)
-
-
-def _record(identity: str, fields: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "recordName": identity,
-        "recordType": "LibraryEntry",
-        "recordChangeTag": f"tag-{identity}",
-        "fields": {name: {"value": value} for name, value in fields.items()},
-    }
+    return tombstone_record(identity, entry_type, tmdb_id)
