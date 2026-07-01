@@ -13,6 +13,7 @@ from anishelf_cli import config
 from anishelf_cli.cache import metadata, records, schema
 from anishelf_cli.cache.scope import LibraryCacheScope, scope_from_existing_database
 from anishelf_cli.cloudkit.executor import ANI_SHELF_LIBRARY_ZONE_NAME, ZoneChangesPage
+from anishelf_cli.library.entries import LibraryEntry, LibraryEntryMetadata
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 LibraryCacheError = schema.LibraryCacheError
@@ -185,7 +186,7 @@ class LibraryCacheStore:
             db.execute("DROP TABLE library_entries_stage")
             db.commit()
 
-    def list_entries(self, *, include_tombstones: bool = False) -> list[dict[str, Any]]:
+    def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntry]:
         where = "" if include_tombstones else "WHERE kind = 'snapshot'"
         with self._connect_initialized() as db:
             rows = db.execute(
@@ -196,9 +197,13 @@ class LibraryCacheStore:
                 ORDER BY date_saved DESC NULLS LAST, identity ASC
                 """
             ).fetchall()
-        return [records.decoded_row(row) for row in rows]
+        return self._entry_models_from_rows(rows)
 
-    def list_entries_filtered(
+    def list_entries(self, *, include_tombstones: bool = False) -> list[dict[str, Any]]:
+        entries = self.list_entry_models(include_tombstones=include_tombstones)
+        return [entry.to_payload() for entry in entries]
+
+    def list_entry_models_filtered(
         self,
         *,
         include_tombstones: bool = False,
@@ -208,7 +213,7 @@ class LibraryCacheStore:
         on_display: bool | None = None,
         sort: str = "saved",
         limit: int | None = None,
-    ) -> list[dict[str, Any]]:
+    ) -> list[LibraryEntry]:
         where_parts: list[str] = []
         params: list[Any] = []
         if not include_tombstones:
@@ -247,7 +252,31 @@ class LibraryCacheStore:
                 """,
                 params,
             ).fetchall()
-        return [records.decoded_row(row) for row in rows]
+        return self._entry_models_from_rows(rows)
+
+    def list_entries_filtered(
+        self,
+        *,
+        include_tombstones: bool = False,
+        watch_status: str | None = None,
+        hidden: bool | None = None,
+        favorite: bool | None = None,
+        on_display: bool | None = None,
+        sort: str = "saved",
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        return [
+            entry.to_payload()
+            for entry in self.list_entry_models_filtered(
+                include_tombstones=include_tombstones,
+                watch_status=watch_status,
+                hidden=hidden,
+                favorite=favorite,
+                on_display=on_display,
+                sort=sort,
+                limit=limit,
+            )
+        ]
 
     def get_entries_by_identity(self, identities: list[str]) -> dict[str, dict[str, Any]]:
         if not identities:
@@ -311,7 +340,7 @@ class LibraryCacheStore:
             ).fetchall()
         return [records.decoded_row(row) for row in rows]
 
-    def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
+    def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
         query = title.strip()
         if not query:
             return []
@@ -341,7 +370,10 @@ class LibraryCacheStore:
                 """,
                 (pattern, pattern, pattern),
             ).fetchall()
-        return [records.decoded_row(row) for row in rows]
+        return self._entry_models_from_rows(rows)
+
+    def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
+        return [entry.to_payload() for entry in self.search_entry_models_by_title(title)]
 
     def upsert_metadata_summary(self, summary: dict[str, Any]) -> None:
         with self._connect_initialized() as db:
@@ -395,28 +427,42 @@ class LibraryCacheStore:
             "ready": missing_count == 0,
         }
 
-    def attach_metadata_summary(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    def attach_metadata_summary_models(
+        self,
+        entries: list[LibraryEntry],
+    ) -> list[LibraryEntry]:
         if not entries:
             return []
+        metadata_keys = [self._metadata_key_from_entry(entry) for entry in entries]
         with self._connect_initialized() as db:
             rows = db.execute(
                 f"""
                 SELECT metadata_json
                 FROM tmdb_metadata_summary
-                WHERE metadata_key IN ({metadata.placeholders(entries)})
+                WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
                 AND language = ''
                 """,
-                metadata.metadata_lookup_params(entries),
+                metadata_keys,
             ).fetchall()
-        metadata_by_key: dict[str, dict[str, Any]] = {}
+        metadata_by_key: dict[str, LibraryEntryMetadata] = {}
         for row in rows:
             summary = metadata.metadata_row(row)
-            metadata_by_key[metadata.metadata_key_from_summary(summary)] = summary
-        attached: list[dict[str, Any]] = []
+            metadata_by_key[metadata.metadata_key_from_summary(summary)] = (
+                LibraryEntryMetadata.from_payload(summary)
+            )
+        attached: list[LibraryEntry] = []
         for entry in entries:
-            clone = dict(entry)
-            clone["metadata"] = metadata_by_key.get(metadata.metadata_key_from_entry(entry))
-            attached.append(clone)
+            attached.append(entry.with_metadata(metadata_by_key.get(self._metadata_key_from_entry(entry))))
+        return attached
+
+    def attach_metadata_summary(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        attached: list[dict[str, Any]] = []
+        for entry in self.attach_metadata_summary_models(
+            [LibraryEntry.from_payload(entry) for entry in entries]
+        ):
+            payload = entry.to_payload()
+            payload["metadata"] = None if entry.metadata is None else entry.metadata.to_payload()
+            attached.append(payload)
         return attached
 
     def _metadata_summary_targets_by_state(
@@ -440,6 +486,18 @@ class LibraryCacheStore:
         db.execute("PRAGMA journal_mode=WAL")
         db.execute("PRAGMA foreign_keys=ON")
         return db
+
+    def _entry_models_from_rows(self, rows: list[sqlite3.Row]) -> list[LibraryEntry]:
+        return [LibraryEntry.from_payload(records.decoded_row(row)) for row in rows]
+
+    def _metadata_key_from_entry(self, entry: LibraryEntry) -> str:
+        payload = {
+            "entry_type": entry.entry_type,
+            "tmdb_id": entry.tmdb_id,
+            "parent_series_id": entry.parent_series_id,
+            "season_number": entry.season_number,
+        }
+        return metadata.metadata_key_from_entry(payload)
 
     @contextmanager
     def _connect_initialized(self) -> Generator[sqlite3.Connection]:

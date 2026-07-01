@@ -13,6 +13,7 @@ from anishelf_cli.cli.root import _normalize_metadata_args, app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
+from anishelf_cli.library.entries import LibraryEntry
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import (
     TMDbClient,
@@ -41,7 +42,7 @@ class MemorySecretStore:
 
 
 def _fake_store() -> object:
-    def list_entries_filtered(**kwargs: object) -> list[object]:
+    def list_entries_filtered(**kwargs: object) -> list[dict[str, object]]:
         _ = kwargs
         return []
 
@@ -53,10 +54,12 @@ def _fake_store() -> object:
             zone="AniShelfLibrary",
             user_record_name="_test_user",
         ),
-        list_entries=lambda *, include_tombstones=False: [],
-        list_entries_filtered=list_entries_filtered,
-        search_entries_by_title=lambda title: [],
-        attach_metadata_summary=lambda entries: entries,
+        list_entry_models=lambda *, include_tombstones=False: [],
+        list_entry_models_filtered=lambda **kwargs: [
+            LibraryEntry.from_payload(entry) for entry in list_entries_filtered(**kwargs)
+        ],
+        search_entry_models_by_title=lambda title: [],
+        attach_metadata_summary_models=lambda entries: entries,
     )
 
 

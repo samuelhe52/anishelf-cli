@@ -25,6 +25,7 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.config import KEYCHAIN_ACCOUNT
 from anishelf_cli.library import LibraryRecordDecodeError
+from anishelf_cli.library.entries import LibraryEntry, LibraryEntryMetadata
 from anishelf_cli.secrets import SecretStorageUnavailableError, cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
@@ -1774,17 +1775,25 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
                 "ready": True,
             }
 
-        def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
+        def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
             assert title == "Alien"
-            return [{"identity": "movie:55", "kind": "snapshot", "entry_type": "movie"}]
+            return [
+                LibraryEntry.from_payload(
+                    {
+                        "identity": "movie:55",
+                        "kind": "snapshot",
+                        "entry_type": "movie",
+                        "tmdb_id": 55,
+                    }
+                )
+            ]
 
-        def attach_metadata_summary(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def attach_metadata_summary_models(self, entries: list[LibraryEntry]) -> list[LibraryEntry]:
             self.attach_calls += 1
             return [
-                {
-                    **entry,
-                    "metadata": _metadata_summary("movie", 55, name="Alien"),
-                }
+                entry.with_metadata(
+                    LibraryEntryMetadata.from_payload(_metadata_summary("movie", 55, name="Alien"))
+                )
                 for entry in entries
             ]
 
@@ -1888,15 +1897,38 @@ def _fake_search_store() -> object:
                 "ready": True,
             }
 
-        def search_entries_by_title(self, title: str) -> list[dict[str, Any]]:
+        def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
             self.search_title_arg = title
             return [
-                {"identity": "movie:55", "kind": "snapshot", "entry_type": "movie"},
-                {"identity": "series:22", "kind": "snapshot", "entry_type": "series"},
-                {"identity": "season:22:1:33", "kind": "snapshot", "entry_type": "season"},
+                LibraryEntry.from_payload(
+                    {
+                        "identity": "movie:55",
+                        "kind": "snapshot",
+                        "entry_type": "movie",
+                        "tmdb_id": 55,
+                    }
+                ),
+                LibraryEntry.from_payload(
+                    {
+                        "identity": "series:22",
+                        "kind": "snapshot",
+                        "entry_type": "series",
+                        "tmdb_id": 22,
+                    }
+                ),
+                LibraryEntry.from_payload(
+                    {
+                        "identity": "season:22:1:33",
+                        "kind": "snapshot",
+                        "entry_type": "season",
+                        "tmdb_id": 33,
+                        "parent_series_id": 22,
+                        "season_number": 1,
+                    }
+                ),
             ]
 
-        def attach_metadata_summary(self, entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        def attach_metadata_summary_models(self, entries: list[LibraryEntry]) -> list[LibraryEntry]:
             return entries
 
     return FakeStore()

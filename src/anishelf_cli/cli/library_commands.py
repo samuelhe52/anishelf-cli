@@ -36,6 +36,7 @@ from anishelf_cli.library import (
     library_get_cache_envelope,
     valid_lookup_record_names,
 )
+from anishelf_cli.library.entries import LibraryEntry
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
     attach_metadata_for_depth,
@@ -96,11 +97,12 @@ def library_get(
         if live_meta:
             _refresh_metadata_for_entries(store, list(cached_entries.values()))
         if metadata_depth is not MetadataDepth.NONE:
+            typed_entries = [LibraryEntry.from_payload(entry) for entry in cached_entries.values()]
             cached_entries = {
-                str(entry["identity"]): entry
+                entry.identity: entry.to_payload()
                 for entry in attach_metadata_for_depth(
                     store,
-                    list(cached_entries.values()),
+                    typed_entries,
                     metadata_depth,
                 )
             }
@@ -398,7 +400,7 @@ def library_list(
         emit_json(payload)
         return
     render_library_list(
-        store.attach_metadata_summary(result.entries),
+        store.attach_metadata_summary_models(result.entries),
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
     )
 
@@ -441,7 +443,7 @@ def library_search(
         return
     render_library_search(
         title,
-        store.attach_metadata_summary(result.entries),
+        store.attach_metadata_summary_models(result.entries),
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
     )
 

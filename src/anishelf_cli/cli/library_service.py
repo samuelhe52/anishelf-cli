@@ -26,6 +26,7 @@ from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError, LockFactory
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
+from anishelf_cli.library.entries import LibraryEntry
 from anishelf_cli.library.queries import (
     LibraryEntriesResult,
     cache_summary_payload,
@@ -90,7 +91,7 @@ class LibraryCommandService:
 
     def entries_result(
         self,
-        entries: list[dict[str, object]],
+        entries: list[LibraryEntry],
         store: LibraryCacheStore,
         refresh_result: LibraryCacheRefreshResult | None,
     ) -> LibraryEntriesResult:

@@ -5,6 +5,7 @@ from typing import Any
 
 import pytest
 
+from anishelf_cli.library.entries import LibraryEntry, LibraryEntryMetadata
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
     build_library_list_result,
@@ -38,8 +39,8 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
         limit=None,
     )
 
-    assert [entry["identity"] for entry in result.entries] == ["movie:66", "movie:55"]
-    assert all("metadata" not in entry for entry in result.entries)
+    assert [entry.identity for entry in result.entries] == ["movie:66", "movie:55"]
+    assert all(entry.metadata is None for entry in result.entries)
     assert store.list_filter_kwargs["limit"] is None
     assert result.to_payload()["metadata"] == {
         "requested": "none",
@@ -93,7 +94,11 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
         "attached": True,
         "source": "cache",
     }
-    assert payload["entries"][0]["metadata"] == {"name": "Alien"}
+    entries = payload["entries"]
+    assert isinstance(entries, list)
+    first_entry = entries[0]
+    assert isinstance(first_entry, dict)
+    assert first_entry["metadata"] == {"name": "Alien"}
 
 
 class FakeQueryStore:
@@ -117,11 +122,11 @@ class FakeQueryStore:
         self.list_filter_kwargs: dict[str, Any] = {}
         self.search_title: str | None = None
 
-    def list_entries(self, *, include_tombstones: bool = False) -> list[dict[str, object]]:
+    def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntry]:
         _ = include_tombstones
-        return self.entries
+        return [LibraryEntry.from_payload(entry) for entry in self.entries]
 
-    def list_entries_filtered(
+    def list_entry_models_filtered(
         self,
         *,
         include_tombstones: bool = False,
@@ -131,7 +136,7 @@ class FakeQueryStore:
         on_display: bool | None = None,
         sort: str = "saved",
         limit: int | None = None,
-    ) -> list[dict[str, object]]:
+    ) -> list[LibraryEntry]:
         self.list_filter_kwargs = {
             "include_tombstones": include_tombstones,
             "watch_status": watch_status,
@@ -141,11 +146,12 @@ class FakeQueryStore:
             "sort": sort,
             "limit": limit,
         }
-        return self.entries[:limit] if limit is not None else self.entries
+        entries = self.entries[:limit] if limit is not None else self.entries
+        return [LibraryEntry.from_payload(entry) for entry in entries]
 
-    def search_entries_by_title(self, title: str) -> list[dict[str, object]]:
+    def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]:
         self.search_title = title
-        return self.entries
+        return [LibraryEntry.from_payload(entry) for entry in self.entries]
 
     def metadata_summary_status(self) -> dict[str, int | bool]:
         tracked = len(self.entries)
@@ -157,15 +163,19 @@ class FakeQueryStore:
             "ready": self.metadata_ready,
         }
 
-    def attach_metadata_summary(
+    def attach_metadata_summary_models(
         self,
-        entries: list[dict[str, object]],
-    ) -> list[dict[str, object]]:
-        attached: list[dict[str, object]] = []
+        entries: list[LibraryEntry],
+    ) -> list[LibraryEntry]:
+        attached: list[LibraryEntry] = []
         for entry in entries:
-            clone = dict(entry)
-            clone["metadata"] = self.metadata.get(str(entry["identity"]))
-            attached.append(clone)
+            attached.append(
+                entry.with_metadata(
+                    None
+                    if str(entry.identity) not in self.metadata
+                    else LibraryEntryMetadata.from_payload(self.metadata[str(entry.identity)])
+                )
+            )
         return attached
 
 

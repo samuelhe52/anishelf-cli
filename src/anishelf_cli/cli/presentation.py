@@ -6,6 +6,7 @@ from anishelf_cli.core.output import (
     HumanTableColumn,
     emit_human_blocks,
 )
+from anishelf_cli.library.entries import EpisodeProgress, LibraryEntry, LibraryEntryMetadata
 from anishelf_cli.tmdb.client import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
@@ -92,22 +93,26 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
     entry = item.get("entry")
     if not isinstance(entry, dict):
         return HumanSection(identity, (("Status", "decode-error"),))
-    metadata = _entry_metadata(entry)
-    title = _metadata_name(metadata)
+    try:
+        entry_model = LibraryEntry.from_payload(entry)
+    except ValueError:
+        return HumanSection(identity, (("Status", "decode-error"),))
+    metadata = entry_model.metadata
+    title = entry_model.metadata_title
 
-    if entry.get("kind") == "tombstone":
+    if entry_model.kind == "tombstone":
         return HumanSection(
             title or identity,
             (
                 ("Status", status),
                 ("Identity", identity),
-                ("Kind", entry.get("kind")),
-                ("Type", entry.get("entry_type")),
-                ("TMDb ID", entry.get("tmdb_id")),
-                ("Parent series", entry.get("parent_series_id")),
-                ("Season", entry.get("season_number")),
-                ("Deleted", entry.get("deleted_at")),
-                ("Schema", entry.get("schema_version")),
+                ("Kind", entry_model.kind),
+                ("Type", entry_model.entry_type),
+                ("TMDb ID", entry_model.tmdb_id),
+                ("Parent series", entry_model.parent_series_id),
+                ("Season", entry_model.season_number),
+                ("Deleted", entry_model.deleted_at),
+                ("Schema", entry_model.schema_version),
             ),
         )
 
@@ -118,45 +123,46 @@ def _library_get_item_section(item: dict[str, object]) -> HumanSection:
             ("Identity", identity),
             ("Title", title),
             ("Original title", _metadata_original_name(metadata)),
-            ("Overview", _truncate_text(_metadata_field(metadata, "overview"), limit=220)),
-            ("Kind", entry.get("kind")),
-            ("Type", entry.get("entry_type")),
-            ("TMDb ID", entry.get("tmdb_id")),
-            ("Parent series", entry.get("parent_series_id")),
-            ("Season", entry.get("season_number")),
-            ("Watch status", entry.get("watch_status")),
-            ("Score", entry.get("score")),
-            ("Favorite", entry.get("favorite")),
-            ("On display", entry.get("on_display")),
-            ("Date saved", _compact_date(entry.get("date_saved"))),
-            ("Date started", entry.get("date_started")),
-            ("Date finished", entry.get("date_finished")),
-            ("Date tracking", entry.get("is_date_tracking_enabled")),
+            (
+                "Overview",
+                _truncate_text(
+                    metadata.overview if metadata is not None else None,
+                    limit=220,
+                ),
+            ),
+            ("Kind", entry_model.kind),
+            ("Type", entry_model.entry_type),
+            ("TMDb ID", entry_model.tmdb_id),
+            ("Parent series", entry_model.parent_series_id),
+            ("Season", entry_model.season_number),
+            ("Watch status", entry_model.watch_status),
+            ("Score", entry_model.score),
+            ("Favorite", entry_model.favorite),
+            ("On display", entry_model.on_display),
+            ("Date saved", _compact_date(entry_model.date_saved)),
+            ("Date started", entry_model.date_started),
+            ("Date finished", entry_model.date_finished),
+            ("Date tracking", entry_model.is_date_tracking_enabled),
             ("Poster", _metadata_field(metadata, "poster_path")),
-            ("Custom poster", entry.get("custom_poster_path")),
-            ("Episode progress", _format_episode_progresses(entry.get("episode_progresses"))),
-            ("Library updated", entry.get("library_updated_at")),
-            ("Tracking updated", entry.get("tracking_updated_at")),
-            ("Notes", _truncate_text(_optional_human_text(entry.get("notes")), limit=160)),
-            ("Schema", entry.get("schema_version")),
+            ("Custom poster", entry_model.custom_poster_path),
+            ("Episode progress", _format_episode_progresses(entry_model.episode_progresses)),
+            ("Library updated", entry_model.library_updated_at),
+            ("Tracking updated", entry_model.tracking_updated_at),
+            ("Notes", _truncate_text(_optional_human_text(entry_model.notes), limit=160)),
+            ("Schema", entry_model.schema_version),
         ),
     )
 
 
-def _format_episode_progresses(value: object) -> str | None:
-    if not isinstance(value, list) or not value:
+def _format_episode_progresses(value: tuple[EpisodeProgress, ...]) -> str | None:
+    if not value:
         return None
 
     parts: list[str] = []
     for item in value:
-        if not isinstance(item, dict):
-            continue
-        season = item.get("season_number")
-        episode = item.get("watched_through_episode")
-        updated_at = item.get("updated_at")
-        label = f"S{season}:E{episode}"
-        if updated_at:
-            label += f" ({updated_at})"
+        label = f"S{item.season_number}:E{item.watched_through_episode}"
+        if item.updated_at:
+            label += f" ({item.updated_at})"
         parts.append(label)
     return ", ".join(parts) if parts else None
 
@@ -167,37 +173,27 @@ def _optional_human_text(value: object) -> object:
     return value
 
 
-def _human_library_row(entry: dict[str, object]) -> dict[str, object]:
+def _human_library_row(entry: LibraryEntry) -> dict[str, object]:
     return {
-        "title": _metadata_name(_entry_metadata(entry)) or entry.get("identity"),
-        "identity": entry.get("identity"),
-        "type": entry.get("entry_type"),
-        "status": entry.get("watch_status"),
-        "score": entry.get("score"),
-        "favorite": entry.get("favorite"),
-        "display": entry.get("on_display"),
-        "saved": _compact_date(entry.get("date_saved")),
+        "title": entry.title,
+        "identity": entry.identity,
+        "type": entry.entry_type,
+        "status": entry.watch_status,
+        "score": entry.score,
+        "favorite": entry.favorite,
+        "display": entry.on_display,
+        "saved": _compact_date(entry.date_saved),
     }
 
 
-def _entry_metadata(entry: dict[str, object]) -> dict[str, object] | None:
-    metadata = entry.get("metadata")
-    return metadata if isinstance(metadata, dict) else None
-
-
-def _metadata_name(metadata: dict[str, object] | None) -> str | None:
-    return _metadata_field(metadata, "name") or _metadata_original_name(metadata)
-
-
-def _metadata_original_name(metadata: dict[str, object] | None) -> str | None:
+def _metadata_original_name(metadata: LibraryEntryMetadata | None) -> str | None:
     return _metadata_field(metadata, "original_name")
 
 
-def _metadata_field(metadata: dict[str, object] | None, key: str) -> str | None:
+def _metadata_field(metadata: LibraryEntryMetadata | None, key: str) -> str | None:
     if metadata is None:
         return None
-    value = metadata.get(key)
-    return value if isinstance(value, str) and value else None
+    return metadata.string_field(key)
 
 
 def _compact_date(value: object) -> object:
@@ -215,7 +211,7 @@ def _truncate_text(value: object, *, limit: int) -> object:
 
 
 def render_library_list(
-    entries: list[dict[str, object]],
+    entries: list[LibraryEntry],
     *,
     fields: tuple[str, ...],
 ) -> None:
@@ -234,7 +230,7 @@ def render_library_list(
 
 def render_library_search(
     title: str,
-    entries: list[dict[str, object]],
+    entries: list[LibraryEntry],
     *,
     fields: tuple[str, ...],
 ) -> None:

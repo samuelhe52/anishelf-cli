@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from anishelf_cli.cache.sync import LibraryCacheRefreshResult
+from anishelf_cli.library.entries import LibraryEntry
 from anishelf_cli.models import LibraryListSort, MetadataDepth
 
 
@@ -28,9 +29,9 @@ class LibraryQueryStore(Protocol):
     @property
     def scope(self) -> LibraryQueryScope: ...
 
-    def list_entries(self, *, include_tombstones: bool = False) -> list[dict[str, object]]: ...
+    def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntry]: ...
 
-    def list_entries_filtered(
+    def list_entry_models_filtered(
         self,
         *,
         include_tombstones: bool = False,
@@ -40,16 +41,16 @@ class LibraryQueryStore(Protocol):
         on_display: bool | None = None,
         sort: str = "saved",
         limit: int | None = None,
-    ) -> list[dict[str, object]]: ...
+    ) -> list[LibraryEntry]: ...
 
-    def search_entries_by_title(self, title: str) -> list[dict[str, object]]: ...
+    def search_entry_models_by_title(self, title: str) -> list[LibraryEntry]: ...
 
     def metadata_summary_status(self) -> dict[str, int | bool]: ...
 
-    def attach_metadata_summary(
+    def attach_metadata_summary_models(
         self,
-        entries: list[dict[str, object]],
-    ) -> list[dict[str, object]]: ...
+        entries: list[LibraryEntry],
+    ) -> list[LibraryEntry]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,7 +71,7 @@ class MetadataCompletenessError(ValueError):
 
 @dataclass(frozen=True, slots=True)
 class LibraryEntriesResult:
-    entries: list[dict[str, object]]
+    entries: list[LibraryEntry]
     cache: dict[str, object]
     metadata: dict[str, object] | None = None
     filters: dict[str, object] | None = None
@@ -82,7 +83,7 @@ class LibraryEntriesResult:
                 "entries": len(self.entries),
                 "cache": self.cache,
             },
-            "entries": self.entries,
+            "entries": [entry.to_payload() for entry in self.entries],
         }
         if self.metadata is not None:
             payload["metadata"] = self.metadata
@@ -111,7 +112,7 @@ def build_library_list_result(
             action="sort library entries by title",
             hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
         )
-    entries = store.list_entries_filtered(
+    entries = store.list_entry_models_filtered(
         include_tombstones=False,
         watch_status=watch_status,
         hidden=True if hidden else None,
@@ -122,7 +123,7 @@ def build_library_list_result(
     )
     sort_entries = attach_metadata_for_depth(store, entries, metadata_depth)
     if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
-        sort_entries = store.attach_metadata_summary(entries)
+        sort_entries = store.attach_metadata_summary_models(entries)
     entries = sort_entries_by_title(sort_entries, sort)
     if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
         entries = strip_entry_metadata(entries)
@@ -155,7 +156,7 @@ def build_library_search_result(
         action="search cached library entries by title",
         hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
     )
-    entries = store.search_entries_by_title(title)
+    entries = store.search_entry_models_by_title(title)
     entries = attach_metadata_for_depth(store, entries, metadata_depth)
     return LibraryEntriesResult(
         entries=entries,
@@ -171,7 +172,7 @@ def build_library_export_result(
     metadata_depth: MetadataDepth,
     cache: dict[str, object],
 ) -> LibraryEntriesResult:
-    entries = store.list_entries(include_tombstones=False)
+    entries = store.list_entry_models(include_tombstones=False)
     entries = attach_metadata_for_depth(store, entries, metadata_depth)
     return LibraryEntriesResult(
         entries=entries,
@@ -203,7 +204,7 @@ def cache_summary_payload(
 
 
 def library_entries_payload(
-    entries: list[dict[str, object]],
+    entries: list[LibraryEntry],
     store: LibraryQueryStore,
     refresh_result: LibraryCacheRefreshResult | None,
 ) -> dict[str, object]:
@@ -215,12 +216,12 @@ def library_entries_payload(
 
 def attach_metadata_for_depth(
     store: LibraryQueryStore,
-    entries: list[dict[str, object]],
+    entries: list[LibraryEntry],
     metadata_depth: MetadataDepth,
-) -> list[dict[str, object]]:
+) -> list[LibraryEntry]:
     if metadata_depth is MetadataDepth.NONE:
         return entries
-    return store.attach_metadata_summary(entries)
+    return store.attach_metadata_summary_models(entries)
 
 
 def require_metadata_ready(
@@ -272,40 +273,19 @@ def library_list_filters_payload(
 
 
 def sort_entries_by_title(
-    entries: list[dict[str, object]],
+    entries: list[LibraryEntry],
     sort: LibraryListSort,
-) -> list[dict[str, object]]:
+) -> list[LibraryEntry]:
     if sort is not LibraryListSort.TITLE:
         return entries
     return sorted(
         entries,
         key=lambda entry: (
-            str(_metadata_name(_entry_metadata(entry)) or entry.get("identity") or "").lower(),
-            str(entry.get("identity") or ""),
+            entry.title.lower(),
+            entry.identity,
         ),
     )
 
 
-def strip_entry_metadata(entries: list[dict[str, object]]) -> list[dict[str, object]]:
-    stripped: list[dict[str, object]] = []
-    for entry in entries:
-        clone = dict(entry)
-        clone.pop("metadata", None)
-        stripped.append(clone)
-    return stripped
-
-
-def _entry_metadata(entry: dict[str, object]) -> dict[str, object] | None:
-    metadata = entry.get("metadata")
-    return metadata if isinstance(metadata, dict) else None
-
-
-def _metadata_name(metadata: dict[str, object] | None) -> str | None:
-    return _metadata_field(metadata, "name") or _metadata_field(metadata, "original_name")
-
-
-def _metadata_field(metadata: dict[str, object] | None, key: str) -> str | None:
-    if metadata is None:
-        return None
-    value = metadata.get(key)
-    return value if isinstance(value, str) and value else None
+def strip_entry_metadata(entries: list[LibraryEntry]) -> list[LibraryEntry]:
+    return [entry.without_metadata() for entry in entries]
