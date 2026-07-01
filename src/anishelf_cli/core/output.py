@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping, Sequence
+from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -36,20 +37,20 @@ class HumanTable:
 
 type HumanBlock = HumanSection | HumanTable
 
-_VERBOSE_OUTPUT_ENABLED = False
+_APP_STATE: ContextVar[AppState | None] = ContextVar("anishelf_cli_app_state", default=None)
 
 
 def console(stderr: bool = False) -> Console:
     return Console(stderr=stderr)
 
 
-def set_verbose_output(enabled: bool) -> None:
-    global _VERBOSE_OUTPUT_ENABLED
-    _VERBOSE_OUTPUT_ENABLED = enabled
+def set_current_app_state(state: AppState) -> None:
+    _APP_STATE.set(state)
 
 
 def verbose_output_enabled() -> bool:
-    return _VERBOSE_OUTPUT_ENABLED
+    state = _APP_STATE.get()
+    return bool(state and state.verbose)
 
 
 def emit_json(payload: dict[str, Any]) -> None:
@@ -162,7 +163,7 @@ def emit_progress(message: str, *, redactor: SecretRedactor | None = None) -> No
 
 
 def emit_verbose(message: str, *, redactor: SecretRedactor | None = None) -> None:
-    if not _VERBOSE_OUTPUT_ENABLED:
+    if not verbose_output_enabled():
         return
     output = redactor.redact(message) if redactor else message
     typer.echo(f"[verbose] {output}", err=True)

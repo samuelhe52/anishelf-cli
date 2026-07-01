@@ -3,7 +3,11 @@ from anishelf_cli.core.output import (
     HumanTable,
     HumanTableColumn,
     emit_human_blocks,
+    emit_verbose,
+    set_current_app_state,
+    verbose_output_enabled,
 )
+from anishelf_cli.models import AppState
 
 
 def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
@@ -56,3 +60,21 @@ def test_emit_human_blocks_formats_empty_table(capsys) -> None:
     )
 
     assert capsys.readouterr().out == "Library\n  No library entries.\n"
+
+
+def test_emit_verbose_is_disabled_without_app_state(capsys) -> None:
+    set_current_app_state(AppState(verbose=False))
+
+    emit_verbose("hidden")
+
+    assert capsys.readouterr().err == ""
+    assert not verbose_output_enabled()
+
+
+def test_emit_verbose_uses_request_scoped_app_state(capsys) -> None:
+    set_current_app_state(AppState(verbose=True))
+
+    emit_verbose("visible")
+
+    assert capsys.readouterr().err == "[verbose] visible\n"
+    assert verbose_output_enabled()

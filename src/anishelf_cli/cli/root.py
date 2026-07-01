@@ -30,7 +30,7 @@ from anishelf_cli.cloudkit.executor import (
     CurrentUser,
     cloudkit_web_auth_token_lock,
 )
-from anishelf_cli.core.output import emit_error, emit_json, set_verbose_output
+from anishelf_cli.core.output import emit_error, emit_json, set_current_app_state
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
 from anishelf_cli.secrets import (
@@ -109,11 +109,12 @@ def root_callback(
         ),
     ] = False,
 ) -> None:
-    set_verbose_output(verbose)
-    ctx.obj = AppState(
+    state = AppState(
         json_output=json_output,
         verbose=verbose,
     )
+    set_current_app_state(state)
+    ctx.obj = state
 
 
 def _make_http_client() -> httpx.Client:
