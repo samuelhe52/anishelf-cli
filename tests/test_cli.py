@@ -351,7 +351,10 @@ def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
-        return httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
+        return httpx.Response(
+            200,
+            json={"results": [{"id": 55, "title": "Alien", "genre_ids": [16]}]},
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(
@@ -385,7 +388,10 @@ def test_verbose_flag_resets_across_multiple_invocations(monkeypatch) -> None:
 
     client = httpx.Client(
         transport=httpx.MockTransport(
-            lambda request: httpx.Response(200, json={"results": [{"id": 55, "title": "Alien"}]})
+            lambda request: httpx.Response(
+                200,
+                json={"results": [{"id": 55, "title": "Alien", "genre_ids": [16]}]},
+            )
         )
     )
     monkeypatch.setattr(

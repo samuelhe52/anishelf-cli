@@ -212,6 +212,7 @@ def test_tmdb_client_searches_movie_and_tv_titles() -> None:
                             "original_language": "en",
                             "overview": "A space horror film.",
                             "poster_path": "/poster.jpg",
+                            "genre_ids": [16, 878],
                         }
                     ]
                 },
@@ -228,6 +229,7 @@ def test_tmdb_client_searches_movie_and_tv_titles() -> None:
                         "original_language": "en",
                         "overview": "A sci-fi police series.",
                         "poster_path": "/series.jpg",
+                        "genre_ids": [16, 18],
                     }
                 ]
             },
@@ -260,8 +262,14 @@ def test_tmdb_client_searches_movie_and_tv_titles() -> None:
 def test_tmdb_client_search_title_preserves_legacy_id_sets() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/3/search/movie":
-            return httpx.Response(200, json={"results": [{"id": 55}, {"id": 55}]})
-        return httpx.Response(200, json={"results": [{"id": 22}, {"id": 99}]})
+            return httpx.Response(
+                200,
+                json={"results": [{"id": 55, "genre_ids": [16]}, {"id": 55, "genre_ids": [16]}]},
+            )
+        return httpx.Response(
+            200,
+            json={"results": [{"id": 22, "genre_ids": [16]}, {"id": 99, "genre_ids": [16]}]},
+        )
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     tmdb = TMDbClient("tmdb-secret-token", client=client)
@@ -291,6 +299,7 @@ def test_tmdb_client_discovers_without_title_and_respects_entry_type_filter() ->
                         "original_language": "en",
                         "overview": "A space horror film.",
                         "poster_path": "/poster.jpg",
+                        "genre_ids": [16, 878],
                     }
                 ]
             },
@@ -308,6 +317,38 @@ def test_tmdb_client_discovers_without_title_and_respects_entry_type_filter() ->
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
     assert requests[0].url.params["primary_release_year"] == "1979"
     assert requests[0].url.params["sort_by"] == "popularity.desc"
+    assert requests[0].url.params["with_genres"] == "16"
+
+
+def test_tmdb_client_filters_non_animation_title_search_results() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/3/search/movie":
+            return httpx.Response(
+                200,
+                json={
+                    "results": [
+                        {"id": 55, "title": "Alien", "genre_ids": [878]},
+                        {"id": 66, "title": "Spirited Away", "genre_ids": [16, 14]},
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "results": [
+                    {"id": 22, "name": "Alien Nation", "genre_ids": [18]},
+                    {"id": 44, "name": "Cowboy Bebop", "genre_ids": [16, 10765]},
+                ]
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", client=client)
+
+    result = tmdb.search_titles(TMDbTitleSearchQuery(title="Anime"))
+
+    assert [match.tmdb_id for match in result.movies] == [66]
+    assert [match.tmdb_id for match in result.series] == [44]
 
 
 def test_tmdb_client_fails_whole_search_when_one_all_type_endpoint_fails() -> None:

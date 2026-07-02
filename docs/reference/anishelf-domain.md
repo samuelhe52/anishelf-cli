@@ -78,7 +78,7 @@ counts or library list/export output.
 `lib search --title` depends on cached TMDb summary metadata. If that
 metadata is incomplete or unavailable, the command should fail explicitly and
 tell the user how to hydrate metadata first. Use `tmdb search --title` for
-global TMDb title search, or omit `--title` for popular-title discovery.
+global TMDb anime title search, or omit `--title` for popular anime discovery.
 
 Low-level CloudKit zone, record, change, and schema-check commands are
 diagnostics. Keep them out of the normal user command tree unless a future

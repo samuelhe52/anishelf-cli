@@ -54,8 +54,8 @@ spec.
   be included with `--show-hidden` or a library config default.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
-- `tmdb search` performs global TMDb title search, and discover-style popular
-  title lookup when no title is provided.
+- `tmdb search` performs global TMDb anime title search, and discover-style
+  popular anime lookup when no title is provided.
 
 ## Near-Term Direction
 

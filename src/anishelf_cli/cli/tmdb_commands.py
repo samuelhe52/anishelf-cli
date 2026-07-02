@@ -18,7 +18,7 @@ from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
 
 tmdb_app = typer.Typer(
-    help="Global TMDb discovery commands.",
+    help="Global TMDb anime discovery commands.",
     no_args_is_help=True,
     rich_markup_mode=None,
 )
@@ -41,7 +41,7 @@ def _tmdb_summary_client_or_exit() -> TMDbClient:
 
 @tmdb_app.command(
     "search",
-    help="Search TMDb by title, or discover popular titles when no title is given.",
+    help="Search TMDb anime by title, or discover popular anime titles when no title is given.",
 )
 def tmdb_search(
     ctx: typer.Context,
@@ -49,7 +49,7 @@ def tmdb_search(
         str | None,
         typer.Option(
             "--title",
-            help="Optional title query. When omitted, discover popular titles instead.",
+            help="Optional title query. When omitted, discover popular anime titles instead.",
         ),
     ] = None,
     year: Annotated[

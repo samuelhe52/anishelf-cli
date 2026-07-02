@@ -28,6 +28,7 @@ from anishelf_cli.models.transport.tmdb import (
 )
 
 ModelT = TypeVar("ModelT", bound=AniShelfBaseModel)
+TMDB_ANIME_GENRE_ID = 16
 
 
 class TMDbRequestError(RuntimeError):
@@ -206,6 +207,10 @@ def _title_search_matches(
 ) -> tuple[TMDbTitleSearchMatch, ...]:
     matches: list[TMDbTitleSearchMatch] = []
     for item in response.results:
+        # TMDb search endpoints do not support genre filters, so enforce the
+        # AniShelf animation-only policy against the returned genre ids.
+        if TMDB_ANIME_GENRE_ID not in item.genre_ids:
+            continue
         match = _title_search_match(entry_type, item)
         if match is not None:
             matches.append(match)
@@ -252,14 +257,14 @@ def _series_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
 
 
 def _movie_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"sort_by": "popularity.desc"}
+    params = {"sort_by": "popularity.desc", "with_genres": str(TMDB_ANIME_GENRE_ID)}
     if query.year is not None:
         params["primary_release_year"] = str(query.year)
     return params
 
 
 def _series_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"sort_by": "popularity.desc"}
+    params = {"sort_by": "popularity.desc", "with_genres": str(TMDB_ANIME_GENRE_ID)}
     if query.year is not None:
         params["first_air_date_year"] = str(query.year)
     return params
