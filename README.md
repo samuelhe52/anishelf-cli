@@ -1,5 +1,9 @@
 # anishelf-cli
 
+> [!WARNING]
+> This project is a work in progress. The CLI is not yet feature-complete,
+> and the API surface is not yet stable. Expect breaking changes.
+
 Read-only AniShelf library inspection CLI. `ani` signs in to your AniShelf
 CloudKit library, keeps a local cache, and lets you inspect, search, and export
 that cached library from the terminal.
@@ -50,7 +54,7 @@ uv run ani library search --title "Alien"
 uv run ani library export --json
 ```
 
-`library get` looks up entries by identity. Accepted identity forms are
+`library get` looks up entries by id. Accepted id forms are
 `movie:<tmdbID>`, `series:<tmdbID>`, and
 `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`.
 
@@ -93,13 +97,13 @@ items contain errors. Check `.summary.errors` or `.items[] | select(.status ==
 
 ```bash
 uv run ani library get movie:55 --json | jq '.items[].entry.watch_status'
-uv run ani library get movie:55 --json | jq '.items[] | {identity, score: .entry.score}'
+uv run ani library get movie:55 --json | jq '.items[] | {id, score: .entry.score}'
 uv run ani library get movie:55 --json | jq '.items[] | select(.status == "error")'
 uv run ani library init --json | jq '.summary.cache.records'
 uv run ani library sync --json | jq '.summary.cache.records'
 uv run ani library status --json | jq '.summary'
-uv run ani library list --json | jq '.entries[] | {identity, watch_status}'
+uv run ani library list --json | jq '.entries[] | {id, watch_status}'
 uv run ani library list --sync --json | jq '.summary.cache.mode'
-uv run ani library export --json | jq '.entries[] | {identity, watch_status}'
-uv run ani library search --title "Alien" --json | jq '.entries[].identity'
+uv run ani library export --json | jq '.entries[] | {id, watch_status}'
+uv run ani library search --title "Alien" --json | jq '.entries[].id'
 ```

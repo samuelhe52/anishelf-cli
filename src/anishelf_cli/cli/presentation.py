@@ -33,7 +33,7 @@ _TMDB_SEARCH_ALL = "all"
 
 LIBRARY_LIST_DEFAULT_FIELDS = (
     "title",
-    "identity",
+    "id",
     "type",
     "status",
     "score",
@@ -43,7 +43,7 @@ LIBRARY_LIST_DEFAULT_FIELDS = (
 )
 LIBRARY_SEARCH_DEFAULT_FIELDS = (
     "title",
-    "identity",
+    "id",
     "type",
     "status",
     "score",
@@ -51,7 +51,7 @@ LIBRARY_SEARCH_DEFAULT_FIELDS = (
 )
 DISPLAY_FIELD_COLUMNS = {
     "title": HumanTableColumn("title", "Title"),
-    "identity": HumanTableColumn("identity", "Identity"),
+    "id": HumanTableColumn("id", "ID"),
     "type": HumanTableColumn("type", "Type"),
     "status": HumanTableColumn("status", "Status"),
     "score": HumanTableColumn("score", "Score", "right"),
@@ -103,7 +103,7 @@ def _library_get_item_section(
             title or identity,
             (
                 ("Status", item.status),
-                ("Identity", identity),
+                ("ID", identity),
                 ("Kind", entry_model.kind),
                 ("Type", entry_model.entry_type),
                 ("TMDb ID", entry_model.tmdb_id),
@@ -119,7 +119,7 @@ def _library_get_item_section(
         title or identity,
         (
             ("Status", item.status),
-            ("Identity", identity),
+            ("ID", identity),
             ("Title", title),
             ("Original title", _metadata_original_name(metadata)),
             (
@@ -175,7 +175,7 @@ def _optional_human_text(value: object) -> object:
 def _human_library_row(entry: LibraryEntryModel) -> dict[str, object]:
     return {
         "title": entry.title,
-        "identity": entry.identity,
+        "id": entry.identity,
         "type": entry.entry_type,
         "status": getattr(entry, "watch_status", None),
         "score": getattr(entry, "score", None),

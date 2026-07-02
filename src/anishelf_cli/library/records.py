@@ -140,7 +140,7 @@ def _episode_progresses_from_cloudkit_fields(
 
 def _identity_raw(identity: LibraryIdentity) -> str:
     if identity.raw is None:
-        raise LibraryRecordDecodeError("CloudKit record identity is missing its canonical value.")
+        raise LibraryRecordDecodeError("CloudKit record id is missing its canonical value.")
     return identity.raw
 
 
@@ -171,9 +171,9 @@ def _validated_identity(
             raw_identity=record_name,
         )
     except LibraryIdentityError as exc:
-        if str(exc) == "Library entry identity does not match decoded fields.":
+        if str(exc) == "Library entry id does not match decoded fields.":
             raise LibraryRecordDecodeError(
-                f"CloudKit record identity {record_name} does not match decoded fields."
+                f"CloudKit record id {record_name} does not match decoded fields."
             ) from exc
         raise LibraryRecordDecodeError(str(exc)) from exc
 

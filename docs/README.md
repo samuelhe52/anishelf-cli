@@ -13,7 +13,7 @@ reading the code.
   locking, retries, and redaction notes.
 - `reference/cloudkit-app-auth.md`: Embedded public app auth, environment
   overrides, redaction, invalidation diagnostics, and rotation notes.
-- `reference/anishelf-domain.md`: AniShelf CloudKit schema, identities, cache,
+- `reference/anishelf-domain.md`: AniShelf CloudKit schema, ids, cache,
   batch, export, and TMDb hydration notes.
 
 When adding docs, prefer updating one of these files unless the topic has a

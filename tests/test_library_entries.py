@@ -102,7 +102,7 @@ def test_library_entry_rejects_unknown_watch_status_string() -> None:
 def test_library_entry_rejects_non_season_context_fields() -> None:
     payload = _snapshot_payload(parent_series_id=22, season_number=1)
 
-    with pytest.raises(ValueError, match="movie identity cannot define"):
+    with pytest.raises(ValueError, match="movie id cannot define"):
         validate_library_entry(payload)
 
 
@@ -114,17 +114,17 @@ def test_library_entry_rejects_season_without_full_context() -> None:
         parent_series_id=22,
     )
 
-    with pytest.raises(ValueError, match="Season identity requires"):
+    with pytest.raises(ValueError, match="Season id requires"):
         validate_library_entry(payload)
 
 
 def test_tmdb_summary_identity_rejects_non_season_context_fields() -> None:
-    with pytest.raises(ValueError, match="movie identity cannot define"):
+    with pytest.raises(ValueError, match="movie id cannot define"):
         TMDbSummaryIdentity(entry_type="movie", tmdb_id=55, parent_series_id=22, season_number=1)
 
 
 def test_tmdb_summary_identity_requires_full_season_context() -> None:
-    with pytest.raises(ValueError, match="Season identity requires"):
+    with pytest.raises(ValueError, match="Season id requires"):
         TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22)
 
 
@@ -255,12 +255,12 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
 
 
 def test_library_entry_metadata_rejects_incomplete_identity_fields() -> None:
-    with pytest.raises(ValueError, match="identity fields are incomplete"):
+    with pytest.raises(ValueError, match="id fields are incomplete"):
         LibraryEntryMetadata.model_validate({"tmdb_id": 55})
 
 
 def test_library_entry_metadata_rejects_non_season_context_fields() -> None:
-    with pytest.raises(ValueError, match="movie identity cannot define"):
+    with pytest.raises(ValueError, match="movie id cannot define"):
         LibraryEntryMetadata.model_validate(
             {
                 "entry_type": "movie",
@@ -272,7 +272,7 @@ def test_library_entry_metadata_rejects_non_season_context_fields() -> None:
 
 
 def test_library_entry_metadata_requires_full_season_context() -> None:
-    with pytest.raises(ValueError, match="Season identity requires"):
+    with pytest.raises(ValueError, match="Season id requires"):
         LibraryEntryMetadata.model_validate(
             {
                 "entry_type": "season",
@@ -364,7 +364,7 @@ def test_snapshot_library_entry_json_omits_missing_metadata() -> None:
 
     payload = entry.model_dump(mode="json")
 
-    assert payload["identity"] == "movie:55"
+    assert payload["id"] == "movie:55"
     assert "metadata" not in payload
 
 
@@ -395,7 +395,7 @@ def test_snapshot_with_metadata_rejects_mismatched_identity() -> None:
         }
     )
 
-    with pytest.raises(ValueError, match="metadata identity does not match entry"):
+    with pytest.raises(ValueError, match="metadata id does not match entry"):
         entry.with_metadata(metadata)
 
 

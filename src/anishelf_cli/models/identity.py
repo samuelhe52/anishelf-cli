@@ -52,7 +52,7 @@ class LibraryIdentity(AniShelfBaseModel):
             object.__setattr__(self, "raw", expected_raw)
             return self
         if self.raw != expected_raw:
-            raise ValueError("Library entry identity does not match decoded fields.")
+            raise ValueError("Library entry id does not match decoded fields.")
         return self
 
     @classmethod
@@ -75,7 +75,7 @@ class LibraryIdentity(AniShelfBaseModel):
             )
 
         raise LibraryIdentityError(
-            "Expected identity in one of these forms: movie:<tmdbID>, series:<tmdbID>, "
+            "Expected id in one of these forms: movie:<tmdbID>, series:<tmdbID>, "
             "season:<parentSeriesID>:<seasonNumber>:<tmdbID>."
         )
 
@@ -132,10 +132,10 @@ def _expected_identity(
 ) -> str:
     if entry_type == "season":
         if parent_series_id is None or season_number is None:
-            raise ValueError("Season identity requires parentSeriesID and seasonNumber.")
+            raise ValueError("Season id requires parentSeriesID and seasonNumber.")
         return f"season:{parent_series_id}:{season_number}:{tmdb_id}"
     if parent_series_id is not None or season_number is not None:
-        raise ValueError(f"{entry_type} identity cannot define parentSeriesID or seasonNumber.")
+        raise ValueError(f"{entry_type} id cannot define parentSeriesID or seasonNumber.")
     return f"{entry_type}:{tmdb_id}"
 
 

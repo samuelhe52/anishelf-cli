@@ -116,7 +116,7 @@ class LibraryEntryMetadata(AniShelfBaseModel):
         if all(field is None for field in identity_fields):
             return self
         if self.entry_type is None or self.tmdb_id is None:
-            raise ValueError("Library entry metadata identity fields are incomplete.")
+            raise ValueError("Library entry metadata id fields are incomplete.")
         try:
             library_identity_from_fields(
                 self.entry_type,
@@ -183,6 +183,15 @@ class _LibraryEntryBase(AniShelfBaseModel):
     parent_series_id: StrictInt | None = None
     season_number: StrictInt | None = None
     schema_version: StrictInt | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_public_id_key(cls, value: object) -> object:
+        if not isinstance(value, dict) or "identity" in value or "id" not in value:
+            return value
+        payload = dict(value)
+        payload["identity"] = payload.pop("id")
+        return payload
 
     @model_validator(mode="after")
     def _validate_identity_fields(self) -> Self:
@@ -259,7 +268,7 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
             self.season_number,
         )
         if metadata_identity != entry_identity:
-            raise ValueError("Library entry metadata identity does not match entry.")
+            raise ValueError("Library entry metadata id does not match entry.")
         return self
 
     def with_metadata(self, metadata: LibraryEntryMetadata | None) -> LibraryEntrySnapshot:
@@ -273,10 +282,16 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
         return self.with_metadata(None)
 
     @model_serializer(mode="wrap", when_used="json")
-    def _serialize_output(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+    def _serialize_output(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ) -> dict[str, object]:
         payload = cast(dict[str, object], handler(self))
         if self.metadata is None:
             payload.pop("metadata", None)
+        if not (isinstance(info.context, dict) and info.context.get("storage_payload")):
+            payload["id"] = payload.pop("identity")
         return payload
 
 
@@ -291,6 +306,17 @@ class LibraryEntryTombstone(_LibraryEntryBase):
 
     def without_metadata(self) -> LibraryEntryTombstone:
         return self
+
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize_output(
+        self,
+        handler: SerializerFunctionWrapHandler,
+        info: SerializationInfo,
+    ) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
+        if not (isinstance(info.context, dict) and info.context.get("storage_payload")):
+            payload["id"] = payload.pop("identity")
+        return payload
 
 
 LibraryEntry = Annotated[

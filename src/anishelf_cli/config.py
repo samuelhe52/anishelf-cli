@@ -23,7 +23,7 @@ KEYCHAIN_SERVICE_TMDB_API_KEY = "anishelf-cli.tmdb-api-key"
 USER_CONFIG_FILE = "config.toml"
 LIBRARY_DISPLAY_FIELDS = (
     "title",
-    "identity",
+    "id",
     "type",
     "status",
     "score",

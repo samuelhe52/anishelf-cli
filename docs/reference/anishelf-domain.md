@@ -12,16 +12,16 @@ Current reference constants:
 - Library entry record type: `LibraryEntry`
 - `LibrarySettings` records are not supported or planned for this CLI.
 
-Stable library identities are semantic record names:
+Stable library ids are semantic record names:
 
 - `movie:<tmdbID>`
 - `series:<tmdbID>`
 - `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`
 
-`LibraryEntry` live snapshots should decode identity, TMDb IDs, entry type,
+`LibraryEntry` live snapshots should decode the id, TMDb IDs, entry type,
 display state, saved date, watch status, dates, score, favorite, notes, custom
 poster path, episode progress, and update clocks. Tombstones should decode from
-valid identity fields plus `deletedAt`.
+valid id fields plus `deletedAt`.
 
 Unsupported future schema versions should fail explicitly instead of silently
 dropping fields or guessing.
@@ -54,7 +54,7 @@ include:
 - `library status`
 - `library clear-cache`
 - `library refresh-meta`
-- `library get <identity...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
+- `library get <id...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
 - `library list [--sync] [--metadata[=none|summary|details|full]]`
 - `library search --title` with optional `--sync` and `--metadata`
 - `library export` with optional `--sync` and `--metadata`
@@ -85,7 +85,7 @@ dev-only entry point is intentionally added.
 
 ## Batch And Output
 
-Commands that naturally accept one identity should usually accept many. Batch
+Commands that naturally accept one id should usually accept many. Batch
 input can grow from positional arguments first, then stdin/file/JSONL when a
 real workflow needs it.
 
@@ -105,7 +105,7 @@ separate top-level hydration pass. Bare `--metadata` should request the default
 summary level. Explicit `none` and `summary` are implemented; `details` and
 `full` are reserved and should fail clearly until detail metadata caching exists.
 Both `--metadata none` and `--metadata=none` should behave the same. If a
-positional identity or title is literally `none`, `summary`, `details`, or
+positional id or title is literally `none`, `summary`, `details`, or
 `full`, require `--` before that positional argument so it is not consumed as
 the metadata level. `none` means no TMDb request.
 

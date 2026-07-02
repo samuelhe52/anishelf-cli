@@ -241,7 +241,7 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
     assert result.stderr == ""
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["identity"] == "movie:55"
+    assert payload["items"][0]["id"] == "movie:55"
     assert payload["items"][0]["status"] == "found"
     entry = payload["items"][0]["entry"]
     assert entry["kind"] == "snapshot"
@@ -286,7 +286,7 @@ def test_library_get_accepts_command_level_json_after_subcommand(tmp_path, monke
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
 
 
 def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeypatch) -> None:
@@ -297,7 +297,7 @@ def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeyp
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
 
 
 def test_library_get_reads_existing_cache(tmp_path, monkeypatch) -> None:
@@ -308,7 +308,7 @@ def test_library_get_reads_existing_cache(tmp_path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
 
 
 def test_library_get_uses_existing_cache_without_cloudkit_requests(
@@ -332,7 +332,7 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
     assert requests == []
 
 
@@ -380,7 +380,7 @@ def test_library_get_sync_refreshes_cache_before_lookup(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["identity"] == "series:22"
+    assert payload["items"][0]["entry"]["id"] == "series:22"
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
 
 
@@ -406,7 +406,7 @@ def test_library_get_does_not_sync_from_config_by_default(
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["items"][0]["entry"]["identity"] == "movie:55"
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
     assert requests == []
 
 
@@ -463,7 +463,7 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     assert "Library entries\n" in result.stdout
     assert "Alien\n" in result.stdout
     assert "movie:55\n" in result.stdout
-    assert "  Identity  Status" not in result.stdout
+    assert "  ID  Status" not in result.stdout
     assert "  Watch status      watched\n" in result.stdout
     assert "  Score             4\n" in result.stdout
     assert "  Favorite          yes\n" in result.stdout
@@ -477,10 +477,10 @@ def test_library_get_human_output_accepts_live_envelope_model() -> None:
     raw_envelope = {
         "items": [
             {
-                "identity": "movie:55",
+                "id": "movie:55",
                 "status": "found",
                 "entry": {
-                    "identity": "movie:55",
+                    "id": "movie:55",
                     "kind": "snapshot",
                     "entry_type": "movie",
                     "tmdb_id": 55,
@@ -524,7 +524,7 @@ def test_library_get_human_output_accepts_live_envelope_model() -> None:
     assert "Library entries\n" in output
     assert "Alien\n" in output
     assert "  Status            found\n" in output
-    assert "  Identity          movie:55\n" in output
+    assert "  ID                movie:55\n" in output
     assert "decode-error" not in output
 
 
@@ -541,7 +541,7 @@ def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(
     assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
     assert payload["items"] == [
         {
-            "identity": "movie:404",
+            "id": "movie:404",
             "status": "error",
             "error": {"code": "not_found", "message": "Library entry not found."},
         }
@@ -566,9 +566,9 @@ def test_library_get_invalid_identity_is_item_error_without_network(monkeypatch)
     assert requests == []
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
-    assert payload["items"][0]["identity"] == "book:1"
+    assert payload["items"][0]["id"] == "book:1"
     assert payload["items"][0]["status"] == "error"
-    assert payload["items"][0]["error"]["code"] == "invalid_identity"
+    assert payload["items"][0]["error"]["code"] == "invalid_id"
 
 
 def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch) -> None:
@@ -589,7 +589,7 @@ def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch)
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 3, "found": 1, "errors": 2}
-    assert [item["identity"] for item in payload["items"]] == [
+    assert [item["id"] for item in payload["items"]] == [
         "bad",
         "series:22",
         "season:22:3:33",
@@ -787,7 +787,7 @@ def test_library_get_tombstone_identity_is_treated_as_not_found(
     assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
     assert payload["items"] == [
         {
-            "identity": "season:22:3:33",
+            "id": "season:22:3:33",
             "status": "error",
             "error": {"code": "not_found", "message": "Library entry not found."},
         }

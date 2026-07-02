@@ -30,7 +30,7 @@ def library_get_envelope(
             parsed = parse_library_identity(raw_identity)
         except LibraryIdentityError as exc:
             items.append(
-                _error_item(raw_identity, "invalid_identity", str(exc)),
+                _error_item(raw_identity, "invalid_id", str(exc)),
             )
         else:
             parsed_identities[raw_identity] = parsed
@@ -78,7 +78,7 @@ def library_get_cache_envelope(
         try:
             parse_library_identity(raw_identity)
         except LibraryIdentityError as exc:
-            items.append(_error_item(raw_identity, "invalid_identity", str(exc)))
+            items.append(_error_item(raw_identity, "invalid_id", str(exc)))
             continue
 
         entry = cached_entries.get(raw_identity)

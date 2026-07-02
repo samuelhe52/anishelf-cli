@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Annotated, Literal, cast
 
 from pydantic import Field, SerializerFunctionWrapHandler, model_serializer
+from pydantic.functional_validators import model_validator
 
 from anishelf_cli.models import CallbackStrategy
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -20,11 +21,41 @@ class LibraryGetItemFound(AniShelfBaseModel):
     status: Literal["found"] = "found"
     entry: LibraryEntryModel
 
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_public_id_key(cls, value: object) -> object:
+        if not isinstance(value, dict) or "identity" in value or "id" not in value:
+            return value
+        payload = dict(value)
+        payload["identity"] = payload.pop("id")
+        return payload
+
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
+        payload["id"] = payload.pop("identity")
+        return payload
+
 
 class LibraryGetItemErrorResult(AniShelfBaseModel):
     identity: str
     status: Literal["error"] = "error"
     error: LibraryGetItemError
+
+    @model_validator(mode="before")
+    @classmethod
+    def _accept_public_id_key(cls, value: object) -> object:
+        if not isinstance(value, dict) or "identity" in value or "id" not in value:
+            return value
+        payload = dict(value)
+        payload["identity"] = payload.pop("id")
+        return payload
+
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
+        payload["id"] = payload.pop("identity")
+        return payload
 
 
 LibraryGetItem = Annotated[

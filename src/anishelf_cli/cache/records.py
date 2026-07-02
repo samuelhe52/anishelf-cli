@@ -189,6 +189,7 @@ def entry_row_params(
         mode="json",
         by_alias=False,
         exclude_none=False,
+        context={"storage_payload": True},
         round_trip=True,
     )
     row = {column: model_payload.get(column) for column in ENTRY_MODEL_COLUMNS}

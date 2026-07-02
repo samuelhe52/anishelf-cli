@@ -242,9 +242,9 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 0, "errors": 1}
-    assert payload["items"][0]["identity"] == "none"
+    assert payload["items"][0]["id"] == "none"
     assert payload["items"][0]["status"] == "error"
-    assert payload["items"][0]["error"]["code"] == "invalid_identity"
+    assert payload["items"][0]["error"]["code"] == "invalid_id"
 
 
 @pytest.mark.parametrize(
@@ -515,7 +515,7 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
             "--metadata",
             "none",
             "--fields",
-            "title,identity,saved",
+            "title,id,saved",
         ],
     )
 
@@ -524,12 +524,12 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
     assert payload["status"] == "stored"
     assert payload["defaults"]["library"] == {
         "metadata": "none",
-        "display_fields": ["title", "identity", "saved"],
+        "display_fields": ["title", "id", "saved"],
     }
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (
-        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "identity", "saved"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id", "saved"]\n'
     )
 
 
@@ -537,7 +537,7 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "identity"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id"]\n'
     )
 
     result = runner.invoke(

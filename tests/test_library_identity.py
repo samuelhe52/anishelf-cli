@@ -37,11 +37,11 @@ def test_parse_library_identity_returns_model_identity() -> None:
 def test_library_identity_from_fields_rejects_non_season_context() -> None:
     with pytest.raises(
         LibraryIdentityError,
-        match=r"movie identity cannot define parentSeriesID or seasonNumber\.",
+        match=r"movie id cannot define parentSeriesID or seasonNumber\.",
     ):
         library_identity_from_fields("movie", 55, parent_series_id=22, season_number=1)
 
 
 def test_parse_library_identity_rejects_invalid_shape() -> None:
-    with pytest.raises(LibraryIdentityError, match="Expected identity in one of these forms"):
+    with pytest.raises(LibraryIdentityError, match="Expected id in one of these forms"):
         parse_library_identity("movie")

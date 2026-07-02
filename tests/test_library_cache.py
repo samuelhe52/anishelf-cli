@@ -1276,7 +1276,7 @@ def test_library_export_excludes_tombstones_from_public_output(
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["mode"] == "cached"
     assert payload["summary"]["entries"] == 1
-    assert [entry["identity"] for entry in payload["entries"]] == ["movie:55"]
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
 
 
 def test_library_list_reads_existing_cache_without_cloudkit_update(
@@ -1300,7 +1300,7 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["mode"] == "cached"
-    assert [entry["identity"] for entry in payload["entries"]] == ["movie:55"]
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
     assert requests == []
 
 
@@ -1350,7 +1350,7 @@ def test_library_list_sync_refreshes_cache_before_reading(
     assert payload["summary"]["cache"]["mode"] == "updated"
     assert payload["summary"]["cache"]["records"] == 1
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
-    assert {entry["identity"] for entry in payload["entries"]} == {"movie:55", "series:22"}
+    assert {entry["id"] for entry in payload["entries"]} == {"movie:55", "series:22"}
 
 
 def test_library_export_reads_existing_cache_without_cloudkit_update(
@@ -1374,7 +1374,7 @@ def test_library_export_reads_existing_cache_without_cloudkit_update(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["mode"] == "cached"
-    assert [entry["identity"] for entry in payload["entries"]] == ["movie:55"]
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
     assert requests == []
 
 
@@ -1460,7 +1460,7 @@ def test_library_list_title_sort_uses_cached_metadata_when_output_metadata_is_di
         "attached": False,
         "source": None,
     }
-    assert [entry["identity"] for entry in payload["entries"]] == ["movie:66", "movie:55"]
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:66", "movie:55"]
     assert all("metadata" not in entry for entry in payload["entries"])
 
 
@@ -1536,7 +1536,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     assert payload["filters"]["watch_status"] == "watching"
     assert payload["filters"]["hidden"] is True
     assert payload["filters"]["sort"] == "title"
-    assert [entry["identity"] for entry in payload["entries"]] == ["movie:66"]
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:66"]
 
 
 def test_library_list_uses_configured_display_fields_for_human_output(
@@ -1556,7 +1556,7 @@ def test_library_list_uses_configured_display_fields_for_human_output(
     assert result.exit_code == 0, result.output
     assert "Title" in result.stdout
     assert "Saved" in result.stdout
-    assert "Identity" not in result.stdout
+    assert "ID" not in result.stdout
     assert "Status" not in result.stdout
 
 
@@ -1572,10 +1572,10 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "list", "--fields", "identity,status"])
+    result = runner.invoke(app, ["library", "list", "--fields", "id,status"])
 
     assert result.exit_code == 0, result.output
-    assert "Identity" in result.stdout
+    assert "ID" in result.stdout
     assert "Status" in result.stdout
     assert "Saved" not in result.stdout
 
@@ -1704,7 +1704,7 @@ def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["query"] == {"title": "Alien"}
-    assert [entry["identity"] for entry in payload["entries"]] == [
+    assert [entry["id"] for entry in payload["entries"]] == [
         "movie:55",
         "series:22",
         "season:22:1:33",
@@ -1778,7 +1778,7 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        '[library]\ndisplay_fields = ["identity", "status"]\n'
+        '[library]\ndisplay_fields = ["id", "status"]\n'
     )
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
@@ -1786,7 +1786,7 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     result = runner.invoke(app, ["library", "search", "--title", "Alien"])
 
     assert result.exit_code == 0, result.output
-    assert "Identity" in result.stdout
+    assert "ID" in result.stdout
     assert "Status" in result.stdout
     assert "Title" not in result.stdout
 

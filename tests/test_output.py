@@ -16,20 +16,20 @@ def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
             HumanSection(
                 "Entry",
                 (
-                    ("Identity", "movie:550"),
+                    ("ID", "movie:550"),
                     ("Favorite", True),
                 ),
             ),
             HumanTable(
                 "Library",
                 (
-                    HumanTableColumn("identity", "Identity"),
+                    HumanTableColumn("id", "ID"),
                     HumanTableColumn("type", "Type"),
                     HumanTableColumn("score", "Score", align="right"),
                 ),
                 (
-                    {"identity": "movie:550", "type": "movie", "score": 9},
-                    {"identity": "series:1399", "type": "series", "score": None},
+                    {"id": "movie:550", "type": "movie", "score": 9},
+                    {"id": "series:1399", "type": "series", "score": None},
                 ),
             ),
         ]
@@ -37,11 +37,11 @@ def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
 
     assert capsys.readouterr().out == (
         "Entry\n"
-        "  Identity  movie:550\n"
+        "  ID        movie:550\n"
         "  Favorite  yes\n"
         "\n"
         "Library\n"
-        "  Identity     Type      Score\n"
+        "  ID           Type      Score\n"
         "  movie:550    movie         9\n"
         "  series:1399  series  not set\n"
     )
@@ -52,7 +52,7 @@ def test_emit_human_blocks_formats_empty_table(capsys) -> None:
         [
             HumanTable(
                 "Library",
-                (HumanTableColumn("identity", "Identity"),),
+                (HumanTableColumn("id", "ID"),),
                 (),
                 empty_message="No library entries.",
             )

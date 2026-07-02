@@ -79,10 +79,10 @@ def _make_http_client() -> httpx.Client:
     return httpx.Client(timeout=30.0)
 
 
-@library_app.command("get", help="Read AniShelf library entries by semantic identity.")
+@library_app.command("get", help="Read AniShelf library entries by AniShelf id.")
 def library_get(
     ctx: typer.Context,
-    identities: Annotated[list[str], typer.Argument(help="AniShelf identities.")],
+    identities: Annotated[list[str], typer.Argument(help="AniShelf ids.")],
     metadata: MetadataOption = None,
     sync: Annotated[
         bool | None,
