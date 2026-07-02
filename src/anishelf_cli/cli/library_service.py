@@ -208,7 +208,11 @@ def refresh_metadata_targets(
         progress_callback=progress_callback,
     )
     if result.requested == 1 and result.errors:
-        emit_error("TMDb summary metadata request failed.")
+        emit_error(
+            result.error_messages[0]
+            if result.error_messages
+            else "TMDb summary metadata request failed."
+        )
     return result
 
 

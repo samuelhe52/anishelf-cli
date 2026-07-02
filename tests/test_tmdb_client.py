@@ -6,6 +6,7 @@ import pytest
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
 from anishelf_cli.models.transport.tmdb import (
     TMDbMovieSummaryResponse,
+    TMDbSearchResponse,
     TMDbSeasonSummaryResponse,
     TMDbSeriesSummaryResponse,
 )
@@ -56,6 +57,30 @@ def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> No
     assert series.seasons == ({"id": 33, "season_number": 1},)
 
     assert season.episodes == ({"id": 1, "episode_number": 1},)
+
+
+def test_tmdb_transport_ignores_additive_tmdb_fields() -> None:
+    search = TMDbSearchResponse.model_validate(
+        {
+            "results": [
+                {
+                    "id": 55,
+                    "title": "Alien",
+                    "softcore": False,
+                }
+            ]
+        }
+    )
+    movie = TMDbMovieSummaryResponse.model_validate(
+        {
+            "id": 55,
+            "title": "Alien",
+            "softcore": False,
+        }
+    )
+
+    assert search.results[0].id == 55
+    assert movie.id == 55
 
 
 def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
@@ -301,3 +326,17 @@ def test_tmdb_client_fails_whole_search_when_one_all_type_endpoint_fails() -> No
         tmdb.search_titles(TMDbTitleSearchQuery(title="Alien", entry_type="all"))
 
     assert [request.url.path for request in requests] == ["/3/search/movie", "/3/search/tv"]
+
+
+def test_tmdb_client_preserves_validation_error_details_for_search_responses() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"results": [{"id": "bad"}]})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", client=client)
+
+    with pytest.raises(
+        TMDbRequestError,
+        match=r"TMDb response had an unexpected shape: results\.0\.id:",
+    ):
+        tmdb.search_titles(TMDbTitleSearchQuery(title="Alien"))

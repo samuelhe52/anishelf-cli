@@ -14,6 +14,7 @@ from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
 from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
+from anishelf_cli.tmdb.client import TMDbRequestError
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 from tests.support import (
     MemorySecretStore,
@@ -451,6 +452,41 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
         list(store.get_entry_models_by_identity(["series:22"]).values())
     )[0]
     assert other_entry.metadata is None
+
+
+def test_library_get_live_meta_surfaces_specific_tmdb_errors(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+    )
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            raise TMDbRequestError(
+                "TMDb response had an unexpected shape: results.0.softcore: "
+                "Extra inputs are not permitted"
+            )
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(app, ["--json", "library", "get", "movie:55", "--live-meta"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["items"][0]["entry"]["id"] == "movie:55"
+    assert "TMDb response had an unexpected shape: results.0.softcore" in result.stderr
 
 
 def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monkeypatch) -> None:

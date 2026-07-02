@@ -34,6 +34,15 @@ class TMDbRequestError(RuntimeError):
     pass
 
 
+def _validation_error_summary(exc: ValidationError) -> str:
+    first_error = exc.errors(include_url=False)[0]
+    location = ".".join(str(part) for part in first_error.get("loc", ()))
+    message = str(first_error.get("msg", "validation failed"))
+    if location:
+        return f"{location}: {message}"
+    return message
+
+
 @dataclass(slots=True)
 class TMDbClient:
     api_key: str
@@ -53,6 +62,8 @@ class TMDbClient:
         try:
             movie_response = self._movie_search_response(query)
             series_response = self._series_search_response(query)
+        except TMDbRequestError:
+            raise
         except Exception as exc:
             if query.mode == "search":
                 raise TMDbRequestError("TMDb title search failed.") from exc
@@ -109,7 +120,9 @@ class TMDbClient:
         try:
             return model_type.model_validate(payload)
         except ValidationError as exc:
-            raise TMDbRequestError("TMDb response had an unexpected shape.") from exc
+            raise TMDbRequestError(
+                f"TMDb response had an unexpected shape: {_validation_error_summary(exc)}"
+            ) from exc
 
     def _get_with_retries(self, path: str, params: dict[str, str]) -> httpx.Response:
         attempts = max(1, self.max_attempts)

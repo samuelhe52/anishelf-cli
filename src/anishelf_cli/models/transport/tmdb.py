@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import Field, StrictFloat, StrictInt, StrictStr, field_validator
+from pydantic import ConfigDict, Field, StrictFloat, StrictInt, StrictStr, field_validator
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -15,12 +15,21 @@ from anishelf_cli.models.domain import (
 TMDB_SUMMARY_SOURCE_VERSION = "tmdb.http.summary.v2"
 
 
-class TMDbGenrePayload(AniShelfBaseModel):
+class TMDbTransportModel(AniShelfBaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="ignore",
+        populate_by_name=False,
+        str_strip_whitespace=False,
+    )
+
+
+class TMDbGenrePayload(TMDbTransportModel):
     id: StrictInt | None = None
     name: StrictStr | None = None
 
 
-class TMDbSearchItem(AniShelfBaseModel):
+class TMDbSearchItem(TMDbTransportModel):
     id: StrictInt | None = None
     title: StrictStr | None = None
     name: StrictStr | None = None
@@ -48,7 +57,7 @@ class TMDbSearchItem(AniShelfBaseModel):
         return value
 
 
-class TMDbSearchResponse(AniShelfBaseModel):
+class TMDbSearchResponse(TMDbTransportModel):
     results: tuple[TMDbSearchItem, ...] = ()
     page: StrictInt | None = None
     total_pages: StrictInt | None = None
@@ -62,7 +71,7 @@ class TMDbSearchResponse(AniShelfBaseModel):
         return value
 
 
-class _TMDbSummaryBase(AniShelfBaseModel):
+class _TMDbSummaryBase(TMDbTransportModel):
     id: StrictInt | None = None
     name: StrictStr | None = None
     title: StrictStr | None = None

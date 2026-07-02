@@ -94,6 +94,7 @@ class MetadataHydrationResult(AniShelfBaseModel):
     requested: int
     hydrated: int
     errors: int
+    error_messages: tuple[str, ...] = Field(default_factory=tuple, exclude=True, repr=False)
 
 
 def _refresh_result_with_hydration(
@@ -303,7 +304,7 @@ def hydrate_metadata_targets(
             )
         )
 
-    summaries, errors = fetch_metadata_summaries(
+    summaries, error_messages = fetch_metadata_summaries(
         tmdb_client,
         targets_to_hydrate,
         max_workers=max_workers,
@@ -313,7 +314,8 @@ def hydrate_metadata_targets(
     return MetadataHydrationResult(
         requested=len(targets_to_hydrate),
         hydrated=len(summaries),
-        errors=errors,
+        errors=len(error_messages),
+        error_messages=tuple(error_messages),
     )
 
 
@@ -323,22 +325,26 @@ def fetch_metadata_summaries(
     *,
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
     progress_callback: Callable[[int, int, int], None] | None = None,
-) -> tuple[list[LibraryEntryMetadata], int]:
+) -> tuple[list[LibraryEntryMetadata], list[str]]:
     if not targets:
-        return [], 0
+        return [], []
 
     worker_count = max(1, min(max_workers, len(targets)))
     summaries: list[LibraryEntryMetadata] = []
-    errors = 0
+    error_messages: list[str] = []
 
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
         futures = [pool.submit(tmdb_client.fetch_summary, target) for target in targets]
         for future in as_completed(futures):
             try:
                 summaries.append(future.result())
-            except TMDbRequestError:
-                errors += 1
+            except TMDbRequestError as exc:
+                error_messages.append(str(exc))
             if progress_callback is not None:
-                progress_callback(len(summaries) + errors, errors, len(targets))
+                progress_callback(
+                    len(summaries) + len(error_messages),
+                    len(error_messages),
+                    len(targets),
+                )
 
-    return summaries, errors
+    return summaries, error_messages
