@@ -1508,7 +1508,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
             66,
             date_saved="2026-05-02T00:00:00Z",
             watch_status="watching",
-            on_display=False,
+            on_display=True,
         ),
     )
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
@@ -1523,7 +1523,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
             "list",
             "--watch-status",
             "watching",
-            "--hidden",
+            "--show-hidden",
             "--sort",
             "title",
             "--limit",
@@ -1534,9 +1534,52 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["filters"]["watch_status"] == "watching"
-    assert payload["filters"]["hidden"] is True
+    assert payload["filters"]["show_hidden"] is True
     assert payload["filters"]["sort"] == "title"
     assert [entry["id"] for entry in payload["entries"]] == ["movie:66"]
+
+
+def test_library_list_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, on_display=False),
+        _live_record("series:22", "series", 22, on_display=True),
+    )
+
+    default_result = runner.invoke(app, ["--json", "lib", "list"])
+    show_hidden_result = runner.invoke(app, ["--json", "lib", "list", "--show-hidden"])
+
+    assert default_result.exit_code == 0, default_result.output
+    default_payload = json.loads(default_result.stdout)
+    assert default_payload["filters"]["show_hidden"] is False
+    assert [entry["id"] for entry in default_payload["entries"]] == ["series:22"]
+    assert show_hidden_result.exit_code == 0, show_hidden_result.output
+    show_hidden_payload = json.loads(show_hidden_result.stdout)
+    assert show_hidden_payload["filters"]["show_hidden"] is True
+    assert [entry["id"] for entry in show_hidden_payload["entries"]] == [
+        "movie:55",
+        "series:22",
+    ]
+
+
+def test_library_list_uses_configured_show_hidden_default(tmp_path, monkeypatch) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text("[library]\nshow_hidden = true\n")
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, on_display=False),
+        _live_record("series:22", "series", 22, on_display=True),
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["filters"]["show_hidden"] is True
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55", "series:22"]
 
 
 def test_library_list_uses_configured_display_fields_for_human_output(
@@ -1670,6 +1713,31 @@ def test_library_export_attaches_cached_metadata_by_default(
     assert payload["entries"][0]["metadata"]["name"] == "Cowboy Bebop"
 
 
+def test_library_export_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, on_display=False),
+        _live_record("series:22", "series", 22, on_display=True),
+    )
+
+    default_result = runner.invoke(app, ["--json", "lib", "export", "--metadata", "none"])
+    show_hidden_result = runner.invoke(
+        app,
+        ["--json", "lib", "export", "--metadata", "none", "--show-hidden"],
+    )
+
+    assert default_result.exit_code == 0, default_result.output
+    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == [
+        "series:22"
+    ]
+    assert show_hidden_result.exit_code == 0, show_hidden_result.output
+    assert [entry["id"] for entry in json.loads(show_hidden_result.stdout)["entries"]] == [
+        "movie:55",
+        "series:22",
+    ]
+
+
 def test_library_export_does_not_sync_from_config_by_default(
     tmp_path,
     monkeypatch,
@@ -1753,6 +1821,45 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
     assert without_metadata.exit_code == 0, without_metadata.output
     assert "metadata" not in json.loads(without_metadata.stdout)["entries"][0]
     assert fake_store.attach_calls == 1
+
+
+def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, on_display=False),
+        _live_record("movie:66", "movie", 66, on_display=True),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+    store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
+
+    default_result = runner.invoke(
+        app,
+        ["--json", "lib", "search", "--title", "Alien", "--metadata", "none"],
+    )
+    show_hidden_result = runner.invoke(
+        app,
+        [
+            "--json",
+            "lib",
+            "search",
+            "--title",
+            "Alien",
+            "--metadata",
+            "none",
+            "--show-hidden",
+        ],
+    )
+
+    assert default_result.exit_code == 0, default_result.output
+    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == [
+        "movie:66"
+    ]
+    assert show_hidden_result.exit_code == 0, show_hidden_result.output
+    assert [entry["id"] for entry in json.loads(show_hidden_result.stdout)["entries"]] == [
+        "movie:55",
+        "movie:66",
+    ]
 
 
 def test_library_search_human_uses_cached_titles_when_configured_metadata_default_is_none(

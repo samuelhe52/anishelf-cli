@@ -313,6 +313,7 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert payload["library"]["defaults"] == {
         "metadata": "summary",
         "display_fields": None,
+        "show_hidden": False,
     }
     assert "config_dir" in payload["paths"]
     assert "config_file" in payload["paths"]
@@ -427,6 +428,8 @@ def test_config_show_human_output_uses_readable_sections() -> None:
     assert "  Metadata" in result.stdout
     assert "  Display fields" in result.stdout
     assert "built-in" in result.stdout
+    assert "  Show hidden" in result.stdout
+    assert "no" in result.stdout
     assert "\nPaths\n" in result.stdout
     assert "  Config" in result.stdout
     assert "  Config file" in result.stdout
@@ -473,6 +476,9 @@ def test_path_overrides_are_preserved(monkeypatch, tmp_path) -> None:
         (["--profile", "prod", "config", "show"], "No such option"),
         (["config", "set-tmdb-token", "--help"], "No such command"),
         (["config", "set-cloudkit-token", "--help"], "No such command"),
+        (["lib", "list", "--hidden"], "No such option"),
+        (["lib", "list", "--on-display"], "No such option"),
+        (["lib", "list", "--not-on-display"], "No such option"),
     ],
 )
 def test_removed_commands_and_options(args: list[str], message: str) -> None:
@@ -516,6 +522,7 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
             "none",
             "--fields",
             "title,id,saved",
+            "--show-hidden",
         ],
     )
 
@@ -525,11 +532,13 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": ["title", "id", "saved"],
+        "show_hidden": True,
     }
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id", "saved"]\n'
+        "show_hidden = true\n"
     )
 
 
@@ -550,6 +559,7 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": None,
+        "show_hidden": False,
     }
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
@@ -558,7 +568,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\nshow_hidden = true\n'
     )
 
     result = runner.invoke(
@@ -572,6 +582,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     assert payload["library"]["defaults"] == {
         "metadata": "none",
         "display_fields": ["title", "saved"],
+        "show_hidden": True,
     }
 
 
@@ -601,6 +612,12 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
             '[library]\nmetadata = "none"\nauto_sync = true\n',
             "Unsupported library defaults key(s)",
             "'auto_sync'",
+        ),
+        (
+            ["config", "show"],
+            '[library]\nshow_hidden = "true"\n',
+            "library.show_hidden",
+            "boolean.",
         ),
         (
             ["config", "show"],
@@ -651,6 +668,7 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": None,
+        "show_hidden": False,
     }
     assert config_file.read_text() == ('[library]\nmetadata = "none"\n')
 

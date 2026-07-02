@@ -36,9 +36,8 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
         metadata_depth=MetadataDepth.NONE,
         cache=cache_summary_payload(store, None),
         watch_status=None,
-        hidden=False,
+        show_hidden=False,
         favorite=False,
-        on_display=None,
         sort=LibraryListSort.TITLE,
         limit=None,
     )
@@ -46,11 +45,37 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
     assert [entry.identity for entry in result.entries] == ["movie:66", "movie:55"]
     assert all(entry.metadata is None for entry in result.entries)
     assert store.list_filter_kwargs["limit"] is None
+    assert store.list_filter_kwargs["on_display"] is True
     assert result.model_dump(mode="json")["metadata"] == {
         "requested": "none",
         "attached": False,
         "source": None,
     }
+
+
+def test_list_show_hidden_controls_default_display_filter() -> None:
+    store = FakeQueryStore(
+        [
+            _entry("movie:55", "movie", 55, on_display=False),
+            _entry("movie:66", "movie", 66, on_display=True),
+        ],
+        metadata={},
+    )
+
+    result = build_library_list_result(
+        store,
+        metadata_depth=MetadataDepth.NONE,
+        cache=cache_summary_payload(store, None),
+        watch_status=None,
+        show_hidden=True,
+        favorite=False,
+        sort=LibraryListSort.SAVED,
+        limit=None,
+    )
+
+    assert [entry.identity for entry in result.entries] == ["movie:55", "movie:66"]
+    assert store.list_filter_kwargs["on_display"] is None
+    assert result.model_dump(mode="json")["filters"]["show_hidden"] is True
 
 
 def test_cache_summary_payload_uses_structured_refresh_result() -> None:
@@ -114,7 +139,10 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
 
 def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
     store = FakeQueryStore(
-        [_entry("movie:55", "movie", 55)],
+        [
+            _entry("movie:55", "movie", 55, on_display=False),
+            _entry("movie:66", "movie", 66, on_display=True),
+        ],
         metadata={"movie:55": {"name": "Alien"}},
     )
 
@@ -123,6 +151,7 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
         title="Alien",
         metadata_depth=MetadataDepth.SUMMARY,
         cache=cache_summary_payload(store, None),
+        show_hidden=False,
     )
 
     assert store.search_title == "Alien"
@@ -137,7 +166,24 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
     assert isinstance(entries, list)
     first_entry = entries[0]
     assert isinstance(first_entry, dict)
-    assert first_entry["metadata"] == {"name": "Alien"}
+    assert first_entry["id"] == "movie:66"
+
+
+def test_search_show_hidden_includes_hidden_matches() -> None:
+    store = FakeQueryStore(
+        [_entry("movie:55", "movie", 55, on_display=False)],
+        metadata={"movie:55": {"name": "Alien"}},
+    )
+
+    result = build_library_search_result(
+        store,
+        title="Alien",
+        metadata_depth=MetadataDepth.SUMMARY,
+        cache=cache_summary_payload(store, None),
+        show_hidden=True,
+    )
+
+    assert [entry.identity for entry in result.entries] == ["movie:55"]
 
 
 class FakeQueryStore:
@@ -218,14 +264,20 @@ class FakeQueryStore:
         return attached
 
 
-def _entry(identity: str, entry_type: str, tmdb_id: int) -> dict[str, object]:
+def _entry(
+    identity: str,
+    entry_type: str,
+    tmdb_id: int,
+    *,
+    on_display: bool = True,
+) -> dict[str, object]:
     payload: dict[str, object] = {
         "identity": identity,
         "kind": "snapshot",
         "entry_type": entry_type,
         "tmdb_id": tmdb_id,
         "schema_version": 2,
-        "on_display": True,
+        "on_display": on_display,
         "date_saved": "2026-05-01T00:00:00Z",
         "watch_status": "watched",
         "is_date_tracking_enabled": False,

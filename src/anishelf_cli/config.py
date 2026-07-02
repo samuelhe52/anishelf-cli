@@ -41,6 +41,7 @@ class UserConfigError(ValueError):
 class LibraryReadDefaults:
     metadata: MetadataDepth = MetadataDepth.SUMMARY
     display_fields: tuple[str, ...] | None = None
+    show_hidden: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,7 +174,7 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
         raise UserConfigError(f"Library defaults in {path} must be a TOML table.")
     _reject_unknown_keys(
         value,
-        allowed_keys={"metadata", "display_fields"},
+        allowed_keys={"metadata", "display_fields", "show_hidden"},
         path=path,
         scope="library defaults",
     )
@@ -190,9 +191,14 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
     else:
         raise UserConfigError(f"library.display_fields in {path} must be a TOML array.")
 
+    show_hidden_value = value.get("show_hidden", False)
+    if not isinstance(show_hidden_value, bool):
+        raise UserConfigError(f"library.show_hidden in {path} must be a TOML boolean.")
+
     return LibraryReadDefaults(
         metadata=metadata,
         display_fields=display_fields,
+        show_hidden=show_hidden_value,
     )
 
 
@@ -204,6 +210,8 @@ def _serialize_user_defaults(defaults: UserDefaults) -> str:
     if defaults.library_read.display_fields is not None:
         fields = ", ".join(f'"{field}"' for field in defaults.library_read.display_fields)
         library_lines.append(f"display_fields = [{fields}]")
+    if defaults.library_read.show_hidden:
+        library_lines.append("show_hidden = true")
 
     if library_lines:
         lines.append("[library]")

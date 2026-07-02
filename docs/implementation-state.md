@@ -29,8 +29,8 @@ spec.
   records from CloudKit, and `lib sync` refreshes that initialized cache.
 - `lib init` now keeps JSON stdout clean while still emitting cache and
   TMDb hydration progress to stderr.
-- `lib status` reports local cache initialization state, and
-  TMDb summary metadata readiness, and
+- `lib status` reports local cache initialization state, visible/hidden entry
+  counts, TMDb summary metadata readiness, and
   `lib clear-cache` removes all local library cache files after explicit
   confirmation.
 - `lib get`, `lib list`, `lib export`, and `lib search --title`
@@ -49,8 +49,9 @@ spec.
   refreshes cached TMDb summaries for the full local library, and `lib get`
   supports `--live-meta` for targeted per-entry refresh.
 - `lib list` has first-pass ergonomic filters and ordering for common
-  questions: watch status, hidden/display state, favorites, saved/updated/title
-  sort, and result limits.
+  questions: watch status, favorites, saved/updated/title sort, and result
+  limits. Hidden entries are excluded from collection reads by default and can
+  be included with `--show-hidden` or a library config default.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
 - `tmdb search` performs global TMDb title search, and discover-style popular

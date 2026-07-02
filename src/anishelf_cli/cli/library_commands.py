@@ -232,6 +232,8 @@ def library_status(
                 (
                     ("Initialized", "yes" if status.initialized else "no"),
                     ("Entries", status.active.entries),
+                    ("Visible entries", status.active.visible_entries),
+                    ("Hidden entries", status.active.hidden_entries),
                     ("Sync token", "present" if status.active.has_sync_token else "missing"),
                     ("Metadata", metadata_state),
                     ("Metadata hydrated", metadata_hydrated),
@@ -314,21 +316,14 @@ def library_list(
         str | None,
         typer.Option("--watch-status", help="Filter by watch status."),
     ] = None,
-    hidden: Annotated[
+    show_hidden: Annotated[
         bool,
-        typer.Option("--hidden", help="Show only entries hidden from display."),
+        typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
     favorite: Annotated[
         bool,
         typer.Option("--favorite", help="Show only favorite entries."),
     ] = False,
-    on_display: Annotated[
-        bool | None,
-        typer.Option(
-            "--on-display/--not-on-display",
-            help="Filter by display visibility.",
-        ),
-    ] = None,
     sort: Annotated[
         LibraryListSort,
         typer.Option("--sort", help="Sort by saved, updated, or title."),
@@ -354,9 +349,8 @@ def library_list(
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
             watch_status=watch_status,
-            hidden=hidden,
+            show_hidden=_show_hidden_requested(show_hidden),
             favorite=favorite,
-            on_display=on_display,
             sort=sort,
             limit=limit,
         )
@@ -385,6 +379,10 @@ def library_search(
         ),
     ] = None,
     fields: FieldListOption = None,
+    show_hidden: Annotated[
+        bool,
+        typer.Option("--show-hidden", help="Include entries hidden from display."),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -401,6 +399,7 @@ def library_search(
             title=title,
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
+            show_hidden=_show_hidden_requested(show_hidden),
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
@@ -426,6 +425,10 @@ def library_export(
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
     ] = None,
+    show_hidden: Annotated[
+        bool,
+        typer.Option("--show-hidden", help="Include entries hidden from display."),
+    ] = False,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -438,6 +441,7 @@ def library_export(
         store,
         metadata_depth=metadata_depth,
         cache=cache_summary_payload(store, refresh_result),
+        show_hidden=_show_hidden_requested(show_hidden),
     )
     payload = result.model_dump(mode="json")
     if json_output_requested(ctx, json_output):
@@ -582,6 +586,12 @@ def _sync_requested(value: bool | None) -> bool:
     if value is not None:
         return value
     return False
+
+
+def _show_hidden_requested(value: bool) -> bool:
+    if value:
+        return True
+    return _user_defaults_or_exit().library_read.show_hidden
 
 
 def _reject_reserved_metadata_depth(metadata_depth: MetadataDepth) -> None:

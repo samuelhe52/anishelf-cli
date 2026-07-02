@@ -27,7 +27,11 @@ from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.queries import cache_summary_payload
-from anishelf_cli.models.domain import LibraryEntryModel, TMDbSummaryIdentity
+from anishelf_cli.models.domain import (
+    LibraryEntryModel,
+    LibraryEntrySnapshot,
+    TMDbSummaryIdentity,
+)
 from anishelf_cli.models.output import (
     CacheActiveResult,
     CacheMetadataStatusResult,
@@ -103,6 +107,8 @@ def library_status() -> CacheStatusResult:
     active = CacheActiveResult(
         initialized=False,
         entries=0,
+        visible_entries=0,
+        hidden_entries=0,
         has_sync_token=False,
         scope=None,
         metadata=CacheMetadataStatusResult(
@@ -119,9 +125,13 @@ def library_status() -> CacheStatusResult:
     if store is not None:
         with store.locked():
             store.initialize()
+            entries = store.list_entry_models(include_tombstones=False)
+            visible_entries, hidden_entries = _entry_visibility_counts(entries)
             active = CacheActiveResult(
                 initialized=store.has_entries(),
-                entries=len(store.list_entry_models(include_tombstones=False)),
+                entries=len(entries),
+                visible_entries=visible_entries,
+                hidden_entries=hidden_entries,
                 has_sync_token=store.read_sync_token() is not None,
                 scope=CacheScopeResult.model_validate(store.scope.key_payload()),
                 metadata=store.metadata_summary_status(),
@@ -136,6 +146,17 @@ def library_status() -> CacheStatusResult:
         cache_files=len(cache_files),
         lock_files=len(lock_files),
     )
+
+
+def _entry_visibility_counts(entries: list[LibraryEntryModel]) -> tuple[int, int]:
+    visible_entries = 0
+    hidden_entries = 0
+    for entry in entries:
+        if isinstance(entry, LibraryEntrySnapshot) and not entry.on_display:
+            hidden_entries += 1
+        else:
+            visible_entries += 1
+    return visible_entries, hidden_entries
 
 
 def initialize_library_store(

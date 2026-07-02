@@ -63,6 +63,8 @@ def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> No
     assert payload["summary"]["scope_count"] == 0
     assert payload["active"]["scope"] is None
     assert payload["active"]["entries"] == 0
+    assert payload["active"]["visible_entries"] == 0
+    assert payload["active"]["hidden_entries"] == 0
     assert payload["active"]["has_sync_token"] is False
     assert payload["active"]["metadata"] == {
         "tracked_entries": 0,
@@ -73,7 +75,19 @@ def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> No
 
 
 def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None:
-    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store = _install_cached_entry(
+        tmp_path,
+        monkeypatch,
+        _live_record("movie:55", "movie", 55, on_display=True),
+    )
+    store.apply_page(
+        ZoneChangesPage(
+            records=[_live_record("movie:66", "movie", 66, on_display=False)],
+            sync_token="t2",
+            more_coming=False,
+        ),
+        staging=False,
+    )
 
     result = runner.invoke(app, ["--json", "lib", "status"])
 
@@ -81,13 +95,15 @@ def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None
     payload = json.loads(result.stdout)
     assert payload["summary"]["initialized"] is True
     assert payload["summary"]["scope_count"] == 1
-    assert payload["active"]["entries"] == 1
+    assert payload["active"]["entries"] == 2
+    assert payload["active"]["visible_entries"] == 1
+    assert payload["active"]["hidden_entries"] == 1
     assert payload["active"]["has_sync_token"] is True
     assert payload["active"]["scope"]["user_record_name"] == "_user"
     assert payload["active"]["metadata"] == {
-        "tracked_entries": 1,
+        "tracked_entries": 2,
         "hydrated_entries": 0,
-        "missing_entries": 1,
+        "missing_entries": 2,
         "ready": False,
     }
 
@@ -143,12 +159,22 @@ def test_library_status_human_output_uses_empty_partial_complete_metadata_states
 
     empty = runner.invoke(app, ["lib", "status"])
     assert empty.exit_code == 0, empty.output
-    assert "  Metadata           empty\n" in empty.stdout
+    assert "  Metadata" in empty.stdout
+    assert "empty\n" in empty.stdout
 
-    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store = _install_cached_entry(
+        tmp_path,
+        monkeypatch,
+        _live_record("movie:55", "movie", 55, on_display=True),
+    )
     still_empty = runner.invoke(app, ["lib", "status"])
     assert still_empty.exit_code == 0, still_empty.output
-    assert "  Metadata           empty\n" in still_empty.stdout
+    assert "  Entries" in still_empty.stdout
+    assert "1\n" in still_empty.stdout
+    assert "  Visible entries" in still_empty.stdout
+    assert "  Hidden entries" in still_empty.stdout
+    assert "  Metadata" in still_empty.stdout
+    assert "empty\n" in still_empty.stdout
 
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
     store.apply_page(
@@ -161,12 +187,12 @@ def test_library_status_human_output_uses_empty_partial_complete_metadata_states
     )
     partial = runner.invoke(app, ["lib", "status"])
     assert partial.exit_code == 0, partial.output
-    assert "  Metadata           partial\n" in partial.stdout
+    assert "partial\n" in partial.stdout
 
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Aliens"))
     complete = runner.invoke(app, ["lib", "status"])
     assert complete.exit_code == 0, complete.output
-    assert "  Metadata           complete\n" in complete.stdout
+    assert "complete\n" in complete.stdout
 
 
 def test_library_clear_cache_requires_confirmation(tmp_path, monkeypatch) -> None:
@@ -903,12 +929,18 @@ def _install_cached_entry(
     return store
 
 
-def _live_record(identity: str, entry_type: str, tmdb_id: int) -> dict[str, Any]:
+def _live_record(
+    identity: str,
+    entry_type: str,
+    tmdb_id: int,
+    *,
+    on_display: bool = False,
+) -> dict[str, Any]:
     return live_record(
         identity,
         entry_type,
         tmdb_id,
-        on_display=False,
+        on_display=on_display,
         using_custom_poster=True,
         custom_poster_path="/stale/custom.jpg",
         custom_poster_url="https://image.tmdb.org/t/p/w342/current/custom.jpg",

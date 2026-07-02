@@ -107,9 +107,8 @@ class LibraryEntriesMetadataResult(AniShelfBaseModel):
 
 class LibraryListFiltersResult(AniShelfBaseModel):
     watch_status: str | None = None
-    hidden: bool
+    show_hidden: bool
     favorite: bool
-    on_display: bool | None = None
     sort: str
     limit: int | None = None
 
@@ -157,6 +156,8 @@ class CacheMetadataStatusResult(AniShelfBaseModel):
 class CacheActiveResult(AniShelfBaseModel):
     initialized: bool
     entries: int
+    visible_entries: int
+    hidden_entries: int
     has_sync_token: bool
     scope: CacheScopeResult | None = None
     metadata: CacheMetadataStatusResult
@@ -314,6 +315,7 @@ class AuthRefreshResult(AniShelfBaseModel):
 class LibraryDefaultsResult(AniShelfBaseModel):
     metadata: str
     display_fields: tuple[str, ...] | None = None
+    show_hidden: bool = False
 
 
 class ConfigCloudKitResult(AniShelfBaseModel):

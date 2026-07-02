@@ -58,6 +58,7 @@ def _config_payload() -> ConfigShowResult:
                     if defaults.display_fields is not None
                     else None
                 ),
+                show_hidden=defaults.show_hidden,
             )
         ),
         paths=ConfigPathsResult(
@@ -116,6 +117,7 @@ def config_show(
                 (
                     ("Metadata", library_defaults.metadata),
                     ("Display fields", display_fields_label),
+                    ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                 ),
             ),
             HumanSection(
@@ -143,12 +145,21 @@ def config_set_defaults(
         ),
     ] = None,
     fields: FieldListOption = None,
+    show_hidden: Annotated[
+        bool | None,
+        typer.Option(
+            "--show-hidden/--hide-hidden",
+            help="Default whether library read commands include hidden entries.",
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    has_replacements = metadata is not None or fields is not None
+    has_replacements = (
+        metadata is not None or fields is not None or show_hidden is not None
+    )
     try:
         defaults = config.load_user_defaults()
     except config.UserConfigError as exc:
@@ -177,6 +188,9 @@ def config_set_defaults(
                 raise typer.Exit(code=2) from exc
         library_defaults = replace(library_defaults, display_fields=display_fields)
 
+    if show_hidden is not None:
+        library_defaults = replace(library_defaults, show_hidden=show_hidden)
+
     defaults = config.UserDefaults(library_read=library_defaults)
     try:
         path = config.save_user_defaults(defaults)
@@ -193,6 +207,7 @@ def config_set_defaults(
                     if library_defaults.display_fields is not None
                     else None
                 ),
+                show_hidden=library_defaults.show_hidden,
             )
         ),
         path=str(path),
@@ -214,6 +229,7 @@ def config_set_defaults(
                         if display_fields is None
                         else ", ".join(str(field) for field in display_fields),
                     ),
+                    ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                     ("Config file", str(path)),
                 ),
             )

@@ -65,8 +65,9 @@ include:
 library read commands require an initialized cache and should fail closed until
 init has been run. `--sync` on a library read command should perform that same
 refresh step explicitly before reading from the local cache.
-`lib status` should report whether the local cache is initialized and which
-cached scopes exist, including TMDb summary metadata readiness.
+`lib status` should report whether the local cache is initialized, total
+snapshot entries split into non-hidden and hidden counts, and which cached
+scopes exist, including TMDb summary metadata readiness.
 `lib clear-cache` should explicitly clear all local library cache files
 after confirmation.
 `lib refresh-meta` should explicitly refresh cached TMDb summary metadata

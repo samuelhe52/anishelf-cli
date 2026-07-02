@@ -16,6 +16,8 @@ def test_cache_status_result_model_dump_preserves_public_json_shape() -> None:
         active=CacheActiveResult(
             initialized=True,
             entries=12,
+            visible_entries=9,
+            hidden_entries=3,
             has_sync_token=True,
             scope=CacheScopeResult(
                 container="container",
@@ -56,6 +58,8 @@ def test_cache_status_result_model_dump_preserves_public_json_shape() -> None:
         "active": {
             "initialized": True,
             "entries": 12,
+            "visible_entries": 9,
+            "hidden_entries": 3,
             "has_sync_token": True,
             "scope": {
                 "container": "container",

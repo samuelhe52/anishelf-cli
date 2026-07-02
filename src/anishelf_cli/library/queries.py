@@ -4,7 +4,7 @@ from typing import Protocol
 
 from anishelf_cli.cache.sync import LibraryCacheRefreshResult
 from anishelf_cli.models import LibraryListSort, MetadataDepth
-from anishelf_cli.models.domain import LibraryEntryModel
+from anishelf_cli.models.domain import LibraryEntryModel, LibraryEntrySnapshot
 from anishelf_cli.models.output import (
     CacheMetadataStatusResult,
     LibraryEntriesCacheResult,
@@ -88,9 +88,8 @@ def build_library_list_result(
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
     watch_status: str | None,
-    hidden: bool,
+    show_hidden: bool,
     favorite: bool,
-    on_display: bool | None,
     sort: LibraryListSort,
     limit: int | None,
 ) -> LibraryEntriesResult:
@@ -103,9 +102,9 @@ def build_library_list_result(
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
         watch_status=watch_status,
-        hidden=True if hidden else None,
+        hidden=None,
         favorite=True if favorite else None,
-        on_display=on_display,
+        on_display=None if show_hidden else True,
         sort=sort.value,
         limit=None if sort is LibraryListSort.TITLE else limit,
     )
@@ -123,9 +122,8 @@ def build_library_list_result(
         metadata=metadata_payload(metadata_depth),
         filters=library_list_filters_payload(
             watch_status=watch_status,
-            hidden=hidden,
+            show_hidden=show_hidden,
             favorite=favorite,
-            on_display=on_display,
             sort=sort,
             limit=limit,
         ),
@@ -138,6 +136,7 @@ def build_library_search_result(
     title: str,
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
+    show_hidden: bool,
 ) -> LibraryEntriesResult:
     require_metadata_ready(
         store,
@@ -145,6 +144,8 @@ def build_library_search_result(
         hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
     )
     entries = store.search_entry_models_by_title(title)
+    if not show_hidden:
+        entries = _visible_snapshots(entries)
     entries = attach_metadata_for_depth(store, entries, metadata_depth)
     return LibraryEntriesResult(
         entries=tuple(entries),
@@ -159,8 +160,11 @@ def build_library_export_result(
     *,
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
+    show_hidden: bool,
 ) -> LibraryEntriesResult:
     entries = store.list_entry_models(include_tombstones=False)
+    if not show_hidden:
+        entries = _visible_snapshots(entries)
     entries = attach_metadata_for_depth(store, entries, metadata_depth)
     return LibraryEntriesResult(
         entries=tuple(entries),
@@ -237,17 +241,15 @@ def metadata_payload(metadata_depth: MetadataDepth) -> LibraryEntriesMetadataRes
 def library_list_filters_payload(
     *,
     watch_status: str | None,
-    hidden: bool,
     favorite: bool,
-    on_display: bool | None,
+    show_hidden: bool,
     sort: LibraryListSort,
     limit: int | None,
 ) -> LibraryListFiltersResult:
     return LibraryListFiltersResult(
         watch_status=watch_status,
-        hidden=hidden,
+        show_hidden=show_hidden,
         favorite=favorite,
-        on_display=on_display,
         sort=sort.value,
         limit=limit,
     )
@@ -270,3 +272,11 @@ def sort_entries_by_title(
 
 def strip_entry_metadata(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
     return [entry.without_metadata() for entry in entries]
+
+
+def _visible_snapshots(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
+    return [
+        entry
+        for entry in entries
+        if isinstance(entry, LibraryEntrySnapshot) and entry.on_display
+    ]

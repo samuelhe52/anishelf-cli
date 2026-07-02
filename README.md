@@ -54,6 +54,14 @@ uv run ani lib search --title "Alien"
 uv run ani lib export --json
 ```
 
+Hidden entries (`onDisplay = false` in AniShelf) are excluded from list,
+search, and export output by default. Pass `--show-hidden` to include them for
+one command, or persist that default with:
+
+```bash
+uv run ani config set-defaults --show-hidden
+```
+
 `lib get` looks up entries by id. Accepted id forms are
 `movie:<tmdbID>`, `series:<tmdbID>`, and
 `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`.
