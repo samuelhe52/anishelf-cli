@@ -881,7 +881,7 @@ def test_library_list_refreshes_cache_and_emits_clean_json(tmp_path, monkeypatch
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 0, result.output
     assert "[progress] Starting local library cache rebuild from CloudKit." in result.stderr
@@ -952,7 +952,7 @@ def test_library_refresh_does_not_hold_cache_lock_during_tmdb_hydration(
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
     monkeypatch.setattr(library_commands, "TMDbClient", AssertingTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1015,7 +1015,7 @@ def test_library_initialization_hydrates_full_library(
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
     monkeypatch.setattr(library_commands, "TMDbClient", CountingTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1047,11 +1047,11 @@ def test_library_init_rejects_existing_cache_and_points_to_sync(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "Run `ani library sync` instead." in result.stderr
+    assert "Run `ani lib sync` instead." in result.stderr
 
 
 def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
@@ -1093,7 +1093,7 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    result = runner.invoke(app, ["--json", "library", "sync"])
+    result = runner.invoke(app, ["--json", "lib", "sync"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1156,7 +1156,7 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
     )
     monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "sync"])
+    result = runner.invoke(app, ["--json", "lib", "sync"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1207,7 +1207,7 @@ def test_library_init_reports_tmdb_secure_storage_failure(
         ),
     )
 
-    result = runner.invoke(app, ["library", "init"])
+    result = runner.invoke(app, ["lib", "init"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -1248,7 +1248,7 @@ def test_library_list_refresh_decode_error_exits_cleanly_in_json_mode(
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -1269,7 +1269,7 @@ def test_library_export_excludes_tombstones_from_public_output(
 
     result = runner.invoke(
         app,
-        ["--json", "library", "export"],
+        ["--json", "lib", "export"],
     )
 
     assert result.exit_code == 0, result.output
@@ -1295,7 +1295,7 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "list"])
+    result = runner.invoke(app, ["--json", "lib", "list"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1343,7 +1343,7 @@ def test_library_list_sync_refreshes_cache_before_reading(
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    result = runner.invoke(app, ["--json", "library", "list", "--sync"])
+    result = runner.invoke(app, ["--json", "lib", "list", "--sync"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1369,7 +1369,7 @@ def test_library_export_reads_existing_cache_without_cloudkit_update(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "export"])
+    result = runner.invoke(app, ["--json", "lib", "export"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1385,12 +1385,12 @@ def test_library_list_attaches_cached_metadata_by_default_and_none_suppresses_it
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    with_metadata = runner.invoke(app, ["--json", "library", "list"])
+    with_metadata = runner.invoke(app, ["--json", "lib", "list"])
     without_metadata = runner.invoke(
         app,
-        ["--json", "library", "list", "--metadata", "none"],
+        ["--json", "lib", "list", "--metadata", "none"],
     )
-    human = runner.invoke(app, ["library", "list"])
+    human = runner.invoke(app, ["lib", "list"])
 
     assert with_metadata.exit_code == 0, with_metadata.output
     with_payload = json.loads(with_metadata.stdout)
@@ -1420,8 +1420,8 @@ def test_library_list_uses_configured_metadata_none_by_default(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["--json", "library", "list"])
-    human = runner.invoke(app, ["library", "list"])
+    result = runner.invoke(app, ["--json", "lib", "list"])
+    human = runner.invoke(app, ["lib", "list"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1451,7 +1451,7 @@ def test_library_list_title_sort_uses_cached_metadata_when_output_metadata_is_di
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Zulu"))
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Alien"))
 
-    result = runner.invoke(app, ["--json", "library", "list", "--sort", "title"])
+    result = runner.invoke(app, ["--json", "lib", "list", "--sort", "title"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1474,7 +1474,7 @@ def test_library_list_metadata_flag_overrides_configured_default(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["--json", "library", "list", "--metadata", "summary"])
+    result = runner.invoke(app, ["--json", "lib", "list", "--metadata", "summary"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1519,7 +1519,7 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
         app,
         [
             "--json",
-            "library",
+            "lib",
             "list",
             "--watch-status",
             "watching",
@@ -1551,7 +1551,7 @@ def test_library_list_uses_configured_display_fields_for_human_output(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "list"])
+    result = runner.invoke(app, ["lib", "list"])
 
     assert result.exit_code == 0, result.output
     assert "Title" in result.stdout
@@ -1572,7 +1572,7 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "list", "--fields", "id,status"])
+    result = runner.invoke(app, ["lib", "list", "--fields", "id,status"])
 
     assert result.exit_code == 0, result.output
     assert "ID" in result.stdout
@@ -1583,7 +1583,7 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
 def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> None:
     create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["--json", "library", "list", "--fields", "title"])
+    result = runner.invoke(app, ["--json", "lib", "list", "--fields", "title"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -1614,7 +1614,7 @@ def test_library_refresh_meta_updates_full_library_cache(
 
     result = runner.invoke(
         app,
-        ["--json", "library", "refresh-meta"],
+        ["--json", "lib", "refresh-meta"],
     )
 
     assert result.exit_code == 0, result.output
@@ -1662,7 +1662,7 @@ def test_library_export_attaches_cached_metadata_by_default(
     )
     store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
 
-    result = runner.invoke(app, ["--json", "library", "export"])
+    result = runner.invoke(app, ["--json", "lib", "export"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1689,7 +1689,7 @@ def test_library_export_does_not_sync_from_config_by_default(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "export"])
+    result = runner.invoke(app, ["--json", "lib", "export"])
 
     assert result.exit_code == 0, result.output
     assert requests == []
@@ -1699,7 +1699,7 @@ def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
     fake_store = _fake_search_store()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
-    result = runner.invoke(app, ["--json", "library", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["--json", "lib", "search", "--title", "Alien"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -1742,10 +1742,10 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
     fake_store = FakeStore()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
-    with_metadata = runner.invoke(app, ["--json", "library", "search", "--title", "Alien"])
+    with_metadata = runner.invoke(app, ["--json", "lib", "search", "--title", "Alien"])
     without_metadata = runner.invoke(
         app,
-        ["--json", "library", "search", "--title", "Alien", "--metadata", "none"],
+        ["--json", "lib", "search", "--title", "Alien", "--metadata", "none"],
     )
 
     assert with_metadata.exit_code == 0, with_metadata.output
@@ -1765,7 +1765,7 @@ def test_library_search_human_uses_cached_titles_when_configured_metadata_defaul
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["lib", "search", "--title", "Alien"])
 
     assert result.exit_code == 0, result.output
     assert "Alien" in result.stdout
@@ -1783,7 +1783,7 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["lib", "search", "--title", "Alien"])
 
     assert result.exit_code == 0, result.output
     assert "ID" in result.stdout

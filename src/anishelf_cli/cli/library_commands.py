@@ -513,7 +513,7 @@ def _library_store_for_read() -> LibraryCacheStore:
             store.initialize()
             if not store.has_entries():
                 raise LibraryCacheNotAvailableError(
-                    "No local library cache entries are available. Run `ani library init` first."
+                    "No local library cache entries are available. Run `ani lib init` first."
                 )
             return store
     except LibraryCacheError as exc:

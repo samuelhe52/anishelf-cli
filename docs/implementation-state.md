@@ -25,30 +25,30 @@ spec.
 - Secret redaction exists for known token values and sensitive URL query keys.
 - Human output uses shared `core.output` blocks: sections for detail views and
   aligned tables for collections.
-- `library init` initializes a rebuildable SQLite cache of `LibraryEntry`
-  records from CloudKit, and `library sync` refreshes that initialized cache.
-- `library init` now keeps JSON stdout clean while still emitting cache and
+- `lib init` initializes a rebuildable SQLite cache of `LibraryEntry`
+  records from CloudKit, and `lib sync` refreshes that initialized cache.
+- `lib init` now keeps JSON stdout clean while still emitting cache and
   TMDb hydration progress to stderr.
-- `library status` reports local cache initialization state, and
+- `lib status` reports local cache initialization state, and
   TMDb summary metadata readiness, and
-  `library clear-cache` removes all local library cache files after explicit
+  `lib clear-cache` removes all local library cache files after explicit
   confirmation.
-- `library get`, `library list`, `library export`, and `library search --title`
+- `lib get`, `lib list`, `lib export`, and `lib search --title`
   read from the initialized local cache and fail closed until init has been
   run. These read commands also support `--sync` for an explicit CloudKit
   refresh before serving results.
-- `library search --title` requires complete cached TMDb summary metadata and
+- `lib search --title` requires complete cached TMDb summary metadata and
   fails explicitly when that metadata is unavailable or incomplete.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_summary`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `details`/`full` are
   reserved until detail cache behavior exists.
-- `library init` hydrates TMDb summary metadata for the full fetched library
-  when a TMDb key is available. Later `library sync` refreshes hydrate all
-  newly added entries automatically. `library refresh-meta` explicitly
-  refreshes cached TMDb summaries for the full local library, and `library get`
+- `lib init` hydrates TMDb summary metadata for the full fetched library
+  when a TMDb key is available. Later `lib sync` refreshes hydrate all
+  newly added entries automatically. `lib refresh-meta` explicitly
+  refreshes cached TMDb summaries for the full local library, and `lib get`
   supports `--live-meta` for targeted per-entry refresh.
-- `library list` has first-pass ergonomic filters and ordering for common
+- `lib list` has first-pass ergonomic filters and ordering for common
   questions: watch status, hidden/display state, favorites, saved/updated/title
   sort, and result limits.
 - Low-level CloudKit diagnostics and schema checks are not

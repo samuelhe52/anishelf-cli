@@ -151,18 +151,18 @@ def test_root_help_hides_non_user_command_groups() -> None:
         assert command not in result.stdout
 
 
-def test_root_help_lists_lib_alias() -> None:
+def test_root_help_lists_lib_command() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
-    assert "library" in result.stdout
     assert "lib" in result.stdout
 
 
 def test_command_tree_registers_public_groups() -> None:
     group_names = {group.name for group in app.registered_groups}
 
-    assert {"auth", "config", "library", "lib", "tmdb"} <= group_names
+    assert {"auth", "config", "lib", "tmdb"} <= group_names
+    assert "library" not in group_names
     assert groups.config_app is config_commands.config_app
     assert groups.library_app is library_commands.library_app
     assert groups.tmdb_app is tmdb_commands.tmdb_app
@@ -180,20 +180,20 @@ def test_non_user_command_groups_are_removed(command: str) -> None:
     ("args", "expected"),
     [
         (
-            ["library", "get", "--metadata", "movie:55"],
-            ["library", "get", "--metadata=summary", "movie:55"],
+            ["lib", "get", "--metadata", "movie:55"],
+            ["lib", "get", "--metadata=summary", "movie:55"],
         ),
         (
-            ["library", "list", "--metadata", "details", "--json"],
-            ["library", "list", "--metadata=details", "--json"],
+            ["lib", "list", "--metadata", "details", "--json"],
+            ["lib", "list", "--metadata=details", "--json"],
         ),
         (
-            ["library", "export", "--metadata", "none"],
-            ["library", "export", "--metadata=none"],
+            ["lib", "export", "--metadata", "none"],
+            ["lib", "export", "--metadata=none"],
         ),
         (
-            ["library", "get", "--metadata", "--", "none"],
-            ["library", "get", "--metadata=summary", "--", "none"],
+            ["lib", "get", "--metadata", "--", "none"],
+            ["lib", "get", "--metadata=summary", "--", "none"],
         ),
     ],
 )
@@ -204,14 +204,14 @@ def test_normalize_metadata_args(args: list[str], expected: list[str]) -> None:
 @pytest.mark.parametrize(
     ("args", "expected_exit", "stdout_entries", "stderr_fragment"),
     [
-        (["--json", "library", "list", "--metadata"], 0, 0, None),
+        (["--json", "lib", "list", "--metadata"], 0, 0, None),
         (
-            ["--json", "library", "list", "--metadata", "full"],
+            ["--json", "lib", "list", "--metadata", "full"],
             2,
             None,
             "reserved until TMDb detail metadata caching exists",
         ),
-        (["--json", "library", "list", "--metadata", "none"], 0, 0, None),
+        (["--json", "lib", "list", "--metadata", "none"], 0, 0, None),
     ],
 )
 def test_library_list_metadata_flag_handling(
@@ -237,7 +237,7 @@ def test_library_list_metadata_flag_handling(
 def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> None:
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: _fake_store())
 
-    result = runner.invoke(app, ["--json", "library", "get", "--metadata", "--", "none"])
+    result = runner.invoke(app, ["--json", "lib", "get", "--metadata", "--", "none"])
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -251,21 +251,21 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
     ("args", "contains", "absent"),
     [
         (
-            ["library", "get"],
+            ["lib", "get"],
             ("--metadata", "--live-meta", "none", "summary", "details", "full", "--sync"),
             (),
         ),
-        (["library", "list"], ("--sync",), ("--refresh-meta",)),
-        (["library"], ("refresh-meta",), ("changes",)),
+        (["lib", "list"], ("--sync",), ("--refresh-meta",)),
+        (["lib"], ("refresh-meta",), ("changes",)),
         (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
-        (["library", "refresh-meta"], ("--json",), ()),
-        (["library", "search"], ("--sync",), ()),
-        (["library", "export"], ("--sync",), ()),
+        (["lib", "refresh-meta"], ("--json",), ()),
+        (["lib", "search"], ("--sync",), ()),
+        (["lib", "export"], ("--sync",), ()),
         (["tmdb", "search"], ("--title", "--type", "--year", "--json"), ()),
-        (["library", "init"], ("--json",), ()),
-        (["library", "sync"], ("--json",), ()),
-        (["library", "status"], ("--json",), ()),
-        (["library", "clear-cache"], ("--yes",), ()),
+        (["lib", "init"], ("--json",), ()),
+        (["lib", "sync"], ("--json",), ()),
+        (["lib", "status"], ("--json",), ()),
+        (["lib", "clear-cache"], ("--yes",), ()),
         (["auth", "logout"], ("clear local library cache files",), ()),
     ],
 )

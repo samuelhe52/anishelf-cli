@@ -49,32 +49,32 @@ direct movie/series TMDb matches, and season parent-series matches.
 Normal user commands should stay library-first. Useful read-only surfaces
 include:
 
-- `library init`
-- `library sync`
-- `library status`
-- `library clear-cache`
-- `library refresh-meta`
-- `library get <id...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
-- `library list [--sync] [--metadata[=none|summary|details|full]]`
-- `library search --title` with optional `--sync` and `--metadata`
-- `library export` with optional `--sync` and `--metadata`
+- `lib init`
+- `lib sync`
+- `lib status`
+- `lib clear-cache`
+- `lib refresh-meta`
+- `lib get <id...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
+- `lib list [--sync] [--metadata[=none|summary|details|full]]`
+- `lib search --title` with optional `--sync` and `--metadata`
+- `lib export` with optional `--sync` and `--metadata`
 - `tmdb search [--title]`
 
-`library init` is the explicit bootstrap entry point for the local cache.
-`library sync` is the explicit refresh entry point after bootstrap. Other
+`lib init` is the explicit bootstrap entry point for the local cache.
+`lib sync` is the explicit refresh entry point after bootstrap. Other
 library read commands require an initialized cache and should fail closed until
 init has been run. `--sync` on a library read command should perform that same
 refresh step explicitly before reading from the local cache.
-`library status` should report whether the local cache is initialized and which
+`lib status` should report whether the local cache is initialized and which
 cached scopes exist, including TMDb summary metadata readiness.
-`library clear-cache` should explicitly clear all local library cache files
+`lib clear-cache` should explicitly clear all local library cache files
 after confirmation.
-`library refresh-meta` should explicitly refresh cached TMDb summary metadata
+`lib refresh-meta` should explicitly refresh cached TMDb summary metadata
 for the full local library.
 Tombstones are an internal sync concern and should not appear in public entry
 counts or library list/export output.
 
-`library search --title` depends on cached TMDb summary metadata. If that
+`lib search --title` depends on cached TMDb summary metadata. If that
 metadata is incomplete or unavailable, the command should fail explicitly and
 tell the user how to hydrate metadata first. Use `tmdb search --title` for
 global TMDb title search, or omit `--title` for popular-title discovery.
@@ -90,7 +90,7 @@ input can grow from positional arguments first, then stdin/file/JSONL when a
 real workflow needs it.
 
 Batch output should preserve caller order, keep item-level errors, and keep
-progress or diagnostics on stderr. `library get` exits nonzero only when no
+progress or diagnostics on stderr. `lib get` exits nonzero only when no
 requested item is found; partial failures remain item-level errors in the output
 envelope, so agents should inspect `summary.errors`.
 
@@ -109,10 +109,10 @@ positional id or title is literally `none`, `summary`, `details`, or
 `full`, require `--` before that positional argument so it is not consumed as
 the metadata level. `none` means no TMDb request.
 
-`library init` should fetch the full library and hydrate TMDb summary metadata
+`lib init` should fetch the full library and hydrate TMDb summary metadata
 for every entry when a TMDb key is available. After that initialization pass,
-`library sync` should hydrate every newly added entry automatically.
-`library refresh-meta` should refetch TMDb summary metadata for the full local
-cache on demand. `library get --live-meta` should refetch TMDb summary metadata
+`lib sync` should hydrate every newly added entry automatically.
+`lib refresh-meta` should refetch TMDb summary metadata for the full local
+cache on demand. `lib get --live-meta` should refetch TMDb summary metadata
 only for the requested entries and update the cache without broad library
 refresh.

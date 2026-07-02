@@ -99,7 +99,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
         require_metadata_ready(
             store,
             action="search cached library entries by title",
-            hint="Run `ani library refresh-meta`.",
+            hint="Run `ani lib refresh-meta`.",
         )
 
     exc = exc_info.value
@@ -108,7 +108,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     assert exc.missing == 1
     assert str(exc) == (
         "Cannot search cached library entries by title because TMDb summary metadata "
-        "is incomplete (0/1 hydrated, 1 missing). Run `ani library refresh-meta`."
+        "is incomplete (0/1 hydrated, 1 missing). Run `ani lib refresh-meta`."
     )
 
 

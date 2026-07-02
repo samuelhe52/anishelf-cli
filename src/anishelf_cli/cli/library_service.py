@@ -167,11 +167,11 @@ def initialize_library_store(
             cache_has_entries = store.has_entries()
             if require_missing_cache and cache_has_entries:
                 raise LibraryCacheError(
-                    "Local library cache already exists. Run `ani library sync` instead."
+                    "Local library cache already exists. Run `ani lib sync` instead."
                 )
             if require_existing_cache and not cache_has_entries:
                 raise LibraryCacheNotAvailableError(
-                    "No local library cache is available. Run `ani library init` first."
+                    "No local library cache is available. Run `ani lib init` first."
                 )
             tmdb_client = tmdb_summary_client_or_none()
             refresh_result = LibraryCacheSync(

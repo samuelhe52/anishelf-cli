@@ -98,7 +98,7 @@ def build_library_list_result(
         require_metadata_ready(
             store,
             action="sort library entries by title",
-            hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
+            hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
         )
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
@@ -142,7 +142,7 @@ def build_library_search_result(
     require_metadata_ready(
         store,
         action="search cached library entries by title",
-        hint="Run `ani library refresh-meta` after configuring a TMDb API key.",
+        hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
     )
     entries = store.search_entry_models_by_title(title)
     entries = attach_metadata_for_depth(store, entries, metadata_depth)

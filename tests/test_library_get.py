@@ -45,17 +45,17 @@ from tests.support import (
 
 def test_library_get_requires_init_before_lookup(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "Run `ani library init` first" in result.stderr
+    assert "Run `ani lib init` first" in result.stderr
 
 
 def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
 
-    result = runner.invoke(app, ["--json", "library", "status"])
+    result = runner.invoke(app, ["--json", "lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -75,7 +75,7 @@ def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> No
 def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["--json", "library", "status"])
+    result = runner.invoke(app, ["--json", "lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -99,7 +99,7 @@ def test_library_status_reports_metadata_ready_when_summary_is_cached(
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["--json", "library", "status"])
+    result = runner.invoke(app, ["--json", "lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -123,7 +123,7 @@ def test_library_status_treats_legacy_v1_summary_as_incomplete(
         tmdb_id=55,
     )
 
-    result = runner.invoke(app, ["--json", "library", "status"])
+    result = runner.invoke(app, ["--json", "lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -141,12 +141,12 @@ def test_library_status_human_output_uses_empty_partial_complete_metadata_states
 ) -> None:
     _isolate_paths(monkeypatch, tmp_path)
 
-    empty = runner.invoke(app, ["library", "status"])
+    empty = runner.invoke(app, ["lib", "status"])
     assert empty.exit_code == 0, empty.output
     assert "  Metadata           empty\n" in empty.stdout
 
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
-    still_empty = runner.invoke(app, ["library", "status"])
+    still_empty = runner.invoke(app, ["lib", "status"])
     assert still_empty.exit_code == 0, still_empty.output
     assert "  Metadata           empty\n" in still_empty.stdout
 
@@ -159,12 +159,12 @@ def test_library_status_human_output_uses_empty_partial_complete_metadata_states
         ),
         staging=False,
     )
-    partial = runner.invoke(app, ["library", "status"])
+    partial = runner.invoke(app, ["lib", "status"])
     assert partial.exit_code == 0, partial.output
     assert "  Metadata           partial\n" in partial.stdout
 
     store.upsert_metadata_summary(_metadata_summary("movie", 66, name="Aliens"))
-    complete = runner.invoke(app, ["library", "status"])
+    complete = runner.invoke(app, ["lib", "status"])
     assert complete.exit_code == 0, complete.output
     assert "  Metadata           complete\n" in complete.stdout
 
@@ -172,7 +172,7 @@ def test_library_status_human_output_uses_empty_partial_complete_metadata_states
 def test_library_clear_cache_requires_confirmation(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["library", "clear-cache"], input="n\n")
+    result = runner.invoke(app, ["lib", "clear-cache"], input="n\n")
 
     assert result.exit_code == 1
     assert "Aborted local library cache clear." in result.stderr
@@ -184,7 +184,7 @@ def test_library_clear_cache_yes_removes_all_local_cache_files(tmp_path, monkeyp
     store.lock_path.parent.mkdir(parents=True, exist_ok=True)
     store.lock_path.write_text("locked")
 
-    result = runner.invoke(app, ["--json", "library", "clear-cache", "--yes"])
+    result = runner.invoke(app, ["--json", "lib", "clear-cache", "--yes"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -198,7 +198,7 @@ def test_library_clear_cache_yes_removes_all_local_cache_files(tmp_path, monkeyp
 def test_library_clear_cache_prompt_can_confirm(tmp_path, monkeypatch) -> None:
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["--json", "library", "clear-cache"], input="y\n")
+    result = runner.invoke(app, ["--json", "lib", "clear-cache"], input="y\n")
 
     assert result.exit_code == 0, result.output
     assert not store.path.exists()
@@ -233,10 +233,10 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
-    init_result = runner.invoke(app, ["--json", "library", "init"])
+    init_result = runner.invoke(app, ["--json", "lib", "init"])
     assert init_result.exit_code == 0, init_result.output
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     assert result.stderr == ""
@@ -282,7 +282,7 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
 def test_library_get_accepts_command_level_json_after_subcommand(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["library", "get", "--json", "movie:55"])
+    result = runner.invoke(app, ["lib", "get", "--json", "movie:55"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -293,7 +293,7 @@ def test_library_get_accepts_command_level_json_after_subcommand(tmp_path, monke
 def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["library", "get", "movie:55", "--json"])
+    result = runner.invoke(app, ["lib", "get", "movie:55", "--json"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -304,7 +304,7 @@ def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeyp
 def test_library_get_reads_existing_cache(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -328,7 +328,7 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -376,7 +376,7 @@ def test_library_get_sync_refreshes_cache_before_lookup(
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
-    result = runner.invoke(app, ["--json", "library", "get", "series:22", "--sync"])
+    result = runner.invoke(app, ["--json", "lib", "get", "series:22", "--sync"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -403,7 +403,7 @@ def test_library_get_does_not_sync_from_config_by_default(
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -438,7 +438,7 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
 
     monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55", "--live-meta"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--live-meta"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -481,7 +481,7 @@ def test_library_get_live_meta_surfaces_specific_tmdb_errors(
 
     monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:55", "--live-meta"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--live-meta"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -493,7 +493,7 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["library", "get", "movie:55"])
+    result = runner.invoke(app, ["lib", "get", "movie:55"])
 
     assert result.exit_code == 0, result.output
     assert "Library entries\n" in result.stdout
@@ -570,7 +570,7 @@ def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(
 ) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 
-    result = runner.invoke(app, ["--json", "library", "get", "movie:404"])
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:404"])
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)
@@ -596,7 +596,7 @@ def test_library_get_invalid_identity_is_item_error_without_network(monkeypatch)
         ),
     )
 
-    result = runner.invoke(app, ["--json", "library", "get", "book:1"])
+    result = runner.invoke(app, ["--json", "lib", "get", "book:1"])
 
     assert result.exit_code == 1
     assert requests == []
@@ -614,7 +614,7 @@ def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch)
         app,
         [
             "--json",
-            "library",
+            "lib",
             "get",
             "bad",
             "series:22",
@@ -657,7 +657,7 @@ def test_library_init_redacts_tokens_from_cloudkit_request_errors(monkeypatch) -
     )
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 2
     assert result.stdout == ""
@@ -720,7 +720,7 @@ def test_library_init_emits_stderr_progress_without_touching_json_stdout(
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
     monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
-    result = runner.invoke(app, ["--json", "library", "init"])
+    result = runner.invoke(app, ["--json", "lib", "init"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -764,7 +764,7 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
 
-    result = runner.invoke(app, ["--verbose", "--json", "library", "init"])
+    result = runner.invoke(app, ["--verbose", "--json", "lib", "init"])
 
     assert result.exit_code == 0, result.output
     assert (
@@ -816,7 +816,7 @@ def test_library_get_tombstone_identity_is_treated_as_not_found(
         _tombstone_record("season:22:3:33", "season", 33, parent_series_id=22, season_number=3),
     )
 
-    result = runner.invoke(app, ["--json", "library", "get", "season:22:3:33"])
+    result = runner.invoke(app, ["--json", "lib", "get", "season:22:3:33"])
 
     assert result.exit_code == 1
     payload = json.loads(result.stdout)

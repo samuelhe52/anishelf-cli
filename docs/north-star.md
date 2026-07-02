@@ -49,7 +49,7 @@ library concepts instead of raw CloudKit records.
   overrides for development and diagnostics.
 - `LibrarySettings` is not a supported or planned CLI surface.
 - TMDb metadata attachment belongs on library read commands via `--metadata`,
-  while explicit cache refresh stays under `library refresh-meta` rather than a
+  while explicit cache refresh stays under `lib refresh-meta` rather than a
   separate top-level workflow.
 
 ## Values To Preserve

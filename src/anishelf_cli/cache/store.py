@@ -62,11 +62,11 @@ class LibraryCacheStore:
 
         if not candidates:
             raise LibraryCacheNotAvailableError(
-                "No local library cache is available. Run `ani library init` first."
+                "No local library cache is available. Run `ani lib init` first."
             )
         if len(candidates) > 1:
             raise LibraryCacheNotAvailableError(
-                "Multiple user-scoped library caches are available. Run `ani library init` "
+                "Multiple user-scoped library caches are available. Run `ani lib init` "
                 "to select the authenticated user."
             )
         return candidates[0]
