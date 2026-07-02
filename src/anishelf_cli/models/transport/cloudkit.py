@@ -83,7 +83,25 @@ CloudKitSwiftReferenceDateTimeValue = Annotated[
 ]
 
 
-class CloudKitCurrentUserResponse(AniShelfBaseModel):
+class _CloudKitTypedNestedModel(AniShelfBaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="ignore",
+        populate_by_name=False,
+        str_strip_whitespace=False,
+    )
+
+
+class _CloudKitPayloadModel(AniShelfBaseModel):
+    model_config = ConfigDict(
+        frozen=True,
+        extra="ignore",
+        populate_by_name=False,
+        str_strip_whitespace=False,
+    )
+
+
+class CloudKitCurrentUserResponse(_CloudKitPayloadModel):
     user_record_name: StrictStr = Field(
         validation_alias="userRecordName",
         serialization_alias="userRecordName",
@@ -114,15 +132,6 @@ class CloudKitCurrentUserResponse(AniShelfBaseModel):
         )
 
 
-class _CloudKitTypedNestedModel(AniShelfBaseModel):
-    model_config = ConfigDict(
-        frozen=True,
-        extra="allow",
-        populate_by_name=False,
-        str_strip_whitespace=False,
-    )
-
-
 class CloudKitZoneID(_CloudKitTypedNestedModel):
     zone_name: StrictStr | None = Field(
         default=None,
@@ -136,7 +145,7 @@ class CloudKitZoneID(_CloudKitTypedNestedModel):
     )
 
 
-class CloudKitRecordID(AniShelfBaseModel):
+class CloudKitRecordID(_CloudKitPayloadModel):
     record_name: StrictStr | None = Field(
         default=None,
         validation_alias="recordName",
@@ -149,7 +158,7 @@ class CloudKitRecordID(AniShelfBaseModel):
     )
 
 
-class CloudKitField(AniShelfBaseModel):
+class CloudKitField(_CloudKitPayloadModel):
     type: StrictStr | None = None
     value: JsonValue = None
 
@@ -177,7 +186,7 @@ class CloudKitUserTimestamp(_CloudKitTypedNestedModel):
     )
 
 
-class CloudKitEpisodeProgressPayload(AniShelfBaseModel):
+class CloudKitEpisodeProgressPayload(_CloudKitPayloadModel):
     season_number: CloudKitIntValue = Field(
         validation_alias="seasonNumber",
         serialization_alias="seasonNumber",
@@ -325,7 +334,7 @@ class CloudKitLibraryEntryTombstoneFields(CloudKitLibraryEntryCommonFields):
     )
 
 
-class CloudKitRecord(AniShelfBaseModel):
+class CloudKitRecord(_CloudKitPayloadModel):
     record_name: StrictStr | None = Field(
         default=None,
         validation_alias="recordName",
@@ -394,7 +403,7 @@ class CloudKitRecord(AniShelfBaseModel):
         return self.model_dump(mode="json", by_alias=True, exclude_none=True)
 
 
-class CloudKitLookupResponse(AniShelfBaseModel):
+class CloudKitLookupResponse(_CloudKitPayloadModel):
     records: tuple[CloudKitRecord, ...] = ()
     server_error_code: StrictStr | None = Field(
         default=None,
@@ -418,7 +427,7 @@ class CloudKitLookupResponse(AniShelfBaseModel):
         return results
 
 
-class CloudKitZoneResult(AniShelfBaseModel):
+class CloudKitZoneResult(_CloudKitPayloadModel):
     zone_id: CloudKitZoneID | None = Field(
         default=None,
         validation_alias="zoneID",
@@ -450,7 +459,7 @@ class CloudKitZoneResult(AniShelfBaseModel):
         return value
 
 
-class CloudKitZoneChangesResponse(AniShelfBaseModel):
+class CloudKitZoneChangesResponse(_CloudKitPayloadModel):
     zones: tuple[CloudKitZoneResult, ...]
     server_error_code: StrictStr | None = Field(
         default=None,

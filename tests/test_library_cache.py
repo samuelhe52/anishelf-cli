@@ -80,6 +80,7 @@ def test_cloudkit_record_types_nested_cloudkit_metadata() -> None:
             "userRecordName": "_editor",
             "deviceID": "device-b",
         },
+        "pluginFields": {},
         "fields": {},
     }
 
@@ -99,7 +100,13 @@ def test_cloudkit_record_types_nested_cloudkit_metadata() -> None:
     assert record.modified.user_record_name == "_editor"
     assert record.modified.device_id == "device-b"
     assert record.modified_timestamp == 1_780_000_000
-    assert record.to_cloudkit_payload() == payload
+    assert record.to_cloudkit_payload() == {
+        "recordID": payload["recordID"],
+        "recordType": "LibraryEntry",
+        "created": payload["created"],
+        "modified": payload["modified"],
+        "fields": {},
+    }
 
 
 def test_cloudkit_zone_changes_response_types_zone_ids() -> None:
@@ -766,7 +773,12 @@ def test_executor_fetches_zone_changes_with_pagination_token(monkeypatch) -> Non
             json={
                 "zones": [
                     {
-                        "records": [_live_record("movie:55", "movie", 55)],
+                        "records": [
+                            {
+                                **_live_record("movie:55", "movie", 55),
+                                "pluginFields": {},
+                            }
+                        ],
                         "syncToken": "next-token",
                         "moreComing": True,
                     }
@@ -786,6 +798,7 @@ def test_executor_fetches_zone_changes_with_pagination_token(monkeypatch) -> Non
     assert page.more_coming is True
     assert page.sync_token == "next-token"
     assert page.records[0].effective_record_name == "movie:55"
+    assert "pluginFields" not in page.records[0].to_cloudkit_payload()
     request = requests[0]
     assert request.url.path.endswith("/production/private/changes/zone")
     assert request.url.params["ckAPIToken"] == "api-secret-token"
