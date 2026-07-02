@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 from anishelf_cli.core.output import (
     HumanSection,
     HumanTable,
@@ -61,7 +63,11 @@ DISPLAY_FIELD_COLUMNS = {
 }
 
 
-def render_library_get(envelope: LibraryGetEnvelope) -> None:
+def render_library_get(
+    envelope: LibraryGetEnvelope,
+    *,
+    display_titles: Mapping[str, str] | None = None,
+) -> None:
     blocks: list[HumanSection] = []
 
     blocks.append(
@@ -76,13 +82,15 @@ def render_library_get(envelope: LibraryGetEnvelope) -> None:
     )
 
     for item in envelope.items:
-        blocks.append(_library_get_item_section(item))
+        blocks.append(_library_get_item_section(item, display_titles=display_titles or {}))
 
     emit_human_blocks(blocks)
 
 
 def _library_get_item_section(
     item: LibraryGetItemFound | LibraryGetItemErrorResult,
+    *,
+    display_titles: Mapping[str, str],
 ) -> HumanSection:
     identity = item.identity
     if isinstance(item, LibraryGetItemErrorResult):
@@ -96,7 +104,7 @@ def _library_get_item_section(
         )
 
     entry_model = item.entry
-    title = entry_model.metadata_title
+    title = _display_title(entry_model, display_titles)
 
     if isinstance(entry_model, LibraryEntryTombstone):
         return HumanSection(
@@ -121,6 +129,7 @@ def _library_get_item_section(
             ("Status", item.status),
             ("ID", identity),
             ("Title", title),
+            ("Season title", _season_metadata_title(entry_model, display_title=title)),
             ("Original title", _metadata_original_name(metadata)),
             (
                 "Overview",
@@ -172,9 +181,13 @@ def _optional_human_text(value: object) -> object:
     return value
 
 
-def _human_library_row(entry: LibraryEntryModel) -> dict[str, object]:
+def _human_library_row(
+    entry: LibraryEntryModel,
+    *,
+    display_titles: Mapping[str, str],
+) -> dict[str, object]:
     return {
-        "title": entry.title,
+        "title": _display_title(entry, display_titles),
         "id": entry.identity,
         "type": entry.entry_type,
         "status": getattr(entry, "watch_status", None),
@@ -189,6 +202,26 @@ def _metadata_original_name(metadata: LibraryEntryMetadata | None) -> str | None
     if metadata is None:
         return None
     return metadata.original_name
+
+
+def _display_title(
+    entry: LibraryEntryModel,
+    display_titles: Mapping[str, str],
+) -> str:
+    return display_titles.get(entry.identity) or entry.title
+
+
+def _season_metadata_title(
+    entry_model: LibraryEntryModel,
+    *,
+    display_title: str,
+) -> str | None:
+    if entry_model.entry_type != "season":
+        return None
+    metadata_title = entry_model.metadata_title
+    if metadata_title is None or metadata_title == display_title:
+        return None
+    return metadata_title
 
 
 def _compact_date(value: object) -> object:
@@ -209,8 +242,9 @@ def render_library_list(
     entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
+    display_titles: Mapping[str, str] | None = None,
 ) -> None:
-    rows = [_human_library_row(entry) for entry in entries]
+    rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(
@@ -228,8 +262,9 @@ def render_library_search(
     entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
+    display_titles: Mapping[str, str] | None = None,
 ) -> None:
-    rows = [_human_library_row(entry) for entry in entries]
+    rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
     emit_human_blocks(
         [
             HumanTable(

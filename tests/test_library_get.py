@@ -633,6 +633,33 @@ def test_library_get_invalid_identity_is_item_error_without_network(monkeypatch)
     assert payload["items"][0]["error"]["code"] == "invalid_id"
 
 
+def test_library_get_human_output_uses_parent_series_title_for_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    json_result = runner.invoke(app, ["--json", "lib", "get", "season:22:1:33"])
+    result = runner.invoke(app, ["lib", "get", "season:22:1:33"])
+
+    assert json_result.exit_code == 0, json_result.output
+    payload = json.loads(json_result.stdout)
+    assert payload["items"][0]["entry"]["metadata"]["name"] == "Season 1"
+    assert payload["items"][0]["entry"]["metadata"]["parent_series_title"] == "Cowboy Bebop"
+    assert result.exit_code == 0, result.output
+    assert "Cowboy Bebop\n" in result.stdout
+    assert "  Title             Cowboy Bebop\n" in result.stdout
+    assert "  Season title      Season 1\n" in result.stdout
+
+
 def test_library_get_partial_batch_preserves_caller_order(tmp_path, monkeypatch) -> None:
     _install_cached_entry(tmp_path, monkeypatch, _live_record("series:22", "series", 22))
 

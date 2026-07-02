@@ -666,6 +666,33 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
     assert attached.metadata.season_number == 1
 
 
+def test_display_titles_for_entries_uses_parent_series_metadata_for_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("series:22", "series", 22),
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    entries = store.attach_metadata_summary_models(store.list_entry_models())
+
+    season = next(entry for entry in entries if entry.identity == "season:22:1:33")
+    assert season.metadata is not None
+    assert season.metadata.name == "Season 1"
+    assert season.metadata_title == "Season 1"
+    assert season.title == "Season 1"
+    assert store.display_titles_for_entries(entries) == {
+        "season:22:1:33": "Cowboy Bebop",
+    }
+
+
 def test_cache_excludes_tombstones_by_default(tmp_path, monkeypatch) -> None:
     store = create_cache_store(monkeypatch, tmp_path)
     page = ZoneChangesPage(
@@ -1713,6 +1740,50 @@ def test_library_export_attaches_cached_metadata_by_default(
     assert payload["entries"][0]["metadata"]["name"] == "Cowboy Bebop"
 
 
+def test_library_list_json_adds_parent_series_title_for_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["entries"][0]["metadata"]["name"] == "Season 1"
+    assert payload["entries"][0]["metadata"]["parent_series_title"] == "Cowboy Bebop"
+
+
+def test_library_list_json_omits_parent_series_title_without_metadata(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert "metadata" not in payload["entries"][0]
+    assert "parent_series_title" not in result.stdout
+
+
 def test_library_export_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> None:
     create_seeded_cache_store(
         monkeypatch,
@@ -1778,6 +1849,52 @@ def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
         "season:22:1:33",
     ]
     assert fake_store.search_title_arg == "Alien"  # type: ignore[attr-defined]
+
+
+def test_cache_title_search_matches_parent_series_titles_for_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("series:22", "series", 22, date_saved="2026-05-03T00:00:00Z"),
+        _live_record(
+            "season:22:1:33",
+            "season",
+            33,
+            date_saved="2026-05-02T00:00:00Z",
+        ),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    entries = store.search_entry_models_by_title("Cowboy")
+
+    assert [entry.identity for entry in entries] == ["series:22", "season:22:1:33"]
+    assert store.display_titles_for_entries(entries) == {
+        "season:22:1:33": "Cowboy Bebop",
+    }
+
+
+def test_cache_title_search_still_matches_raw_season_titles(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    entries = store.search_entry_models_by_title("Season 1")
+
+    assert [entry.identity for entry in entries] == ["season:22:1:33"]
 
 
 def test_library_search_metadata_default_and_none(monkeypatch) -> None:

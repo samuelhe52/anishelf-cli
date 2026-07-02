@@ -322,26 +322,34 @@ class LibraryCacheStore:
         with self._connect_initialized() as db:
             rows = db.execute(
                 """
-                SELECT library_entries.decoded_json
+                SELECT
+                    library_entries.decoded_json
                 FROM library_entries
-                LEFT JOIN tmdb_metadata_summary
-                    ON tmdb_metadata_summary.metadata_key = CASE
+                LEFT JOIN tmdb_metadata_summary AS entry_tmdb_metadata_summary
+                    ON entry_tmdb_metadata_summary.metadata_key = CASE
                         WHEN library_entries.entry_type = 'season' THEN
                             'season:' || library_entries.parent_series_id || ':' ||
                             library_entries.season_number || ':' || library_entries.tmdb_id
                         ELSE
                             library_entries.entry_type || ':' || library_entries.tmdb_id
                     END
-                    AND tmdb_metadata_summary.language = ''
+                    AND entry_tmdb_metadata_summary.language = ''
+                LEFT JOIN tmdb_metadata_summary AS parent_tmdb_metadata_summary
+                    ON library_entries.entry_type = 'season'
+                    AND parent_tmdb_metadata_summary.metadata_key =
+                        'series:' || library_entries.parent_series_id
+                    AND parent_tmdb_metadata_summary.language = ''
                 WHERE library_entries.kind = 'snapshot'
                     AND (
                         LOWER(library_entries.identity) LIKE ?
-                        OR LOWER(COALESCE(tmdb_metadata_summary.name, '')) LIKE ?
-                        OR LOWER(COALESCE(tmdb_metadata_summary.original_name, '')) LIKE ?
+                        OR LOWER(COALESCE(entry_tmdb_metadata_summary.name, '')) LIKE ?
+                        OR LOWER(COALESCE(entry_tmdb_metadata_summary.original_name, '')) LIKE ?
+                        OR LOWER(COALESCE(parent_tmdb_metadata_summary.name, '')) LIKE ?
+                        OR LOWER(COALESCE(parent_tmdb_metadata_summary.original_name, '')) LIKE ?
                     )
                 ORDER BY library_entries.date_saved DESC NULLS LAST, library_entries.identity ASC
                 """,
-                (pattern, pattern, pattern),
+                (pattern, pattern, pattern, pattern, pattern),
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
@@ -414,12 +422,42 @@ class LibraryCacheStore:
         for row in rows:
             summary = metadata.metadata_row(row)
             metadata_by_key[metadata.metadata_key_from_summary(summary)] = summary
-        attached: list[LibraryEntryModel] = []
-        for entry in entries:
-            attached.append(
-                entry.with_metadata(metadata_by_key.get(metadata.metadata_key_from_entry(entry)))
-            )
-        return attached
+        return [
+            entry.with_metadata(metadata_by_key.get(metadata.metadata_key_from_entry(entry)))
+            for entry in entries
+        ]
+
+    def display_titles_for_entries(self, entries: list[LibraryEntryModel]) -> dict[str, str]:
+        parent_keys_by_identity = {
+            entry.identity: parent_key
+            for entry in entries
+            if (parent_key := self._parent_series_metadata_key(entry)) is not None
+        }
+        if not parent_keys_by_identity:
+            return {}
+
+        metadata_keys = sorted(set(parent_keys_by_identity.values()))
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT metadata_key, metadata_json
+                FROM tmdb_metadata_summary
+                WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
+                AND language = ''
+                """,
+                metadata_keys,
+            ).fetchall()
+
+        metadata_by_key = {
+            str(row["metadata_key"]): metadata.metadata_row(row)
+            for row in rows
+        }
+        display_titles: dict[str, str] = {}
+        for identity, parent_key in parent_keys_by_identity.items():
+            parent_title = metadata_by_key.get(parent_key)
+            if parent_title is not None and parent_title.title is not None:
+                display_titles[identity] = parent_title.title
+        return display_titles
 
     def _metadata_summary_targets_by_state(
         self,
@@ -445,6 +483,13 @@ class LibraryCacheStore:
 
     def _entry_models_from_rows(self, rows: list[sqlite3.Row]) -> list[LibraryEntryModel]:
         return [records.decoded_entry(row) for row in rows]
+
+    def _parent_series_metadata_key(self, entry: LibraryEntryModel) -> str | None:
+        if entry.entry_type != "season" or entry.parent_series_id is None:
+            return None
+        return metadata.metadata_key_from_target(
+            TMDbSummaryIdentity(entry_type="series", tmdb_id=entry.parent_series_id)
+        )
 
     @contextmanager
     def _connect_initialized(self) -> Generator[sqlite3.Connection]:

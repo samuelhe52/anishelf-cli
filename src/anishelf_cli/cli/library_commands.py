@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Annotated, NoReturn
+from typing import Annotated, NoReturn, cast
 
 import httpx
 import typer
@@ -107,6 +107,7 @@ def library_get(
     _reject_reserved_metadata_depth(metadata_depth)
     lookup_record_names = valid_lookup_record_names(identities)
     cached_entries: dict[str, LibraryEntryModel] = {}
+    store: LibraryCacheStore | None = None
     if lookup_record_names:
         store, _ = _library_read_store(sync=sync)
         cached_entries = store.get_entry_models_by_identity(lookup_record_names)
@@ -124,9 +125,20 @@ def library_get(
 
     envelope = library_get_cache_envelope(identities, cached_entries)
     if json_output_requested(ctx, json_output):
-        emit_json(envelope.model_dump(mode="json"))
+        payload = envelope.model_dump(mode="json")
+        if store is not None:
+            _add_parent_series_titles_to_get_payload(
+                payload,
+                _display_titles_for_entries(store, list(cached_entries.values())),
+            )
+        emit_json(payload)
     else:
-        render_library_get(envelope)
+        display_titles = (
+            _display_titles_for_entries(store, list(cached_entries.values()))
+            if store is not None
+            else {}
+        )
+        render_library_get(envelope, display_titles=display_titles)
 
     if not has_any_found_item(envelope):
         raise typer.Exit(code=1)
@@ -358,11 +370,17 @@ def library_list(
         _exit_metadata_completeness(exc)
     payload = result.model_dump(mode="json")
     if machine_output:
+        _add_parent_series_titles_to_entries_payload(
+            payload,
+            _display_titles_for_entries(store, list(result.entries)),
+        )
         emit_json(payload)
         return
+    display_entries = store.attach_metadata_summary_models(list(result.entries))
     render_library_list(
-        store.attach_metadata_summary_models(list(result.entries)),
+        display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
+        display_titles=_display_titles_for_entries(store, display_entries),
     )
 
 
@@ -405,12 +423,18 @@ def library_search(
         _exit_metadata_completeness(exc)
     payload = result.model_dump(mode="json")
     if machine_output:
+        _add_parent_series_titles_to_entries_payload(
+            payload,
+            _display_titles_for_entries(store, list(result.entries)),
+        )
         emit_json(payload)
         return
+    display_entries = store.attach_metadata_summary_models(list(result.entries))
     render_library_search(
         title,
-        store.attach_metadata_summary_models(list(result.entries)),
+        display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
+        display_titles=_display_titles_for_entries(store, display_entries),
     )
 
 
@@ -445,6 +469,10 @@ def library_export(
     )
     payload = result.model_dump(mode="json")
     if json_output_requested(ctx, json_output):
+        _add_parent_series_titles_to_entries_payload(
+            payload,
+            _display_titles_for_entries(store, list(result.entries)),
+        )
         emit_json(payload)
         return
     render_library_export_result(list(result.entries), result.cache)
@@ -552,6 +580,58 @@ def _library_cache_update_result(
             )
         )
     )
+
+
+def _add_parent_series_titles_to_get_payload(
+    payload: dict[str, object],
+    parent_series_titles: dict[str, str],
+) -> None:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        entry = item.get("entry")
+        if isinstance(entry, dict):
+            _add_parent_series_title_to_entry_payload(entry, parent_series_titles)
+
+
+def _add_parent_series_titles_to_entries_payload(
+    payload: dict[str, object],
+    parent_series_titles: dict[str, str],
+) -> None:
+    entries = payload.get("entries")
+    if not isinstance(entries, list):
+        return
+    for entry in entries:
+        if isinstance(entry, dict):
+            _add_parent_series_title_to_entry_payload(entry, parent_series_titles)
+
+
+def _add_parent_series_title_to_entry_payload(
+    entry: dict[str, object],
+    parent_series_titles: dict[str, str],
+) -> None:
+    identity = entry.get("id")
+    if not isinstance(identity, str):
+        return
+    parent_series_title = parent_series_titles.get(identity)
+    if parent_series_title is None:
+        return
+    metadata = entry.get("metadata")
+    if isinstance(metadata, dict):
+        cast(dict[str, object], metadata)["parent_series_title"] = parent_series_title
+
+
+def _display_titles_for_entries(
+    store: object,
+    entries: list[LibraryEntryModel],
+) -> dict[str, str]:
+    display_titles = getattr(store, "display_titles_for_entries", None)
+    if not callable(display_titles):
+        return {}
+    return cast(Callable[[list[LibraryEntryModel]], dict[str, str]], display_titles)(entries)
 
 
 def _initialize_library_store(
