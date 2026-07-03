@@ -221,6 +221,18 @@ def test_library_clear_cache_yes_removes_all_local_cache_files(tmp_path, monkeyp
     assert not store.lock_path.exists()
 
 
+def test_library_clear_cache_y_alias_removes_all_local_cache_files(tmp_path, monkeypatch) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["-j", "lib", "clear-cache", "-y"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["status"] == "cleared"
+    assert payload["removed"]["cache_files"] == 1
+    assert not store.path.exists()
+
+
 def test_library_clear_cache_prompt_can_confirm(tmp_path, monkeypatch) -> None:
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
 

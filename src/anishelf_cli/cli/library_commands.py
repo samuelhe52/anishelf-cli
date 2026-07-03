@@ -125,7 +125,7 @@ def library_get(
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
@@ -197,7 +197,7 @@ def library_init(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     machine_output = json_output_requested(ctx, json_output)
@@ -232,7 +232,7 @@ def library_sync(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     store, refresh_result = _initialize_library_store(
@@ -266,7 +266,7 @@ def library_status(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     status = service_library_status()
@@ -315,11 +315,11 @@ def library_clear_cache(
     ctx: typer.Context,
     yes: Annotated[
         bool,
-        typer.Option("--yes", help="Skip the confirmation prompt."),
+        typer.Option("--yes", "-y", help="Skip the confirmation prompt."),
     ] = False,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     if not yes:
@@ -375,7 +375,7 @@ def library_list(
     output_style: OutputStyleOption = None,
     watch_status: Annotated[
         str | None,
-        typer.Option("--watch-status", help="Filter by watch status."),
+        typer.Option("--watch-status", "-w", help="Filter by watch status."),
     ] = None,
     show_hidden: Annotated[
         bool,
@@ -402,11 +402,11 @@ def library_list(
     ] = LibraryListSort.UPDATED,
     limit: Annotated[
         int | None,
-        typer.Option("--limit", min=1, help="Limit the number of entries returned."),
+        typer.Option("--limit", "-l", min=1, help="Limit the number of entries returned."),
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
@@ -472,7 +472,7 @@ def library_list(
 @library_app.command("search", help="Search cached library entries by title.")
 def library_search(
     ctx: typer.Context,
-    title: Annotated[str, typer.Option("--title")],
+    title: Annotated[str, typer.Option("--title", "-t")],
     metadata: MetadataOption = None,
     sync: Annotated[
         bool | None,
@@ -500,7 +500,7 @@ def library_search(
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
@@ -588,7 +588,7 @@ def library_export(
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
@@ -633,7 +633,7 @@ def library_refresh_meta(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     store = _library_store_for_read()

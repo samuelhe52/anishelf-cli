@@ -1601,6 +1601,25 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
     assert [entry["id"] for entry in payload["entries"]] == ["movie:66"]
 
 
+def test_library_list_accepts_short_filter_and_limit_options(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, watch_status="watching"),
+        _live_record("series:22", "series", 22, watch_status="watched"),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+
+    result = runner.invoke(app, ["lib", "list", "-j", "-w", "watching", "-l", "1"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["filters"]["watch_status"] == "watching"
+    assert payload["filters"]["limit"] == 1
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
+
+
 def test_library_list_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> None:
     create_seeded_cache_store(
         monkeypatch,
@@ -1819,6 +1838,23 @@ def test_library_list_style_list_respects_fields_selection(
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     result = runner.invoke(app, ["lib", "list", "--style", "list", "--fields", "id,status"])
+
+    assert result.exit_code == 0, result.output
+    assert "\nmovie:55\n" in result.stdout
+    assert "  ID       movie:55\n" in result.stdout
+    assert "  Status   watched\n" in result.stdout
+    assert "Title" not in result.stdout
+    assert "Alien" not in result.stdout
+
+
+def test_library_list_accepts_short_style_and_fields_options(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list", "-s", "list", "-f", "id,status"])
 
     assert result.exit_code == 0, result.output
     assert "\nmovie:55\n" in result.stdout
@@ -2047,6 +2083,23 @@ def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
     result = runner.invoke(app, ["--json", "lib", "search", "--title", "Alien"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"title": "Alien"}
+    assert [entry["id"] for entry in payload["entries"]] == [
+        "movie:55",
+        "series:22",
+        "season:22:1:33",
+    ]
+    assert fake_store.search_title_arg == "Alien"  # type: ignore[attr-defined]
+
+
+def test_library_search_accepts_short_title_and_json_options(monkeypatch) -> None:
+    fake_store = _fake_search_store()
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
+
+    result = runner.invoke(app, ["lib", "search", "-t", "Alien", "-j"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)

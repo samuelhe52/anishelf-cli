@@ -88,7 +88,7 @@ def config_show(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     payload = _config_payload()
@@ -157,6 +157,7 @@ def config_set_defaults(
         str | None,
         typer.Option(
             "--metadata",
+            "-m",
             help="Default metadata level for library read commands: none or summary.",
             show_default=False,
         ),
@@ -166,6 +167,7 @@ def config_set_defaults(
         str | None,
         typer.Option(
             "--style",
+            "-s",
             help=(
                 "Default human output style for library list/search: table or list. "
                 "Use default to reset to the built-in table style."
@@ -193,7 +195,7 @@ def config_set_defaults(
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     has_replacements = (
@@ -331,7 +333,7 @@ def config_set_tmdb_api_key(
     ] = False,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     token = (

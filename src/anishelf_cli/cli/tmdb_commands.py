@@ -50,12 +50,13 @@ def tmdb_search(
         str | None,
         typer.Option(
             "--title",
+            "-t",
             help="Optional title query. When omitted, discover popular anime titles instead.",
         ),
     ] = None,
     year: Annotated[
         int | None,
-        typer.Option("--year", min=1888, help="Filter to a release or first-air year."),
+        typer.Option("--year", "-y", min=1888, help="Filter to a release or first-air year."),
     ] = None,
     entry_type: Annotated[
         TMDbSearchType,
@@ -76,7 +77,7 @@ def tmdb_search(
     ] = None,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     defaults = _user_defaults_or_exit()

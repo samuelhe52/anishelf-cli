@@ -128,7 +128,9 @@ def test_root_help_mentions_global_options() -> None:
     assert result.exit_code == 0
     assert "--profile" not in result.stdout
     assert "--json" in result.stdout
+    assert "-j" in result.stdout
     assert "--verbose" in result.stdout
+    assert "-v" in result.stdout
     assert "--metadata-depth" not in result.stdout
     assert "--anishelf-source" not in result.stdout
 
@@ -192,6 +194,14 @@ def test_non_user_command_groups_are_removed(command: str) -> None:
             ["lib", "export", "--metadata=none"],
         ),
         (
+            ["lib", "list", "-m"],
+            ["lib", "list", "--metadata=summary"],
+        ),
+        (
+            ["lib", "list", "-m", "none"],
+            ["lib", "list", "--metadata=none"],
+        ),
+        (
             ["lib", "get", "--metadata", "--", "none"],
             ["lib", "get", "--metadata=summary", "--", "none"],
         ),
@@ -205,6 +215,7 @@ def test_normalize_metadata_args(args: list[str], expected: list[str]) -> None:
     ("args", "expected_exit", "stdout_entries", "stderr_fragment"),
     [
         (["--json", "lib", "list", "--metadata"], 0, 0, None),
+        (["--json", "lib", "list", "-m"], 0, 0, None),
         (
             ["--json", "lib", "list", "--metadata", "full"],
             2,
@@ -252,20 +263,29 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
     [
         (
             ["lib", "get"],
-            ("--metadata", "--live-meta", "none", "summary", "details", "full", "--sync"),
+            (
+                "--metadata",
+                "-m",
+                "--live-meta",
+                "none",
+                "summary",
+                "details",
+                "full",
+                "--sync",
+            ),
             (),
         ),
-        (["lib", "list"], ("--sync",), ("--refresh-meta",)),
+        (["lib", "list"], ("--sync", "-f", "-s", "-w", "-l", "-j"), ("--refresh-meta",)),
         (["lib"], ("refresh-meta",), ("changes",)),
         (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
-        (["lib", "refresh-meta"], ("--json",), ()),
+        (["lib", "refresh-meta"], ("--json", "-j"), ()),
         (["lib", "search"], ("--sync",), ()),
         (["lib", "export"], ("--sync",), ()),
-        (["tmdb", "search"], ("--title", "--type", "--year", "--json"), ()),
-        (["lib", "init"], ("--json",), ()),
-        (["lib", "sync"], ("--json",), ()),
-        (["lib", "status"], ("--json",), ()),
-        (["lib", "clear-cache"], ("--yes",), ()),
+        (["tmdb", "search"], ("--title", "-t", "--type", "--year", "-y", "--json", "-j"), ()),
+        (["lib", "init"], ("--json", "-j"), ()),
+        (["lib", "sync"], ("--json", "-j"), ()),
+        (["lib", "status"], ("--json", "-j"), ()),
+        (["lib", "clear-cache"], ("--yes", "-y"), ()),
         (["auth", "logout"], ("clear local library cache files",), ()),
     ],
 )
@@ -564,6 +584,37 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id", "saved"]\n'
         'output_style = "list"\nshow_hidden = true\n\n[tmdb]\nmetadata_language = "ja-JP"\n'
     )
+
+
+def test_config_set_defaults_accepts_short_metadata_fields_style_and_json_options(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    result = runner.invoke(
+        app,
+        [
+            "config",
+            "set-defaults",
+            "-m",
+            "none",
+            "-f",
+            "title,id",
+            "-s",
+            "list",
+            "-j",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["defaults"]["library"] == {
+        "metadata": "none",
+        "display_fields": ["title", "id"],
+        "output_style": "list",
+        "show_hidden": False,
+    }
 
 
 def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monkeypatch) -> None:
@@ -974,6 +1025,36 @@ def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -
     assert payload["summary"] == {"movies": 1, "series": 0, "total": 1}
     assert payload["results"]["movies"][0]["tmdb_id"] == 55
     assert payload["results"]["series"] == []
+
+
+def test_tmdb_search_accepts_short_title_year_and_json_options(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=1979, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+    )
+
+    result = runner.invoke(app, ["tmdb", "search", "-t", "Alien", "-y", "1979", "-j"])
+
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {
+        "language": "en-US",
+        "mode": "search",
+        "title": "Alien",
+        "type": "all",
+        "year": 1979,
+    }
+    assert payload["results"]["movies"][0]["tmdb_id"] == 55
 
 
 def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:

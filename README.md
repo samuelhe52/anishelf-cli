@@ -103,7 +103,7 @@ language that differs from the configured default is fetched live for that
 request and is not written back to the metadata cache.
 
 Use `ani lib clear-cache` to remove all local library cache files after an
-interactive confirmation. Pass `--yes` to skip the prompt.
+interactive confirmation. Pass `--yes` or `-y` to skip the prompt.
 
 ## Metadata
 

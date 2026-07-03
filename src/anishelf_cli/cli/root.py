@@ -50,6 +50,7 @@ from anishelf_cli.secrets import (
 
 _DEFAULT_METADATA_DEPTH = MetadataDepth.SUMMARY.value
 _METADATA_DEPTH_VALUES = {depth.value for depth in MetadataDepth}
+_METADATA_OPTION_NAMES = {"--metadata", "-m"}
 
 
 def _normalize_metadata_args(args: list[str]) -> list[str]:
@@ -61,7 +62,7 @@ def _normalize_metadata_args(args: list[str]) -> list[str]:
         if arg == "--":
             normalized.extend(args[index:])
             break
-        if arg != "--metadata":
+        if arg not in _METADATA_OPTION_NAMES:
             normalized.append(arg)
             index += 1
             continue
@@ -106,12 +107,13 @@ def root_callback(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON when supported."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON when supported."),
     ] = False,
     verbose: Annotated[
         bool,
         typer.Option(
             "--verbose",
+            "-v",
             help="Emit redacted network diagnostics to stderr.",
         ),
     ] = False,
@@ -201,7 +203,7 @@ def login(
     ] = 120.0,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     strategy = callback_strategy or CallbackStrategy.MANUAL_PASTE
@@ -267,7 +269,7 @@ def logout(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     secret_store = default_secret_store()
@@ -297,7 +299,7 @@ def auth_status(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     current_user = _get_current_user_or_exit()
@@ -313,7 +315,7 @@ def auth_refresh(
     ctx: typer.Context,
     json_output: Annotated[
         bool,
-        typer.Option("--json", help="Emit machine-readable JSON."),
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     current_user = _get_current_user_or_exit()
