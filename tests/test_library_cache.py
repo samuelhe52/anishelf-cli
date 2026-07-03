@@ -1762,6 +1762,26 @@ def test_library_list_json_adds_parent_series_title_for_seasons(
     assert payload["entries"][0]["metadata"]["parent_series_title"] == "Cowboy Bebop"
 
 
+def test_library_list_human_output_labels_season_rows_with_series_and_season_number(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    result = runner.invoke(app, ["lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Cowboy Bebop (S1)" in result.stdout
+
+
 def test_library_list_json_omits_parent_series_title_without_metadata(
     tmp_path,
     monkeypatch,
@@ -1849,6 +1869,27 @@ def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
         "season:22:1:33",
     ]
     assert fake_store.search_title_arg == "Alien"  # type: ignore[attr-defined]
+
+
+def test_library_search_human_output_labels_season_rows_with_series_and_season_number(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("series:22", "series", 22, date_saved="2026-05-03T00:00:00Z"),
+        _live_record("season:22:1:33", "season", 33, date_saved="2026-05-02T00:00:00Z"),
+    )
+    store.upsert_metadata_summary(_metadata_summary("series", 22, name="Cowboy Bebop"))
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    result = runner.invoke(app, ["lib", "search", "--title", "Cowboy"])
+
+    assert result.exit_code == 0, result.output
+    assert "Cowboy Bebop (S1)" in result.stdout
 
 
 def test_cache_title_search_matches_parent_series_titles_for_seasons(

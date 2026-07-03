@@ -187,7 +187,7 @@ def _human_library_row(
     display_titles: Mapping[str, str],
 ) -> dict[str, object]:
     return {
-        "title": _display_title(entry, display_titles),
+        "title": _display_table_title(entry, display_titles),
         "id": entry.identity,
         "type": entry.entry_type,
         "status": getattr(entry, "watch_status", None),
@@ -209,6 +209,20 @@ def _display_title(
     display_titles: Mapping[str, str],
 ) -> str:
     return display_titles.get(entry.identity) or entry.title
+
+
+def _display_table_title(
+    entry: LibraryEntryModel,
+    display_titles: Mapping[str, str],
+) -> str:
+    title = _display_title(entry, display_titles)
+    if (
+        entry.entry_type != "season"
+        or entry.season_number is None
+        or entry.identity not in display_titles
+    ):
+        return title
+    return f"{title} (S{entry.season_number})"
 
 
 def _season_metadata_title(
