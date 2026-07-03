@@ -399,7 +399,7 @@ def library_list(
     sort: Annotated[
         LibraryListSort,
         typer.Option("--sort", help="Sort by saved, updated, or title."),
-    ] = LibraryListSort.SAVED,
+    ] = LibraryListSort.UPDATED,
     limit: Annotated[
         int | None,
         typer.Option("--limit", min=1, help="Limit the number of entries returned."),

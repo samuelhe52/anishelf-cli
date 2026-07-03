@@ -11,6 +11,7 @@ from typing import Any
 import httpx
 import pytest
 
+from anishelf_cli.cache import schema as cache_schema
 from anishelf_cli.cache.records import entry_row_params
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import LibraryCacheStore
@@ -187,14 +188,23 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
 
     with sqlite3.connect(store.path) as db:
         index_names = {row[1] for row in db.execute("PRAGMA index_list(library_entries)")}
-        assert "idx_library_entries_snapshot_sort" in index_names
+        assert "idx_library_entries_snapshot_updated_sort" in index_names
         assert "idx_library_entries_tmdb_lookup" in index_names
         assert "idx_library_entries_parent_series_lookup" in index_names
-        assert _index_columns(db, "idx_library_entries_snapshot_sort") == [
-            "kind",
-            "date_saved",
-            "identity",
-        ]
+        snapshot_sort_sql = db.execute(
+            """
+            SELECT sql
+            FROM sqlite_master
+            WHERE type = 'index' AND name = 'idx_library_entries_snapshot_updated_sort'
+            """
+        ).fetchone()[0]
+        assert snapshot_sort_sql is not None
+        assert (
+            "ON library_entries("
+            "kind, "
+            f"{cache_schema.UPDATED_SORT_EXPRESSION} DESC, "
+            "identity ASC)"
+        ) in snapshot_sort_sql
         assert _index_columns(db, "idx_library_entries_tmdb_lookup") == [
             "kind",
             "entry_type",
@@ -220,6 +230,26 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
             "poster_path",
             "source_version",
         } <= metadata_columns
+
+
+def test_cache_updated_sort_query_uses_snapshot_sort_index(tmp_path, monkeypatch) -> None:
+    store = create_cache_store(monkeypatch, tmp_path)
+
+    with sqlite3.connect(store.path) as db:
+        plan_rows = db.execute(
+            f"""
+            EXPLAIN QUERY PLAN
+            SELECT decoded_json
+            FROM library_entries
+            WHERE kind = 'snapshot'
+            {cache_schema.list_order_by("updated")}
+            """
+        ).fetchall()
+
+    assert any(
+        "USING INDEX idx_library_entries_snapshot_updated_sort" in str(row[3])
+        for row in plan_rows
+    )
 
 
 def test_cache_preserves_raw_cloudkit_record_json_shape(tmp_path, monkeypatch) -> None:
@@ -1595,6 +1625,80 @@ def test_library_list_hides_hidden_entries_by_default(tmp_path, monkeypatch) -> 
     ]
 
 
+def test_library_list_defaults_to_updated_sort_order(tmp_path, monkeypatch) -> None:
+    first = _live_record("movie:55", "movie", 55, date_saved="2026-05-01T00:00:00Z")
+    second = _live_record("series:22", "series", 22, date_saved="2026-05-03T00:00:00Z")
+    third = _live_record("movie:66", "movie", 66, date_saved="2026-05-02T00:00:00Z")
+    first["fields"]["libraryUpdatedAt"]["value"] = "2026-05-07T00:00:00Z"
+    first["fields"]["trackingUpdatedAt"]["value"] = "2026-05-10T00:00:00Z"
+    second["fields"]["libraryUpdatedAt"]["value"] = "2026-05-06T00:00:00Z"
+    second["fields"]["trackingUpdatedAt"]["value"] = "2026-05-08T00:00:00Z"
+    third["fields"]["libraryUpdatedAt"]["value"] = "2026-05-05T00:00:00Z"
+    third["fields"]["trackingUpdatedAt"]["value"] = "2026-05-09T00:00:00Z"
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        first,
+        second,
+        third,
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["filters"]["sort"] == "updated"
+    assert [entry["id"] for entry in payload["entries"]] == [
+        "movie:55",
+        "movie:66",
+        "series:22",
+    ]
+
+
+def test_library_list_updated_sort_uses_newest_update_clock(tmp_path, monkeypatch) -> None:
+    tracking_newer = _live_record(
+        "movie:55",
+        "movie",
+        55,
+        date_saved="2026-05-01T00:00:00Z",
+    )
+    library_newer = _live_record(
+        "series:22",
+        "series",
+        22,
+        date_saved="2026-05-02T00:00:00Z",
+    )
+    fallback_saved = _live_record(
+        "movie:66",
+        "movie",
+        66,
+        date_saved="2026-05-09T00:00:00Z",
+    )
+    tracking_newer["fields"]["libraryUpdatedAt"]["value"] = "2026-05-05T00:00:00Z"
+    tracking_newer["fields"]["trackingUpdatedAt"]["value"] = "2026-05-12T00:00:00Z"
+    library_newer["fields"]["libraryUpdatedAt"]["value"] = "2026-05-13T00:00:00Z"
+    library_newer["fields"]["trackingUpdatedAt"]["value"] = "2026-05-06T00:00:00Z"
+    fallback_saved["fields"]["libraryUpdatedAt"]["value"] = None
+    fallback_saved["fields"]["trackingUpdatedAt"]["value"] = None
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        tracking_newer,
+        library_newer,
+        fallback_saved,
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [entry["id"] for entry in payload["entries"]] == [
+        "series:22",
+        "movie:55",
+        "movie:66",
+    ]
+
+
 def test_library_list_uses_configured_show_hidden_default(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
@@ -1633,6 +1737,24 @@ def test_library_list_uses_configured_display_fields_for_human_output(
     assert "Saved" in result.stdout
     assert "ID" not in result.stdout
     assert "Status" not in result.stdout
+
+
+def test_library_list_uses_updated_in_builtin_table_fields(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    record = _live_record("movie:55", "movie", 55)
+    record["fields"]["libraryUpdatedAt"]["value"] = "2026-05-12T00:00:00Z"
+    record["fields"]["trackingUpdatedAt"]["value"] = "2026-05-11T00:00:00Z"
+    store = create_seeded_cache_store(monkeypatch, tmp_path, record)
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Updated" in result.stdout
+    assert "2026-05-12" in result.stdout
+    assert "Saved" not in result.stdout
 
 
 def test_library_list_fields_flag_overrides_configured_display_fields(

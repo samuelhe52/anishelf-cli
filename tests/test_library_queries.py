@@ -219,7 +219,7 @@ class FakeQueryStore:
         hidden: bool | None = None,
         favorite: bool | None = None,
         on_display: bool | None = None,
-        sort: str = "saved",
+        sort: str = "updated",
         limit: int | None = None,
     ) -> list[LibraryEntryModel]:
         self.list_filter_kwargs = {

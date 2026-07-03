@@ -41,7 +41,7 @@ Rebuilds should not expose a mixed old/new cache. Fetch rebuilt rows into a
 staging table and promote them only after the final page has been applied.
 
 List and search reads should stay index-friendly for large libraries. The cache
-currently keeps kind-scoped sort and lookup indexes for saved-date ordering,
+currently keeps kind-scoped sort and lookup indexes for updated ordering,
 direct movie/series TMDb matches, and season parent-series matches.
 
 ## Public Commands

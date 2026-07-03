@@ -42,7 +42,7 @@ LIBRARY_LIST_DEFAULT_FIELDS = (
     "score",
     "favorite",
     "display",
-    "saved",
+    "updated",
 )
 LIBRARY_SEARCH_DEFAULT_FIELDS = (
     "title",
@@ -60,6 +60,7 @@ DISPLAY_FIELD_COLUMNS = {
     "score": HumanTableColumn("score", "Score", "right"),
     "favorite": HumanTableColumn("favorite", "Fav"),
     "display": HumanTableColumn("display", "Display"),
+    "updated": HumanTableColumn("updated", "Updated"),
     "saved": HumanTableColumn("saved", "Saved"),
 }
 
@@ -199,8 +200,23 @@ def _human_library_row(
         "score": getattr(entry, "score", None),
         "favorite": getattr(entry, "favorite", None),
         "display": getattr(entry, "on_display", None),
+        "updated": _compact_date(_library_updated_value(entry)),
         "saved": _compact_date(getattr(entry, "date_saved", None)),
     }
+
+
+def _library_updated_value(entry: LibraryEntryModel) -> object:
+    update_clocks = [
+        value
+        for value in (
+            getattr(entry, "tracking_updated_at", None),
+            getattr(entry, "library_updated_at", None),
+        )
+        if isinstance(value, str)
+    ]
+    if update_clocks:
+        return max(update_clocks)
+    return getattr(entry, "date_saved", None)
 
 
 def _display_title(

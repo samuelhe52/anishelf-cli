@@ -30,6 +30,7 @@ LIBRARY_DISPLAY_FIELDS = (
     "score",
     "favorite",
     "display",
+    "updated",
     "saved",
 )
 

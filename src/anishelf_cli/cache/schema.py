@@ -8,6 +8,15 @@ CACHE_SCHEMA_VERSION = "2"
 TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v3"
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
 REBUILD_SYNC_TOKEN_META_KEY = "rebuild_sync_token"
+UPDATED_SORT_EXPRESSION = (
+    "CASE "
+    "WHEN tracking_updated_at IS NULL AND library_updated_at IS NULL THEN date_saved "
+    "WHEN tracking_updated_at IS NULL THEN library_updated_at "
+    "WHEN library_updated_at IS NULL THEN tracking_updated_at "
+    "WHEN tracking_updated_at >= library_updated_at THEN tracking_updated_at "
+    "ELSE library_updated_at "
+    "END"
+)
 
 
 class LibraryCacheError(RuntimeError):
@@ -46,8 +55,8 @@ def reset_schema(db: sqlite3.Connection) -> None:
 
 def create_entries_indexes(db: sqlite3.Connection, table: str, prefix: str) -> None:
     db.execute(
-        f"CREATE INDEX IF NOT EXISTS {prefix}_snapshot_sort "
-        f"ON {table}(kind, date_saved DESC, identity ASC)"
+        f"CREATE INDEX IF NOT EXISTS {prefix}_snapshot_updated_sort "
+        f"ON {table}(kind, {UPDATED_SORT_EXPRESSION} DESC, identity ASC)"
     )
     db.execute(
         f"CREATE INDEX IF NOT EXISTS {prefix}_tmdb_lookup ON {table}(kind, entry_type, tmdb_id)"
@@ -129,10 +138,7 @@ def list_order_by(sort: str) -> str:
     if sort == "saved":
         return "ORDER BY date_saved DESC NULLS LAST, identity ASC"
     if sort == "updated":
-        return (
-            "ORDER BY COALESCE(tracking_updated_at, library_updated_at, date_saved) "
-            "DESC NULLS LAST, identity ASC"
-        )
+        return f"ORDER BY {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
     if sort == "title":
         return "ORDER BY identity ASC"
     raise LibraryCacheError(f"Unsupported library list sort: {sort}.")
