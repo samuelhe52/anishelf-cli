@@ -19,7 +19,8 @@ spec.
 - `auth logout` removes the stored CloudKit web auth token and clears all local
   library cache files.
 - `config show`, `config set-defaults`, and `config set-tmdb-api-key` are
-  implemented.
+  implemented. Defaults include library output behavior and the preferred TMDb
+  metadata language, which defaults to `en-US`.
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.
@@ -43,12 +44,16 @@ spec.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_summary`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `details`/`full` are
-  reserved until detail cache behavior exists.
+  reserved until detail cache behavior exists. Cached summaries are keyed by
+  the configured preferred TMDb metadata language.
 - `lib init` hydrates TMDb summary metadata for the full fetched library
-  when a TMDb key is available. Later `lib sync` refreshes hydrate all
-  newly added entries automatically. `lib refresh-meta` explicitly
-  refreshes cached TMDb summaries for the full local library, and `lib get`
-  supports `--live-meta` for targeted per-entry refresh.
+  in the preferred language when a TMDb key is available. Later `lib sync`
+  refreshes hydrate all newly added entries automatically. `lib refresh-meta`
+  explicitly refreshes cached TMDb summaries for the full local library, and
+  `lib get` supports `--live-meta` for targeted per-entry refresh. A
+  per-command `--tmdb-language` override on library reads is ad-hoc when it
+  differs from the preferred language: summaries are fetched live for output
+  and are not written to the cache.
 - `lib list` has first-pass ergonomic filters and ordering for common
   questions: watch status, favorites, saved/updated/title sort, and result
   limits. Human output supports `--style table|list` and configurable display
@@ -57,7 +62,8 @@ spec.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
 - `tmdb search` performs global TMDb anime title search, and discover-style
-  popular anime lookup when no title is provided.
+  popular anime lookup when no title is provided. It sends the preferred TMDb
+  metadata language unless `--tmdb-language` is supplied for that request.
 
 ## Near-Term Direction
 

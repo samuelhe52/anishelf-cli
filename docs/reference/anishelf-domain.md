@@ -54,12 +54,12 @@ include:
 - `lib status`
 - `lib clear-cache`
 - `lib refresh-meta`
-- `lib get <id...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
-- `lib list [--sync] [--metadata[=none|summary|details|full]] [--style table|list]`
-- `lib search --title` with optional `--sync`, `--metadata`, and
-  `--style table|list`
-- `lib export` with optional `--sync` and `--metadata`
-- `tmdb search [--title]`
+- `lib get <id...> [--sync] [--live-meta] [--tmdb-language] [--metadata[=none|summary|details|full]]`
+- `lib list [--sync] [--tmdb-language] [--metadata[=none|summary|details|full]] [--style table|list]`
+- `lib search --title` with optional `--sync`, `--tmdb-language`,
+  `--metadata`, and `--style table|list`
+- `lib export` with optional `--sync`, `--tmdb-language`, and `--metadata`
+- `tmdb search [--title] [--tmdb-language]`
 
 `lib init` is the explicit bootstrap entry point for the local cache.
 `lib sync` is the explicit refresh entry point after bootstrap. Other
@@ -102,6 +102,15 @@ CloudKit records do not contain rich TMDb metadata such as localized titles,
 overviews, posters for normal TMDb items, runtime, credits, or season detail.
 Hydration should be explicit and optional.
 
+The implemented summary contract follows AniShelf entry metadata, not TMDb
+detail payloads. Summary fields are requested `language`, localized `name` and
+`overview`, `name_translations`, `overview_translations`, poster/backdrop/logo
+paths, `original_language_code`, `on_air_date`, homepage-backed
+`link_to_details`, and the internal identity fields required to attach the
+summary to a library entry. Do not include detail/full fields such as runtime,
+genres, vote averages/counts, popularity, credits, seasons, or episodes in the
+summary model or cache.
+
 The CLI decision is to keep metadata on library commands instead of exposing a
 separate top-level hydration pass. Bare `--metadata` should request the default
 summary level. Explicit `none` and `summary` are implemented; `details` and
@@ -112,9 +121,18 @@ positional id or title is literally `none`, `summary`, `details`, or
 the metadata level. `none` means no TMDb request.
 
 `lib init` should fetch the full library and hydrate TMDb summary metadata
-for every entry when a TMDb key is available. After that initialization pass,
-`lib sync` should hydrate every newly added entry automatically.
+for every entry in the configured preferred metadata language when a TMDb key is
+available. After that initialization pass, `lib sync` should hydrate every
+newly added entry automatically in that same preferred language.
 `lib refresh-meta` should refetch TMDb summary metadata for the full local
 cache on demand. `lib get --live-meta` should refetch TMDb summary metadata
 only for the requested entries and update the cache without broad library
 refresh.
+
+`config set-defaults --tmdb-language <tag>` changes the preferred persisted
+metadata language. Changing it should prompt the user to clear and rebuild the
+cache; the cache does not rewrite old metadata rows in place. A one-off
+`--tmdb-language` on a library read command is ad-hoc: if it differs from the
+preferred language, fetch the requested summaries live for that command and do
+not upsert them into `tmdb_metadata_summary`. `tmdb search --tmdb-language`
+uses the override only for that search request.
