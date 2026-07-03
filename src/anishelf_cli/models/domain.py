@@ -8,7 +8,6 @@ from pydantic import (
     SerializationInfo,
     SerializerFunctionWrapHandler,
     StrictBool,
-    StrictFloat,
     StrictInt,
     StrictStr,
     TypeAdapter,
@@ -52,7 +51,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     language: NonEmptyStr | None = None
     name: NonEmptyStr | None = None
     name_translations: tuple[tuple[str, str], ...] = ()
-    original_name: NonEmptyStr | None = None
     overview: NonEmptyStr | None = None
     overview_translations: tuple[tuple[str, str], ...] = ()
     poster_path: NonEmptyStr | None = None
@@ -60,15 +58,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     logo_path: NonEmptyStr | None = None
     original_language_code: NonEmptyStr | None = None
     on_air_date: NonEmptyStr | None = None
-    status: NonEmptyStr | None = None
-    genre_ids: Annotated[tuple[StrictInt, ...], EmptyTupleForNone] = ()
-    genres: Annotated[tuple[LibraryEntryMetadataGenre, ...], EmptyTupleForNone] = ()
-    runtime_minutes: StrictInt | None = None
-    season_count: StrictInt | None = None
-    episode_count: StrictInt | None = None
-    vote_average: StrictFloat | StrictInt | None = None
-    vote_count: StrictInt | None = None
-    popularity: StrictFloat | StrictInt | None = None
     link_to_details: NonEmptyStr | None = None
     fetched_at: NonEmptyStr | None = None
     source_version: NonEmptyStr | None = None
@@ -100,12 +89,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
         return tuple(normalized)
 
     @model_validator(mode="after")
-    def _derive_genre_ids(self) -> Self:
-        if "genre_ids" not in self.model_fields_set and self.genres:
-            object.__setattr__(self, "genre_ids", tuple(genre.id for genre in self.genres))
-        return self
-
-    @model_validator(mode="after")
     def _validate_identity_context(self) -> Self:
         identity_fields = (
             self.entry_type,
@@ -134,7 +117,7 @@ class LibraryEntryMetadata(AniShelfBaseModel):
 
     @property
     def title(self) -> str | None:
-        return self.name or self.original_name
+        return self.name
 
     @property
     def name_translation_map(self) -> dict[str, str]:
@@ -162,7 +145,6 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     def storage_payload(self) -> dict[str, object]:
         return self.model_dump(
             mode="json",
-            exclude={"genre_ids"},
             context={"storage_payload": True},
         )
 

@@ -7,6 +7,7 @@ import httpx
 import typer
 
 from anishelf_cli import config
+from anishelf_cli.cache import metadata as cache_metadata
 from anishelf_cli.cache.store import (
     LibraryCacheError,
     LibraryCacheNotAvailableError,
@@ -16,6 +17,7 @@ from anishelf_cli.cache.sync import (
     LibraryCacheProgress,
     LibraryCacheRefreshResult,
     MetadataHydrationResult,
+    fetch_metadata_summaries,
 )
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.library_service import (
@@ -58,6 +60,7 @@ from anishelf_cli.models.output import (
     LibraryCacheUpdateSummaryResult,
     LibraryClearCacheResult,
     LibraryEntriesCacheResult,
+    LibraryEntriesResult,
     LibraryRefreshMetadataCacheResult,
     LibraryRefreshMetadataResult,
     LibraryRefreshMetadataSummaryResult,
@@ -98,6 +101,17 @@ def library_get(
             help="Fetch fresh TMDb summary metadata for the requested entries.",
         ),
     ] = False,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help=(
+                "Fetch metadata for this request in a different TMDb language without "
+                "updating the cache."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -105,21 +119,33 @@ def library_get(
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
+    preferred_language = _preferred_metadata_language()
+    request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
+    ad_hoc_language = request_language != preferred_language
     lookup_record_names = valid_lookup_record_names(identities)
     cached_entries: dict[str, LibraryEntryModel] = {}
     store: LibraryCacheStore | None = None
     if lookup_record_names:
         store, _ = _library_read_store(sync=sync)
         cached_entries = store.get_entry_models_by_identity(lookup_record_names)
-        if live_meta:
+        if live_meta and not ad_hoc_language:
             _refresh_metadata_for_entries(store, list(cached_entries.values()))
-        if metadata_depth is not MetadataDepth.NONE:
+        if metadata_depth is not MetadataDepth.NONE and ad_hoc_language:
+            cached_entries = {
+                entry.identity: entry
+                for entry in _attach_live_metadata_for_entries(
+                    list(cached_entries.values()),
+                    language=request_language,
+                )
+            }
+        elif metadata_depth is not MetadataDepth.NONE:
             cached_entries = {
                 entry.identity: entry
                 for entry in attach_metadata_for_depth(
                     store,
                     list(cached_entries.values()),
                     metadata_depth,
+                    metadata_language=preferred_language,
                 )
             }
 
@@ -129,12 +155,22 @@ def library_get(
         if store is not None:
             _add_parent_series_titles_to_get_payload(
                 payload,
-                _display_titles_for_entries(store, list(cached_entries.values())),
+                _display_titles_for_entries(
+                    store,
+                    list(cached_entries.values()),
+                    language=request_language,
+                    preferred_language=preferred_language,
+                ),
             )
         emit_json(payload)
     else:
         display_titles = (
-            _display_titles_for_entries(store, list(cached_entries.values()))
+            _display_titles_for_entries(
+                store,
+                list(cached_entries.values()),
+                language=request_language,
+                preferred_language=preferred_language,
+            )
             if store is not None
             else {}
         )
@@ -333,6 +369,17 @@ def library_list(
         bool,
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help=(
+                "Fetch metadata for this request in a different TMDb language without "
+                "updating the cache."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     favorite: Annotated[
         bool,
         typer.Option("--favorite", help="Show only favorite entries."),
@@ -355,6 +402,9 @@ def library_list(
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
+    preferred_language = _preferred_metadata_language()
+    request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
+    ad_hoc_language = request_language != preferred_language
     _validate_watch_status(watch_status)
     store, refresh_result = _library_read_store(sync=sync)
     try:
@@ -367,23 +417,43 @@ def library_list(
             favorite=favorite,
             sort=sort,
             limit=limit,
+            metadata_language=preferred_language,
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
+    if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
+        result = _result_with_entries(
+            result,
+            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+        )
     payload = result.model_dump(mode="json")
     if machine_output:
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(store, list(result.entries)),
+            _display_titles_for_entries(
+                store,
+                list(result.entries),
+                language=request_language,
+                preferred_language=preferred_language,
+            ),
         )
         emit_json(payload)
         return
-    display_entries = store.attach_metadata_summary_models(list(result.entries))
+    display_entries = (
+        list(result.entries)
+        if ad_hoc_language
+        else store.attach_metadata_summary_models(list(result.entries), language=preferred_language)
+    )
     render_library_list(
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
         style=_resolve_output_style(output_style),
-        display_titles=_display_titles_for_entries(store, display_entries),
+        display_titles=_display_titles_for_entries(
+            store,
+            display_entries,
+            language=request_language,
+            preferred_language=preferred_language,
+        ),
     )
 
 
@@ -405,6 +475,17 @@ def library_search(
         bool,
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help=(
+                "Fetch metadata for this request in a different TMDb language without "
+                "updating the cache."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -415,6 +496,9 @@ def library_search(
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
+    preferred_language = _preferred_metadata_language()
+    request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
+    ad_hoc_language = request_language != preferred_language
     store, refresh_result = _library_read_store(sync=sync)
     try:
         result = build_library_search_result(
@@ -423,24 +507,44 @@ def library_search(
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
             show_hidden=_show_hidden_requested(show_hidden),
+            metadata_language=preferred_language,
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
+    if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
+        result = _result_with_entries(
+            result,
+            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+        )
     payload = result.model_dump(mode="json")
     if machine_output:
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(store, list(result.entries)),
+            _display_titles_for_entries(
+                store,
+                list(result.entries),
+                language=request_language,
+                preferred_language=preferred_language,
+            ),
         )
         emit_json(payload)
         return
-    display_entries = store.attach_metadata_summary_models(list(result.entries))
+    display_entries = (
+        list(result.entries)
+        if ad_hoc_language
+        else store.attach_metadata_summary_models(list(result.entries), language=preferred_language)
+    )
     render_library_search(
         title,
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
         style=_resolve_output_style(output_style),
-        display_titles=_display_titles_for_entries(store, display_entries),
+        display_titles=_display_titles_for_entries(
+            store,
+            display_entries,
+            language=request_language,
+            preferred_language=preferred_language,
+        ),
     )
 
 
@@ -459,6 +563,17 @@ def library_export(
         bool,
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help=(
+                "Fetch metadata for this request in a different TMDb language without "
+                "updating the cache."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
@@ -466,18 +581,32 @@ def library_export(
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
+    preferred_language = _preferred_metadata_language()
+    request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
+    ad_hoc_language = request_language != preferred_language
     store, refresh_result = _library_read_store(sync=sync)
     result = build_library_export_result(
         store,
         metadata_depth=metadata_depth,
         cache=cache_summary_payload(store, refresh_result),
         show_hidden=_show_hidden_requested(show_hidden),
+        metadata_language=preferred_language,
     )
+    if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
+        result = _result_with_entries(
+            result,
+            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+        )
     payload = result.model_dump(mode="json")
     if json_output_requested(ctx, json_output):
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(store, list(result.entries)),
+            _display_titles_for_entries(
+                store,
+                list(result.entries),
+                language=request_language,
+                preferred_language=preferred_language,
+            ),
         )
         emit_json(payload)
         return
@@ -633,11 +762,19 @@ def _add_parent_series_title_to_entry_payload(
 def _display_titles_for_entries(
     store: object,
     entries: list[LibraryEntryModel],
+    *,
+    language: str,
+    preferred_language: str,
 ) -> dict[str, str]:
+    if language != preferred_language:
+        return _live_parent_series_titles_for_entries(entries, language=language)
     display_titles = getattr(store, "display_titles_for_entries", None)
     if not callable(display_titles):
         return {}
-    return cast(Callable[[list[LibraryEntryModel]], dict[str, str]], display_titles)(entries)
+    return cast(
+        Callable[..., dict[str, str]],
+        display_titles,
+    )(entries, language=preferred_language)
 
 
 def _initialize_library_store(
@@ -660,6 +797,85 @@ def _library_command_service() -> LibraryCommandService:
         library_lock_factory=library_lock_factory,
         tmdb_summary_client_or_none=_tmdb_summary_client_or_none,
     )
+
+
+def _result_with_entries(
+    result: LibraryEntriesResult,
+    entries: list[LibraryEntryModel],
+) -> LibraryEntriesResult:
+    return result.model_copy(update={"entries": tuple(entries)})
+
+
+def _preferred_metadata_language() -> str:
+    return _user_defaults_or_exit().tmdb.metadata_language
+
+
+def _metadata_language(value: str | None, *, preferred_language: str) -> str:
+    if value is None:
+        return preferred_language
+    try:
+        return config.resolve_configured_tmdb_language(value)
+    except config.UserConfigError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+
+def _attach_live_metadata_for_entries(
+    entries: list[LibraryEntryModel],
+    *,
+    language: str,
+) -> list[LibraryEntryModel]:
+    targets = cache_metadata.dedupe_summary_targets(
+        [
+            target
+            for entry in entries
+            if (target := cache_metadata.metadata_target_from_entry(entry)) is not None
+        ]
+    )
+    summaries, error_messages = fetch_metadata_summaries(
+        _tmdb_summary_client_or_exit(language=language),
+        targets,
+    )
+    if error_messages:
+        emit_error(error_messages[0])
+        raise typer.Exit(code=2)
+    summaries_by_key = {
+        cache_metadata.metadata_key_from_summary(summary): summary for summary in summaries
+    }
+    return [
+        entry.with_metadata(summaries_by_key.get(cache_metadata.metadata_key_from_entry(entry)))
+        for entry in entries
+    ]
+
+
+def _live_parent_series_titles_for_entries(
+    entries: list[LibraryEntryModel],
+    *,
+    language: str,
+) -> dict[str, str]:
+    targets_by_identity = {
+        entry.identity: TMDbSummaryIdentity(entry_type="series", tmdb_id=entry.parent_series_id)
+        for entry in entries
+        if entry.entry_type == "season" and entry.parent_series_id is not None
+    }
+    if not targets_by_identity:
+        return {}
+    targets = cache_metadata.dedupe_summary_targets(list(targets_by_identity.values()))
+    summaries, error_messages = fetch_metadata_summaries(
+        _tmdb_summary_client_or_exit(language=language),
+        targets,
+    )
+    if error_messages:
+        return {}
+    summaries_by_key = {
+        cache_metadata.metadata_key_from_summary(summary): summary for summary in summaries
+    }
+    display_titles: dict[str, str] = {}
+    for identity, target in targets_by_identity.items():
+        summary = summaries_by_key.get(cache_metadata.metadata_key_from_target(target))
+        if summary is not None and summary.title is not None:
+            display_titles[identity] = summary.title
+    return display_titles
 
 
 def _metadata_depth(value: MetadataDepth | None) -> MetadataDepth:
@@ -701,7 +917,7 @@ def _refresh_metadata_for_entries(
     store: LibraryCacheStore,
     entries: list[LibraryEntryModel],
 ) -> MetadataHydrationResult:
-    tmdb_client = _tmdb_summary_client_or_exit()
+    tmdb_client = _tmdb_summary_client_or_exit(language=_preferred_metadata_language())
     targets = store.metadata_summary_targets_for_entries(entries)
     return _refresh_metadata_targets(store, tmdb_client, targets)
 
@@ -729,16 +945,20 @@ def _tmdb_summary_client_or_none() -> TMDbClient | None:
         tmdb_token = resolve_tmdb_api_token(default_secret_store())
     except MissingTMDbAPITokenError:
         return None
-    return TMDbClient(tmdb_token.value)
+    client = TMDbClient(tmdb_token.value)
+    client.language = _preferred_metadata_language()
+    return client
 
 
-def _tmdb_summary_client_or_exit() -> TMDbClient:
+def _tmdb_summary_client_or_exit(*, language: str) -> TMDbClient:
     try:
         tmdb_token = resolve_tmdb_api_token(default_secret_store())
     except (MissingTMDbAPITokenError, SecretStorageUnavailableError) as exc:
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
-    return TMDbClient(tmdb_token.value)
+    client = TMDbClient(tmdb_token.value)
+    client.language = language
+    return client
 
 
 def _emit_library_cache_progress(progress: LibraryCacheProgress) -> None:

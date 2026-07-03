@@ -18,7 +18,6 @@ def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> No
         {
             "id": 55,
             "title": "Alien",
-            "genres": [{"id": 878, "name": "Science Fiction"}],
             "belongs_to_collection": {"id": 10, "name": "Alien Collection"},
             "production_companies": [{"id": 1, "name": "Brandywine"}],
             "spoken_languages": [{"english_name": "English", "iso_639_1": "en"}],
@@ -28,7 +27,6 @@ def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> No
         {
             "id": 22,
             "name": "Alien Nation",
-            "genres": [{"id": 18, "name": "Drama"}],
             "last_episode_to_air": {"id": 7, "name": "Finale"},
             "networks": [{"id": 2, "name": "FOX"}],
             "seasons": [{"id": 33, "season_number": 1}],
@@ -42,16 +40,10 @@ def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> No
         }
     )
 
-    assert [genre.model_dump(mode="json") for genre in movie.genres] == [
-        {"id": 878, "name": "Science Fiction"}
-    ]
     assert movie.belongs_to_collection == {"id": 10, "name": "Alien Collection"}
     assert movie.production_companies == ({"id": 1, "name": "Brandywine"},)
     assert movie.spoken_languages == ({"english_name": "English", "iso_639_1": "en"},)
 
-    assert [genre.model_dump(mode="json") for genre in series.genres] == [
-        {"id": 18, "name": "Drama"}
-    ]
     assert series.last_episode_to_air == {"id": 7, "name": "Finale"}
     assert series.networks == ({"id": 2, "name": "FOX"},)
     assert series.seasons == ({"id": 33, "season_number": 1},)
@@ -88,6 +80,22 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.url.path.endswith("/translations"):
+            return httpx.Response(
+                200,
+                json={
+                    "translations": [
+                        {
+                            "iso_639_1": "ja",
+                            "iso_3166_1": "JP",
+                            "data": {
+                                "title": "エイリアン",
+                                "overview": "宇宙ホラー映画。",
+                            },
+                        }
+                    ]
+                },
+            )
         return httpx.Response(
             200,
             json={
@@ -99,15 +107,7 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
                 "poster_path": "/poster.jpg",
                 "backdrop_path": "/backdrop.jpg",
                 "original_language": "en",
-                "status": "Released",
-                "genres": [
-                    {"id": 878, "name": "Science Fiction"},
-                    {"id": 27, "name": "Horror"},
-                ],
-                "runtime": 117,
-                "vote_average": 8.2,
-                "vote_count": 15432,
-                "popularity": 44.5,
+                "homepage": "https://example.com/alien",
             },
         )
 
@@ -117,22 +117,16 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
     summary = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
 
     assert summary.name == "Alien"
-    assert summary.link_to_details == "https://www.themoviedb.org/movie/55"
-    assert summary.status == "Released"
-    assert [genre.model_dump(mode="json") for genre in summary.genres] == [
-        {"id": 878, "name": "Science Fiction"},
-        {"id": 27, "name": "Horror"},
-    ]
-    assert summary.runtime_minutes == 117
-    assert summary.season_count is None
-    assert summary.episode_count is None
-    assert summary.vote_average == 8.2
-    assert summary.vote_count == 15432
-    assert summary.popularity == 44.5
-    assert summary.source_version == "tmdb.http.summary.v2"
-    assert len(requests) == 1
+    assert summary.language == "en-US"
+    assert summary.name_translation_map == {"ja-JP": "エイリアン"}
+    assert summary.overview_translation_map == {"ja-JP": "宇宙ホラー映画。"}
+    assert summary.link_to_details == "https://example.com/alien"
+    assert summary.source_version == "tmdb.http.summary.v3"
+    assert len(requests) == 2
     assert requests[0].url.path == "/3/movie/55"
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
+    assert requests[0].url.params["language"] == "en-US"
+    assert requests[1].url.path == "/3/movie/55/translations"
 
 
 def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
@@ -140,6 +134,8 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.url.path.endswith("/translations"):
+            return httpx.Response(200, json={"translations": []})
         if request.url.path == "/3/tv/22":
             return httpx.Response(
                 200,
@@ -152,13 +148,7 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
                     "poster_path": "/series.jpg",
                     "backdrop_path": "/series-backdrop.jpg",
                     "original_language": "en",
-                    "status": "Ended",
-                    "genres": [{"id": 18, "name": "Drama"}],
-                    "number_of_seasons": 1,
-                    "number_of_episodes": 22,
-                    "vote_average": 7.4,
-                    "vote_count": 120,
-                    "popularity": 8.8,
+                    "homepage": "https://example.com/alien-nation",
                 },
             )
         return httpx.Response(
@@ -169,8 +159,6 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
                 "overview": "The first season.",
                 "air_date": "1989-09-18",
                 "poster_path": "/season.jpg",
-                "episodes": [{"id": 1}, {"id": 2}, {"id": 3}],
-                "vote_average": 7.1,
             },
         )
 
@@ -182,16 +170,17 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
         TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22, season_number=1)
     )
 
-    assert series_summary.season_count == 1
-    assert series_summary.episode_count == 22
-    assert series_summary.runtime_minutes is None
-    assert [genre.model_dump(mode="json") for genre in series_summary.genres] == [
-        {"id": 18, "name": "Drama"}
+    assert series_summary.language == "en-US"
+    assert series_summary.link_to_details == "https://example.com/alien-nation"
+    assert season_summary.original_language_code == "en"
+    assert season_summary.link_to_details == "https://example.com/alien-nation"
+    assert [request.url.path for request in requests] == [
+        "/3/tv/22",
+        "/3/tv/22/translations",
+        "/3/tv/22",
+        "/3/tv/22/season/1",
+        "/3/tv/22/season/1/translations",
     ]
-    assert season_summary.season_count is None
-    assert season_summary.episode_count == 3
-    assert season_summary.link_to_details == "https://www.themoviedb.org/tv/22/season/1"
-    assert [request.url.path for request in requests] == ["/3/tv/22", "/3/tv/22/season/1"]
 
 
 def test_tmdb_client_searches_movie_and_tv_titles() -> None:

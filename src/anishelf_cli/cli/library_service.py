@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 import typer
 
+from anishelf_cli import config
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import (
     LibraryCacheError,
@@ -98,6 +99,7 @@ class LibraryCommandService:
 
 
 def library_status() -> CacheStatusResult:
+    metadata_language = _preferred_metadata_language()
     scopes = LibraryCacheStore.existing_scopes()
     cache_root = LibraryCacheStore.library_cache_root()
     lock_root = LibraryCacheStore.library_lock_root()
@@ -134,7 +136,7 @@ def library_status() -> CacheStatusResult:
                 hidden_entries=hidden_entries,
                 has_sync_token=store.read_sync_token() is not None,
                 scope=CacheScopeResult.model_validate(store.scope.key_payload()),
-                metadata=store.metadata_summary_status(),
+                metadata=store.metadata_summary_status(language=metadata_language),
             )
 
     return CacheStatusResult(
@@ -198,6 +200,7 @@ def initialize_library_store(
             refresh_result = LibraryCacheSync(
                 store=store,
                 executor=executor,
+                metadata_language=_preferred_metadata_language(),
                 tmdb_client=tmdb_client,
                 collect_metadata_targets=tmdb_client is not None,
                 progress_callback=progress_callback,
@@ -266,3 +269,7 @@ def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
             f"{progress.metadata_completed}/{progress.metadata_requested} complete "
             f"({progress.metadata_errors or 0} errors)."
         )
+
+
+def _preferred_metadata_language() -> str:
+    return config.load_user_defaults().tmdb.metadata_language

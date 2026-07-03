@@ -4,9 +4,8 @@ import os
 import sqlite3
 from pathlib import Path
 
-CACHE_SCHEMA_VERSION = "1"
-TMDB_LEGACY_SUMMARY_SOURCE_VERSION = "tmdbsummary.v1"
-TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v2"
+CACHE_SCHEMA_VERSION = "2"
+TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v3"
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
 REBUILD_SYNC_TOKEN_META_KEY = "rebuild_sync_token"
 
@@ -28,11 +27,21 @@ def initialize_schema(db: sqlite3.Connection) -> None:
         )
         """
     )
+    existing_schema_version = read_meta(db, "schema_version")
+    if existing_schema_version is not None and existing_schema_version != CACHE_SCHEMA_VERSION:
+        reset_schema(db)
     db.execute(entries_table_sql("library_entries"))
     create_entries_indexes(db, "library_entries", "idx_library_entries")
     db.execute(metadata_summary_table_sql())
     create_metadata_summary_indexes(db)
     write_meta(db, "schema_version", CACHE_SCHEMA_VERSION)
+
+
+def reset_schema(db: sqlite3.Connection) -> None:
+    db.execute("DROP TABLE IF EXISTS library_entries")
+    db.execute("DROP TABLE IF EXISTS library_entries_stage")
+    db.execute("DROP TABLE IF EXISTS tmdb_metadata_summary")
+    db.execute("DELETE FROM cache_meta")
 
 
 def create_entries_indexes(db: sqlite3.Connection, table: str, prefix: str) -> None:
@@ -93,7 +102,6 @@ def metadata_summary_table_sql() -> str:
             language TEXT NOT NULL,
             name TEXT,
             name_translations_json TEXT NOT NULL,
-            original_name TEXT,
             overview TEXT,
             overview_translations_json TEXT NOT NULL,
             poster_path TEXT,

@@ -234,11 +234,18 @@ class FakeQueryStore:
         entries = self.entries[:limit] if limit is not None else self.entries
         return [validate_library_entry(entry) for entry in entries]
 
-    def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
+    def search_entry_models_by_title(
+        self,
+        title: str,
+        *,
+        metadata_language: str = "en-US",
+    ) -> list[LibraryEntryModel]:
+        _ = metadata_language
         self.search_title = title
         return [validate_library_entry(entry) for entry in self.entries]
 
-    def metadata_summary_status(self) -> CacheMetadataStatusResult:
+    def metadata_summary_status(self, *, language: str = "en-US") -> CacheMetadataStatusResult:
+        _ = language
         tracked = len(self.entries)
         missing = 0 if self.metadata_ready else tracked
         return CacheMetadataStatusResult(
@@ -251,7 +258,10 @@ class FakeQueryStore:
     def attach_metadata_summary_models(
         self,
         entries: list[LibraryEntryModel],
+        *,
+        language: str = "en-US",
     ) -> list[LibraryEntryModel]:
+        _ = language
         attached: list[LibraryEntryModel] = []
         for entry in entries:
             attached.append(

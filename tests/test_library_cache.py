@@ -277,19 +277,30 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
 
     raw_entry = store.list_entry_models()[0]
     assert raw_entry.metadata is None
-    attached = store.attach_metadata_summary_models([raw_entry])[0]
+    attached = store.attach_metadata_summary_models([raw_entry], language="en-US")[0]
     assert attached.metadata is not None
     assert attached.metadata.name == "Alien"
     assert attached.metadata.poster_path == "/poster.jpg"
-    assert [genre.model_dump(mode="json") for genre in attached.metadata.genres] == [
-        {"id": 878, "name": "Science Fiction"}
-    ]
-    assert attached.metadata.runtime_minutes == 117
-    assert attached.metadata.vote_average == 8.2
+    assert attached.metadata.language == "en-US"
+    assert attached.metadata.name_translation_map == {"ja-JP": "Alien JP"}
 
     with sqlite3.connect(store.path) as db:
         decoded_json = db.execute("SELECT decoded_json FROM library_entries").fetchone()[0]
         assert "Alien" not in decoded_json
+
+
+def test_metadata_summary_cache_is_keyed_by_language(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    raw_entry = store.list_entry_models()[0]
+    assert (
+        store.attach_metadata_summary_models([raw_entry], language="en-US")[0].metadata
+        is not None
+    )
+    assert store.attach_metadata_summary_models([raw_entry], language="ja-JP")[0].metadata is None
+    assert store.metadata_summary_status(language="en-US").ready is True
+    assert store.metadata_summary_status(language="ja-JP").ready is False
 
 
 def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
@@ -307,14 +318,9 @@ def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert attached is not None
 
-    assert attached.status is None
-    assert attached.genres == ()
-    assert attached.runtime_minutes is None
-    assert attached.season_count is None
-    assert attached.episode_count is None
-    assert attached.vote_average is None
-    assert attached.vote_count is None
-    assert attached.popularity is None
+    assert attached.language == "en-US"
+    assert attached.name == "Alien"
+    assert attached.source_version == "tmdbsummary.v1"
 
 
 def test_attach_metadata_summary_preserves_dict_compatibility(
@@ -327,7 +333,7 @@ def test_attach_metadata_summary_preserves_dict_compatibility(
     raw_entry = store.list_entry_models()[0]
     assert getattr(raw_entry, "metadata", None) is None
 
-    attached = store.attach_metadata_summary_models([raw_entry])[0]
+    attached = store.attach_metadata_summary_models([raw_entry], language="en-US")[0]
 
     assert attached.identity == "movie:55"
     assert attached.metadata is not None
@@ -348,13 +354,13 @@ def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
     )
 
     assert store.missing_metadata_summary_targets() == []
-    assert store.outdated_metadata_summary_targets() == [
+    assert store.outdated_metadata_summary_targets(language="en-US") == [
         TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
     ]
-    assert store.incomplete_metadata_summary_targets() == [
+    assert store.incomplete_metadata_summary_targets(language="en-US") == [
         TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
     ]
-    assert store.metadata_summary_status().model_dump(mode="json") == {
+    assert store.metadata_summary_status(language="en-US").model_dump(mode="json") == {
         "tracked_entries": 1,
         "hydrated_entries": 0,
         "missing_entries": 1,
@@ -466,9 +472,8 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
     assert tmdb.targets == [("movie", 55)]
     refreshed = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert refreshed is not None
-    assert refreshed.source_version == "tmdbsummary.v2"
-    assert refreshed.runtime_minutes == 117
-    assert store.metadata_summary_status().ready is True
+    assert refreshed.source_version == "tmdbsummary.v3"
+    assert store.metadata_summary_status(language="en-US").ready is True
 
 
 def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled(
@@ -1768,18 +1773,18 @@ def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
     summary = _metadata_summary("movie", 55, name="Alien")
-    summary = summary.with_updates(source_version="tmdb.http.summary.v2")
+    summary = summary.with_updates(source_version="tmdb.http.summary.v3")
     store.upsert_metadata_summary(summary)
 
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert attached is not None
-    assert attached.source_version == "tmdbsummary.v2"
+    assert attached.source_version == "tmdbsummary.v3"
     with sqlite3.connect(store.path) as db:
         stored = db.execute(
             "SELECT source_version FROM tmdb_metadata_summary WHERE metadata_key = ?",
             ("movie:55",),
         ).fetchone()
-    assert stored[0] == "tmdbsummary.v2"
+    assert stored[0] == "tmdbsummary.v3"
 
 
 def test_library_export_attaches_cached_metadata_by_default(
@@ -1973,7 +1978,7 @@ def test_cache_title_search_matches_parent_series_titles_for_seasons(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models_by_title("Cowboy")
+    entries = store.search_entry_models_by_title("Cowboy", metadata_language="en-US")
 
     assert [entry.identity for entry in entries] == ["series:22", "season:22:1:33"]
     assert store.display_titles_for_entries(entries) == {
@@ -1994,7 +1999,7 @@ def test_cache_title_search_still_matches_raw_season_titles(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models_by_title("Season 1")
+    entries = store.search_entry_models_by_title("Season 1", metadata_language="en-US")
 
     assert [entry.identity for entry in entries] == ["season:22:1:33"]
 
@@ -2004,7 +2009,12 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         scope = LibraryCacheScope.default_for_user("_user")
         attach_calls = 0
 
-        def metadata_summary_status(self) -> CacheMetadataStatusResult:
+        def metadata_summary_status(
+            self,
+            *,
+            language: str = "en-US",
+        ) -> CacheMetadataStatusResult:
+            _ = language
             return CacheMetadataStatusResult(
                 tracked_entries=1,
                 hydrated_entries=1,
@@ -2012,14 +2022,21 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
                 ready=True,
             )
 
-        def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
+        def search_entry_models_by_title(
+            self,
+            title: str,
+            metadata_language: str = "en-US",
+        ) -> list[LibraryEntryModel]:
             assert title == "Alien"
             return [validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))]
 
         def attach_metadata_summary_models(
             self,
             entries: list[LibraryEntryModel],
+            *,
+            language: str = "en-US",
         ) -> list[LibraryEntryModel]:
+            _ = language
             self.attach_calls += 1
             return [
                 entry.with_metadata(_metadata_summary("movie", 55, name="Alien"))
@@ -2142,7 +2159,12 @@ def _fake_search_store() -> object:
         search_title_arg: str | None = None
         scope = LibraryCacheScope.default_for_user("_user")
 
-        def metadata_summary_status(self) -> CacheMetadataStatusResult:
+        def metadata_summary_status(
+            self,
+            *,
+            language: str = "en-US",
+        ) -> CacheMetadataStatusResult:
+            _ = language
             return CacheMetadataStatusResult(
                 tracked_entries=3,
                 hydrated_entries=3,
@@ -2150,7 +2172,11 @@ def _fake_search_store() -> object:
                 ready=True,
             )
 
-        def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
+        def search_entry_models_by_title(
+            self,
+            title: str,
+            metadata_language: str = "en-US",
+        ) -> list[LibraryEntryModel]:
             self.search_title_arg = title
             return [
                 validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55)),
@@ -2169,7 +2195,10 @@ def _fake_search_store() -> object:
         def attach_metadata_summary_models(
             self,
             entries: list[LibraryEntryModel],
+            *,
+            language: str = "en-US",
         ) -> list[LibraryEntryModel]:
+            _ = language
             return entries
 
     return FakeStore()

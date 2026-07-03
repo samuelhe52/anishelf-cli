@@ -178,26 +178,25 @@ def test_tombstone_library_entry_rejects_snapshot_fields() -> None:
 def test_library_entry_metadata_uses_typed_fields_and_preserves_partial_payload_shape() -> None:
     metadata = LibraryEntryMetadata.model_validate(
         {
+            "language": "ja-JP",
             "name": "Alien",
-            "original_name": "Alien",
-            "genres": [{"id": 878, "name": "Science Fiction"}],
-            "vote_average": 8.2,
+            "name_translations": {"en-US": "Alien"},
+            "overview": "Localized overview.",
+            "overview_translations": {"en-US": "Original overview."},
         }
     )
 
+    assert metadata.language == "ja-JP"
     assert metadata.name == "Alien"
-    assert metadata.original_name == "Alien"
     assert metadata.title == "Alien"
-    assert metadata.genre_ids == (878,)
-    assert [genre.model_dump(mode="json") for genre in metadata.genres] == [
-        {"id": 878, "name": "Science Fiction"}
-    ]
-    assert metadata.vote_average == 8.2
+    assert metadata.name_translation_map == {"en-US": "Alien"}
+    assert metadata.overview_translation_map == {"en-US": "Original overview."}
     assert metadata.model_dump(mode="json") == {
+        "language": "ja-JP",
         "name": "Alien",
-        "original_name": "Alien",
-        "genres": [{"id": 878, "name": "Science Fiction"}],
-        "vote_average": 8.2,
+        "name_translations": {"en-US": "Alien"},
+        "overview": "Localized overview.",
+        "overview_translations": {"en-US": "Original overview."},
     }
 
 
@@ -218,10 +217,9 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
         "tmdb_id": 22,
         "parent_series_id": None,
         "season_number": None,
-        "language": None,
+        "language": "en-US",
         "name": "Alien Nation",
-        "name_translations": {"ja": "エイリアン・ネイション"},
-        "original_name": "Alien Nation",
+        "name_translations": {"ja-JP": "エイリアン・ネイション"},
         "overview": "A sci-fi police series.",
         "overview_translations": {},
         "poster_path": "/series.jpg",
@@ -229,28 +227,17 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
         "logo_path": None,
         "original_language_code": "en",
         "on_air_date": "1989-09-18",
-        "status": "Ended",
-        "genres": [{"id": 18, "name": "Drama"}],
-        "runtime_minutes": None,
-        "season_count": 1,
-        "episode_count": 22,
-        "vote_average": 7.4,
-        "vote_count": 120,
-        "popularity": 8.8,
-        "link_to_details": "https://www.themoviedb.org/tv/22",
+        "link_to_details": "https://example.com/alien-nation",
         "fetched_at": "2026-06-30T00:00:00Z",
-        "source_version": "tmdbsummary.v2",
+        "source_version": "tmdbsummary.v3",
     }
 
     metadata = LibraryEntryMetadata.model_validate(payload)
 
     assert metadata.entry_type == "series"
     assert metadata.tmdb_id == 22
-    assert metadata.name_translation_map == {"ja": "エイリアン・ネイション"}
-    assert metadata.status == "Ended"
-    assert metadata.genre_ids == (18,)
-    assert metadata.season_count == 1
-    assert metadata.episode_count == 22
+    assert metadata.language == "en-US"
+    assert metadata.name_translation_map == {"ja-JP": "エイリアン・ネイション"}
     assert metadata.model_dump(mode="json") == payload
 
 
@@ -287,7 +274,7 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
         {
             "entry_type": "movie",
             "tmdb_id": 55,
-            "genres": [{"id": 878, "name": "Science Fiction"}],
+            "language": "en-US",
         }
     )
 
@@ -296,10 +283,9 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
         "tmdb_id": 55,
         "parent_series_id": None,
         "season_number": None,
-        "language": None,
+        "language": "en-US",
         "name": None,
         "name_translations": {},
-        "original_name": None,
         "overview": None,
         "overview_translations": {},
         "poster_path": None,
@@ -307,14 +293,6 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
         "logo_path": None,
         "original_language_code": None,
         "on_air_date": None,
-        "status": None,
-        "genres": [{"id": 878, "name": "Science Fiction"}],
-        "runtime_minutes": None,
-        "season_count": None,
-        "episode_count": None,
-        "vote_average": None,
-        "vote_count": None,
-        "popularity": None,
         "link_to_details": None,
         "fetched_at": None,
         "source_version": None,
@@ -328,10 +306,9 @@ def test_library_entry_metadata_with_updates_preserves_full_payload_shape() -> N
             "tmdb_id": 55,
             "parent_series_id": None,
             "season_number": None,
-            "language": None,
+            "language": "en-US",
             "name": "Alien",
             "name_translations": {},
-            "original_name": None,
             "overview": None,
             "overview_translations": {},
             "poster_path": None,
@@ -339,17 +316,9 @@ def test_library_entry_metadata_with_updates_preserves_full_payload_shape() -> N
             "logo_path": None,
             "original_language_code": None,
             "on_air_date": None,
-            "status": None,
-            "genres": [],
-            "runtime_minutes": None,
-            "season_count": None,
-            "episode_count": None,
-            "vote_average": None,
-            "vote_count": None,
-            "popularity": None,
             "link_to_details": None,
             "fetched_at": None,
-            "source_version": "tmdbsummary.v2",
+            "source_version": "tmdbsummary.v3",
         }
     )
 

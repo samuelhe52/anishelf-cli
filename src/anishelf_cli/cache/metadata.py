@@ -8,7 +8,6 @@ from typing import Any, Literal
 from pydantic import ValidationError
 
 from anishelf_cli.cache.schema import (
-    TMDB_LEGACY_SUMMARY_SOURCE_VERSION,
     TMDB_SUMMARY_SOURCE_VERSION,
     LibraryCacheError,
 )
@@ -42,7 +41,6 @@ def upsert_metadata_summary(db: sqlite3.Connection, summary: LibraryEntryMetadat
             language,
             name,
             name_translations_json,
-            original_name,
             overview,
             overview_translations_json,
             poster_path,
@@ -64,7 +62,6 @@ def upsert_metadata_summary(db: sqlite3.Connection, summary: LibraryEntryMetadat
             :language,
             :name,
             :name_translations_json,
-            :original_name,
             :overview,
             :overview_translations_json,
             :poster_path,
@@ -81,7 +78,6 @@ def upsert_metadata_summary(db: sqlite3.Connection, summary: LibraryEntryMetadat
             language = excluded.language,
             name = excluded.name,
             name_translations_json = excluded.name_translations_json,
-            original_name = excluded.original_name,
             overview = excluded.overview,
             overview_translations_json = excluded.overview_translations_json,
             poster_path = excluded.poster_path,
@@ -106,10 +102,9 @@ def metadata_summary_params(summary: LibraryEntryMetadata) -> dict[str, Any]:
         "tmdb_id": summary.tmdb_id,
         "parent_series_id": summary.parent_series_id,
         "season_number": summary.season_number,
-        "language": payload["language"] or "",
+        "language": payload["language"],
         "name": payload["name"],
         "name_translations_json": _stable_json(payload["name_translations"]),
-        "original_name": payload["original_name"],
         "overview": payload["overview"],
         "overview_translations_json": _stable_json(payload["overview_translations"]),
         "poster_path": payload["poster_path"],
@@ -125,27 +120,22 @@ def metadata_summary_params(summary: LibraryEntryMetadata) -> dict[str, Any]:
 
 
 def canonical_metadata_source_version(value: object) -> str | None:
-    source_version = optional_string(value)
-    if source_version is None:
-        return None
-    if source_version in {TMDB_SUMMARY_SOURCE_VERSION, "tmdb.http.summary.v2"}:
-        return TMDB_SUMMARY_SOURCE_VERSION
-    if source_version in {TMDB_LEGACY_SUMMARY_SOURCE_VERSION, "tmdb.http.summary.v1"}:
-        return TMDB_LEGACY_SUMMARY_SOURCE_VERSION
-    return source_version
+    return optional_string(value)
 
 
 def metadata_summary_state(
     db: sqlite3.Connection,
     target: TMDbSummaryIdentity,
+    *,
+    language: str,
 ) -> Literal["current", "missing", "outdated"]:
     row = db.execute(
         """
         SELECT source_version
         FROM tmdb_metadata_summary
-        WHERE metadata_key = ? AND language = ''
+        WHERE metadata_key = ? AND language = ?
         """,
-        (metadata_key_from_target(target),),
+        (metadata_key_from_target(target), language),
     ).fetchone()
     if row is None:
         return "missing"
@@ -155,13 +145,18 @@ def metadata_summary_state(
     return "outdated"
 
 
-def metadata_summary_exists(db: sqlite3.Connection, target: TMDbSummaryIdentity) -> bool:
+def metadata_summary_exists(
+    db: sqlite3.Connection,
+    target: TMDbSummaryIdentity,
+    *,
+    language: str,
+) -> bool:
     row = db.execute(
         """
         SELECT 1 FROM tmdb_metadata_summary
-        WHERE metadata_key = ? AND language = ''
+        WHERE metadata_key = ? AND language = ?
         """,
-        (metadata_key_from_target(target),),
+        (metadata_key_from_target(target), language),
     ).fetchone()
     return row is not None
 

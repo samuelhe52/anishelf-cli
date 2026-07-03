@@ -66,17 +66,26 @@ def tmdb_search(
             show_default=True,
         ),
     ] = TMDbSearchType.ALL,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help="Use a TMDb language for this search without changing the configured default.",
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
     defaults = _user_defaults_or_exit()
+    language = _metadata_language(tmdb_language, preferred_language=defaults.tmdb.metadata_language)
     query = TMDbTitleSearchQuery(
         title=normalized_tmdb_title(title),
         year=year,
         entry_type=entry_type.value,
-        language=defaults.tmdb.metadata_language,
+        language=language,
     )
     try:
         result = _tmdb_summary_client_or_exit().search_titles(query)
@@ -95,6 +104,16 @@ def tmdb_search(
 def _user_defaults_or_exit() -> config.UserDefaults:
     try:
         return config.load_user_defaults()
+    except config.UserConfigError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
+
+
+def _metadata_language(value: str | None, *, preferred_language: str) -> str:
+    if value is None:
+        return preferred_language
+    try:
+        return config.resolve_configured_tmdb_language(value)
     except config.UserConfigError as exc:
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc

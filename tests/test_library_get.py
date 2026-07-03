@@ -470,14 +470,60 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     payload = json.loads(result.stdout)
     assert requested == [("movie", 55)]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "Alien"
-    assert payload["items"][0]["entry"]["metadata"]["genres"] == [
-        {"id": 878, "name": "Science Fiction"}
-    ]
-    assert payload["items"][0]["entry"]["metadata"]["runtime_minutes"] == 117
+    assert payload["items"][0]["entry"]["metadata"]["language"] == "en-US"
+    assert payload["items"][0]["entry"]["metadata"]["name_translations"] == {
+        "ja-JP": "Alien JP"
+    }
     other_entry = store.attach_metadata_summary_models(
         list(store.get_entry_models_by_identity(["series:22"]).values())
     )[0]
     assert other_entry.metadata is None
+
+
+def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+    )
+    requested: list[tuple[str, int, str]] = []
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    class FakeTMDbClient:
+        language = "en-US"
+
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            requested.append((identity.entry_type, identity.tmdb_id, self.language))
+            return _metadata_summary(
+                identity.entry_type,
+                identity.tmdb_id,
+                name="エイリアン",
+            ).with_updates(language=self.language)
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "movie:55", "--tmdb-language", "ja-JP"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert requested == [("movie", 55, "ja-JP")]
+    assert payload["items"][0]["entry"]["metadata"]["language"] == "ja-JP"
+    assert payload["items"][0]["entry"]["metadata"]["name"] == "エイリアン"
+    cached = store.attach_metadata_summary_models(store.list_entry_models(), language="ja-JP")[0]
+    assert cached.metadata is None
 
 
 def test_library_get_live_meta_surfaces_specific_tmdb_errors(
@@ -563,7 +609,6 @@ def test_library_get_human_output_accepts_live_envelope_model() -> None:
                     "tracking_updated_at": None,
                     "metadata": {
                         "name": "Alien",
-                        "original_name": "Alien",
                         "overview": "A crew answers a distress signal.",
                     },
                 },

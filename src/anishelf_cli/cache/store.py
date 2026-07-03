@@ -150,6 +150,7 @@ class LibraryCacheStore:
         page: ZoneChangesPage,
         *,
         staging: bool,
+        metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     ) -> list[TMDbSummaryIdentity]:
         table = "library_entries_stage" if staging else "library_entries"
         token_key = (
@@ -162,7 +163,11 @@ class LibraryCacheStore:
                 for record in page.records:
                     target = records.summary_target_from_record(db, table, record)
                     records.apply_record(db, table, record)
-                    if target is not None and not metadata.metadata_summary_exists(db, target):
+                    if target is not None and not metadata.metadata_summary_exists(
+                        db,
+                        target,
+                        language=metadata_language,
+                    ):
                         new_targets.append(target)
                 schema.write_meta(db, token_key, page.sync_token)
                 db.commit()
@@ -313,7 +318,12 @@ class LibraryCacheStore:
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
-    def search_entry_models_by_title(self, title: str) -> list[LibraryEntryModel]:
+    def search_entry_models_by_title(
+        self,
+        title: str,
+        *,
+        metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> list[LibraryEntryModel]:
         query = title.strip()
         if not query:
             return []
@@ -333,23 +343,21 @@ class LibraryCacheStore:
                         ELSE
                             library_entries.entry_type || ':' || library_entries.tmdb_id
                     END
-                    AND entry_tmdb_metadata_summary.language = ''
+                    AND entry_tmdb_metadata_summary.language = ?
                 LEFT JOIN tmdb_metadata_summary AS parent_tmdb_metadata_summary
                     ON library_entries.entry_type = 'season'
                     AND parent_tmdb_metadata_summary.metadata_key =
                         'series:' || library_entries.parent_series_id
-                    AND parent_tmdb_metadata_summary.language = ''
+                    AND parent_tmdb_metadata_summary.language = ?
                 WHERE library_entries.kind = 'snapshot'
                     AND (
                         LOWER(library_entries.identity) LIKE ?
                         OR LOWER(COALESCE(entry_tmdb_metadata_summary.name, '')) LIKE ?
-                        OR LOWER(COALESCE(entry_tmdb_metadata_summary.original_name, '')) LIKE ?
                         OR LOWER(COALESCE(parent_tmdb_metadata_summary.name, '')) LIKE ?
-                        OR LOWER(COALESCE(parent_tmdb_metadata_summary.original_name, '')) LIKE ?
                     )
                 ORDER BY library_entries.date_saved DESC NULLS LAST, library_entries.identity ASC
                 """,
-                (pattern, pattern, pattern, pattern, pattern),
+                (metadata_language, metadata_language, pattern, pattern, pattern),
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
@@ -371,16 +379,35 @@ class LibraryCacheStore:
         targets = [metadata.metadata_target_from_entry(entry) for entry in entries]
         return metadata.dedupe_summary_targets([target for target in targets if target is not None])
 
-    def missing_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
-        return self._metadata_summary_targets_by_state({"missing"})
+    def missing_metadata_summary_targets(
+        self,
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> list[TMDbSummaryIdentity]:
+        return self._metadata_summary_targets_by_state({"missing"}, language=language)
 
-    def outdated_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
-        return self._metadata_summary_targets_by_state({"outdated"})
+    def outdated_metadata_summary_targets(
+        self,
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> list[TMDbSummaryIdentity]:
+        return self._metadata_summary_targets_by_state({"outdated"}, language=language)
 
-    def incomplete_metadata_summary_targets(self) -> list[TMDbSummaryIdentity]:
-        return self._metadata_summary_targets_by_state({"missing", "outdated"})
+    def incomplete_metadata_summary_targets(
+        self,
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> list[TMDbSummaryIdentity]:
+        return self._metadata_summary_targets_by_state(
+            {"missing", "outdated"},
+            language=language,
+        )
 
-    def metadata_summary_status(self) -> CacheMetadataStatusResult:
+    def metadata_summary_status(
+        self,
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> CacheMetadataStatusResult:
         entries = self.list_entry_models(include_tombstones=False)
         if not entries:
             return CacheMetadataStatusResult(
@@ -391,7 +418,7 @@ class LibraryCacheStore:
             )
 
         tracked = self.metadata_summary_targets_for_entries(entries)
-        missing = self.incomplete_metadata_summary_targets()
+        missing = self.incomplete_metadata_summary_targets(language=language)
         tracked_count = len(tracked)
         missing_count = len(missing)
         return CacheMetadataStatusResult(
@@ -404,6 +431,8 @@ class LibraryCacheStore:
     def attach_metadata_summary_models(
         self,
         entries: list[LibraryEntryModel],
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     ) -> list[LibraryEntryModel]:
         if not entries:
             return []
@@ -414,9 +443,9 @@ class LibraryCacheStore:
                 SELECT metadata_json
                 FROM tmdb_metadata_summary
                 WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
-                AND language = ''
+                AND language = ?
                 """,
-                metadata_keys,
+                [*metadata_keys, language],
             ).fetchall()
         metadata_by_key: dict[str, LibraryEntryMetadata] = {}
         for row in rows:
@@ -427,7 +456,12 @@ class LibraryCacheStore:
             for entry in entries
         ]
 
-    def display_titles_for_entries(self, entries: list[LibraryEntryModel]) -> dict[str, str]:
+    def display_titles_for_entries(
+        self,
+        entries: list[LibraryEntryModel],
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> dict[str, str]:
         parent_keys_by_identity = {
             entry.identity: parent_key
             for entry in entries
@@ -443,9 +477,9 @@ class LibraryCacheStore:
                 SELECT metadata_key, metadata_json
                 FROM tmdb_metadata_summary
                 WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
-                AND language = ''
+                AND language = ?
                 """,
-                metadata_keys,
+                [*metadata_keys, language],
             ).fetchall()
 
         metadata_by_key = {
@@ -462,6 +496,8 @@ class LibraryCacheStore:
     def _metadata_summary_targets_by_state(
         self,
         states: set[str],
+        *,
+        language: str,
     ) -> list[TMDbSummaryIdentity]:
         entries = self.list_entry_models(include_tombstones=False)
         if not entries:
@@ -470,7 +506,10 @@ class LibraryCacheStore:
         with self._connect_initialized() as db:
             for entry in entries:
                 target = metadata.metadata_target_from_entry(entry)
-                if target is not None and metadata.metadata_summary_state(db, target) in states:
+                if (
+                    target is not None
+                    and metadata.metadata_summary_state(db, target, language=language) in states
+                ):
                     targets.append(target)
         return metadata.dedupe_summary_targets(targets)
 

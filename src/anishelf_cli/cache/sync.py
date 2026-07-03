@@ -10,6 +10,7 @@ from pydantic import Field
 from anishelf_cli.cache.metadata import dedupe_summary_targets
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
+from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
@@ -114,6 +115,7 @@ def _refresh_result_with_hydration(
 class LibraryCacheSync:
     store: LibraryCacheStore
     executor: CloudKitExecutor
+    metadata_language: str = DEFAULT_TMDB_METADATA_LANGUAGE
     tmdb_client: TMDbSummaryClient | None = None
     collect_metadata_targets: bool = True
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
@@ -149,7 +151,9 @@ class LibraryCacheSync:
         pages = 0
         records = 0
         metadata_targets = (
-            self.store.outdated_metadata_summary_targets() if self.collect_metadata_targets else []
+            self.store.outdated_metadata_summary_targets(language=self.metadata_language)
+            if self.collect_metadata_targets
+            else []
         )
         next_token: str | None = sync_token
         self._emit_progress("sync-started", rebuilt=False)
@@ -159,7 +163,11 @@ class LibraryCacheSync:
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
             metadata_targets.extend(
-                self.store.apply_page_and_collect_new_summary_targets(page, staging=False)
+                self.store.apply_page_and_collect_new_summary_targets(
+                    page,
+                    staging=False,
+                    metadata_language=self.metadata_language,
+                )
             )
             pages += 1
             records += len(page.records)
@@ -196,7 +204,11 @@ class LibraryCacheSync:
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
             metadata_targets.extend(
-                self.store.apply_page_and_collect_new_summary_targets(page, staging=True)
+                self.store.apply_page_and_collect_new_summary_targets(
+                    page,
+                    staging=True,
+                    metadata_language=self.metadata_language,
+                )
             )
             pages += 1
             records += len(page.records)

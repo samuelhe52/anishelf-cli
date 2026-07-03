@@ -8,11 +8,10 @@ from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import (
     LibraryEntryMetadata,
-    LibraryEntryMetadataGenre,
     TMDbSummaryIdentity,
 )
 
-TMDB_SUMMARY_SOURCE_VERSION = "tmdb.http.summary.v2"
+TMDB_SUMMARY_SOURCE_VERSION = "tmdb.http.summary.v3"
 
 
 class TMDbTransportModel(AniShelfBaseModel):
@@ -22,11 +21,6 @@ class TMDbTransportModel(AniShelfBaseModel):
         populate_by_name=False,
         str_strip_whitespace=False,
     )
-
-
-class TMDbGenrePayload(TMDbTransportModel):
-    id: StrictInt | None = None
-    name: StrictStr | None = None
 
 
 class TMDbSearchItem(TMDbTransportModel):
@@ -81,68 +75,39 @@ class _TMDbSummaryBase(TMDbTransportModel):
     poster_path: StrictStr | None = None
     backdrop_path: StrictStr | None = None
     original_language: StrictStr | None = None
-    status: StrictStr | None = None
-    genres: tuple[TMDbGenrePayload, ...] = ()
-    vote_average: StrictFloat | StrictInt | None = None
-    vote_count: StrictInt | None = None
-    popularity: StrictFloat | StrictInt | None = None
 
-    @field_validator("genres", mode="before")
-    @classmethod
-    def _default_genres(cls, value: object) -> object:
-        if value is None:
-            return ()
-        return value
-
-    def _base_domain_metadata(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
+    def _base_domain_metadata(
+        self,
+        identity: TMDbSummaryIdentity,
+        *,
+        language: str,
+        translations: TranslationDictionaries,
+        link_to_details: str | None,
+        original_language_code: str | None = None,
+    ) -> LibraryEntryMetadata:
         return LibraryEntryMetadata(
             entry_type=identity.entry_type,
             tmdb_id=identity.tmdb_id,
             parent_series_id=identity.parent_series_id,
             season_number=identity.season_number,
-            language=None,
+            language=language,
             name=nonempty_string_or_none(self.title) or nonempty_string_or_none(self.name),
-            name_translations=(),
-            original_name=nonempty_string_or_none(self.original_title)
-            or nonempty_string_or_none(self.original_name),
+            name_translations=translations.name,
             overview=nonempty_string_or_none(self.overview),
-            overview_translations=(),
+            overview_translations=translations.overview,
             poster_path=nonempty_string_or_none(self.poster_path),
             backdrop_path=nonempty_string_or_none(self.backdrop_path),
             logo_path=None,
-            original_language_code=nonempty_string_or_none(self.original_language),
+            original_language_code=original_language_code
+            or nonempty_string_or_none(self.original_language),
             on_air_date=self.on_air_date,
-            status=nonempty_string_or_none(self.status),
-            genres=self.domain_genres,
-            runtime_minutes=None,
-            season_count=None,
-            episode_count=None,
-            vote_average=optional_number(self.vote_average),
-            vote_count=self.vote_count,
-            popularity=optional_number(self.popularity),
-            link_to_details=details_link(identity),
+            link_to_details=link_to_details,
             source_version=TMDB_SUMMARY_SOURCE_VERSION,
         )
 
     @property
-    def domain_genres(self) -> tuple[LibraryEntryMetadataGenre, ...]:
-        genres: list[LibraryEntryMetadataGenre] = []
-        for genre in self.genres:
-            name = nonempty_string_or_none(genre.name)
-            if genre.id is not None and name is not None:
-                genres.append(LibraryEntryMetadataGenre(id=genre.id, name=name))
-        return tuple(genres)
-
-    @property
     def on_air_date(self) -> str | None:
         return None
-
-
-def _metadata_with_updates(
-    metadata: LibraryEntryMetadata,
-    **updates: object,
-) -> LibraryEntryMetadata:
-    return metadata.with_updates(**updates)
 
 
 class TMDbMovieSummaryResponse(_TMDbSummaryBase):
@@ -166,11 +131,18 @@ class TMDbMovieSummaryResponse(_TMDbSummaryBase):
     def on_air_date(self) -> str | None:
         return nonempty_string_or_none(self.release_date)
 
-    def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        runtime = self.runtime
-        return _metadata_with_updates(
-            self._base_domain_metadata(identity),
-            runtime_minutes=runtime if runtime is not None and runtime > 0 else None,
+    def to_domain(
+        self,
+        identity: TMDbSummaryIdentity,
+        *,
+        language: str,
+        translations: TranslationDictionaries,
+    ) -> LibraryEntryMetadata:
+        return self._base_domain_metadata(
+            identity,
+            language=language,
+            translations=translations,
+            link_to_details=nonempty_string_or_none(self.homepage),
         )
 
 
@@ -200,15 +172,18 @@ class TMDbSeriesSummaryResponse(_TMDbSummaryBase):
     def on_air_date(self) -> str | None:
         return nonempty_string_or_none(self.first_air_date)
 
-    def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        season_count = self.number_of_seasons
-        episode_count = self.number_of_episodes
-        return _metadata_with_updates(
-            self._base_domain_metadata(identity),
-            season_count=season_count if season_count is not None and season_count >= 0 else None,
-            episode_count=(
-                episode_count if episode_count is not None and episode_count >= 0 else None
-            ),
+    def to_domain(
+        self,
+        identity: TMDbSummaryIdentity,
+        *,
+        language: str,
+        translations: TranslationDictionaries,
+    ) -> LibraryEntryMetadata:
+        return self._base_domain_metadata(
+            identity,
+            language=language,
+            translations=translations,
+            link_to_details=nonempty_string_or_none(self.homepage),
         )
 
 
@@ -229,11 +204,69 @@ class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
     def on_air_date(self) -> str | None:
         return nonempty_string_or_none(self.air_date)
 
-    def to_domain(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
-        return _metadata_with_updates(
-            self._base_domain_metadata(identity),
-            episode_count=len(self.episodes),
+    def to_domain(
+        self,
+        identity: TMDbSummaryIdentity,
+        *,
+        language: str,
+        translations: TranslationDictionaries,
+        parent_series: TMDbSeriesSummaryResponse,
+    ) -> LibraryEntryMetadata:
+        return self._base_domain_metadata(
+            identity,
+            language=language,
+            translations=translations,
+            link_to_details=nonempty_string_or_none(parent_series.homepage),
+            original_language_code=nonempty_string_or_none(parent_series.original_language),
         )
+
+
+class TMDbTranslationData(TMDbTransportModel):
+    title: StrictStr | None = None
+    name: StrictStr | None = None
+    overview: StrictStr | None = None
+
+
+class TMDbTranslationItem(TMDbTransportModel):
+    iso_3166_1: StrictStr | None = None
+    iso_639_1: StrictStr | None = None
+    data: TMDbTranslationData | None = None
+
+
+class TMDbTranslationsResponse(TMDbTransportModel):
+    translations: tuple[TMDbTranslationItem, ...] = ()
+
+    @field_validator("translations", mode="before")
+    @classmethod
+    def _default_translations(cls, value: object) -> object:
+        if value is None:
+            return ()
+        return value
+
+    def to_dictionaries(self) -> TranslationDictionaries:
+        names: list[tuple[str, str]] = []
+        overviews: list[tuple[str, str]] = []
+        for translation in self.translations:
+            language_code = nonempty_string_or_none(translation.iso_639_1)
+            country_code = nonempty_string_or_none(translation.iso_3166_1)
+            if language_code is None or country_code is None or translation.data is None:
+                continue
+            key = f"{language_code}-{country_code}"
+            name = (
+                nonempty_string_or_none(translation.data.title)
+                or nonempty_string_or_none(translation.data.name)
+            )
+            overview = nonempty_string_or_none(translation.data.overview)
+            if name is not None:
+                names.append((key, name))
+            if overview is not None:
+                overviews.append((key, overview))
+        return TranslationDictionaries(name=tuple(names), overview=tuple(overviews))
+
+
+class TranslationDictionaries(AniShelfBaseModel):
+    name: tuple[tuple[str, str], ...] = ()
+    overview: tuple[tuple[str, str], ...] = ()
 
 
 def details_link(identity: TMDbSummaryIdentity) -> str:

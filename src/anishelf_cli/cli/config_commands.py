@@ -10,7 +10,13 @@ from anishelf_cli import config
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.options import FieldListOption
 from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
-from anishelf_cli.core.output import HumanSection, emit_error, emit_human_blocks, emit_json
+from anishelf_cli.core.output import (
+    HumanSection,
+    emit_error,
+    emit_human_blocks,
+    emit_json,
+    emit_progress,
+)
 from anishelf_cli.models import CallbackStrategy
 from anishelf_cli.models.output import (
     ConfigCallbackResult,
@@ -206,6 +212,7 @@ def config_set_defaults(
         defaults = config.UserDefaults()
     library_defaults = defaults.library_read
     tmdb_defaults = defaults.tmdb
+    original_tmdb_language = tmdb_defaults.metadata_language
 
     if metadata is not None:
         try:
@@ -257,6 +264,12 @@ def config_set_defaults(
     except config.UserConfigError as exc:
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
+    tmdb_language_changed = original_tmdb_language != tmdb_defaults.metadata_language
+    if tmdb_language_changed:
+        emit_progress(
+            "TMDb metadata language changed. Run `ani lib clear-cache --yes` and "
+            "`ani lib init` to rebuild persisted metadata in the new language."
+        )
 
     payload = ConfigSetDefaultsResult(
         defaults=ConfigSetDefaultsPayloadResult(
@@ -294,6 +307,14 @@ def config_set_defaults(
                     ("Output style", library_defaults.output_style.value),
                     ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                     ("TMDb language", tmdb_defaults.metadata_language),
+                    (
+                        "Cache rebuild",
+                        (
+                            "recommended"
+                            if tmdb_language_changed
+                            else "not needed for this change"
+                        ),
+                    ),
                     ("Config file", str(path)),
                 ),
             )

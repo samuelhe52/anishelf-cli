@@ -36,8 +36,8 @@ def _fake_store() -> object:
         ),
         list_entry_models=lambda *, include_tombstones=False: [],
         list_entry_models_filtered=lambda **kwargs: [],
-        search_entry_models_by_title=lambda title: [],
-        attach_metadata_summary_models=lambda entries: entries,
+        search_entry_models_by_title=lambda title, **kwargs: [],
+        attach_metadata_summary_models=lambda entries, **kwargs: entries,
     )
 
 
@@ -550,6 +550,8 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
         "show_hidden": True,
     }
     assert payload["defaults"]["tmdb"] == {"metadata_language": "ja-JP"}
+    assert "TMDb metadata language changed" in result.stderr
+    assert "ani lib clear-cache --yes" in result.stderr
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (

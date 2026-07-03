@@ -11,7 +11,6 @@ from anishelf_cli.core.output import (
 from anishelf_cli.models import HumanOutputStyle
 from anishelf_cli.models.domain import (
     EpisodeProgress,
-    LibraryEntryMetadata,
     LibraryEntryModel,
     LibraryEntryTombstone,
 )
@@ -131,7 +130,6 @@ def _library_get_item_section(
             ("ID", identity),
             ("Title", title),
             ("Season title", _season_metadata_title(entry_model, display_title=title)),
-            ("Original title", _metadata_original_name(metadata)),
             (
                 "Overview",
                 _truncate_text(
@@ -197,12 +195,6 @@ def _human_library_row(
         "display": getattr(entry, "on_display", None),
         "saved": _compact_date(getattr(entry, "date_saved", None)),
     }
-
-
-def _metadata_original_name(metadata: LibraryEntryMetadata | None) -> str | None:
-    if metadata is None:
-        return None
-    return metadata.original_name
 
 
 def _display_title(

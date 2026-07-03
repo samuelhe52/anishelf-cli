@@ -24,6 +24,7 @@ from anishelf_cli.models.transport.tmdb import (
     TMDbSearchResponse,
     TMDbSeasonSummaryResponse,
     TMDbSeriesSummaryResponse,
+    TMDbTranslationsResponse,
     details_link,
 )
 
@@ -47,6 +48,7 @@ def _validation_error_summary(exc: ValidationError) -> str:
 @dataclass(slots=True)
 class TMDbClient:
     api_key: str
+    language: str = "en-US"
     timeout_seconds: float = 20.0
     max_attempts: int = 3
     client: httpx.Client = field(default_factory=httpx.Client, repr=False)
@@ -81,22 +83,55 @@ class TMDbClient:
                 movie_response = self._get_model(
                     f"movie/{identity.tmdb_id}",
                     TMDbMovieSummaryResponse,
+                    params={"language": self.language},
                 )
-                return movie_response.to_domain(identity)
+                translations_response = self._get_model(
+                    f"movie/{identity.tmdb_id}/translations",
+                    TMDbTranslationsResponse,
+                )
+                return movie_response.to_domain(
+                    identity,
+                    language=self.language,
+                    translations=translations_response.to_dictionaries(),
+                )
             elif identity.entry_type == "series":
                 series_response = self._get_model(
                     f"tv/{identity.tmdb_id}",
                     TMDbSeriesSummaryResponse,
+                    params={"language": self.language},
                 )
-                return series_response.to_domain(identity)
+                translations_response = self._get_model(
+                    f"tv/{identity.tmdb_id}/translations",
+                    TMDbTranslationsResponse,
+                )
+                return series_response.to_domain(
+                    identity,
+                    language=self.language,
+                    translations=translations_response.to_dictionaries(),
+                )
             elif identity.entry_type == "season":
                 if identity.parent_series_id is None or identity.season_number is None:
                     raise TMDbRequestError("Season metadata requires a parent series and season.")
+                parent_series_response = self._get_model(
+                    f"tv/{identity.parent_series_id}",
+                    TMDbSeriesSummaryResponse,
+                    params={"language": self.language},
+                )
                 season_response = self._get_model(
                     f"tv/{identity.parent_series_id}/season/{identity.season_number}",
                     TMDbSeasonSummaryResponse,
+                    params={"language": self.language},
                 )
-                return season_response.to_domain(identity)
+                translations_response = self._get_model(
+                    f"tv/{identity.parent_series_id}/season/{identity.season_number}/translations",
+                    TMDbTranslationsResponse,
+                )
+                return season_response.to_domain(
+                    identity,
+                    language=self.language,
+                    translations=translations_response.to_dictionaries(),
+                    parent_series=parent_series_response,
+                )
             else:
                 raise TMDbRequestError(f"Unsupported TMDb entry type: {identity.entry_type}.")
         except TMDbRequestError:
@@ -243,28 +278,36 @@ def _retryable_status(status_code: int) -> bool:
 
 
 def _movie_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"query": query.title or ""}
+    params = {"query": query.title or "", "language": query.language}
     if query.year is not None:
         params["primary_release_year"] = str(query.year)
     return params
 
 
 def _series_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"query": query.title or ""}
+    params = {"query": query.title or "", "language": query.language}
     if query.year is not None:
         params["first_air_date_year"] = str(query.year)
     return params
 
 
 def _movie_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"sort_by": "popularity.desc", "with_genres": str(TMDB_ANIME_GENRE_ID)}
+    params = {
+        "sort_by": "popularity.desc",
+        "with_genres": str(TMDB_ANIME_GENRE_ID),
+        "language": query.language,
+    }
     if query.year is not None:
         params["primary_release_year"] = str(query.year)
     return params
 
 
 def _series_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"sort_by": "popularity.desc", "with_genres": str(TMDB_ANIME_GENRE_ID)}
+    params = {
+        "sort_by": "popularity.desc",
+        "with_genres": str(TMDB_ANIME_GENRE_ID),
+        "language": query.language,
+    }
     if query.year is not None:
         params["first_air_date_year"] = str(query.year)
     return params
