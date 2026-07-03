@@ -21,6 +21,11 @@ class HumanSection:
 
 
 @dataclass(frozen=True, slots=True)
+class HumanParagraph:
+    text: str
+
+
+@dataclass(frozen=True, slots=True)
 class HumanTableColumn:
     key: str
     label: str
@@ -37,6 +42,8 @@ class HumanTable:
 
 type HumanBlock = HumanSection | HumanTable
 
+_PARAGRAPH_CONTENT_INDENT = 4
+_PARAGRAPH_MAX_WIDTH = 88
 _APP_STATE: ContextVar[AppState | None] = ContextVar("anishelf_cli_app_state", default=None)
 
 
@@ -87,12 +94,39 @@ def _section_label_width(blocks: Sequence[HumanBlock]) -> int:
 
 def _print_section(out: Console, section: HumanSection, label_width: int) -> None:
     out.print(Text(section.title, style="bold cyan"))
-    for label, value in section.rows:
+    for row_index, (label, value) in enumerate(section.rows):
+        if isinstance(value, HumanParagraph):
+            _print_section_paragraph(out, label, value.text, label_width)
+            if row_index < len(section.rows) - 1:
+                out.print()
+            continue
         line = Text("  ")
         line.append(f"{label:<{label_width}}", style="cyan")
         line.append("  ")
         line.append(_human_value(value))
         out.print(line)
+
+
+def _print_section_paragraph(
+    out: Console,
+    label: str,
+    value: str,
+    label_width: int,
+) -> None:
+    label_line = Text("  ")
+    label_line.append(label, style="cyan")
+    out.print(label_line)
+
+    indent = Text(" " * _PARAGRAPH_CONTENT_INDENT)
+    content_width = min(max(out.width - indent.cell_len, 20), _PARAGRAPH_MAX_WIDTH)
+    paragraphs = value.splitlines() or [""]
+
+    for paragraph in paragraphs:
+        wrapped_lines = Text(paragraph).wrap(out, content_width) if paragraph else [Text("")]
+        for wrapped in wrapped_lines:
+            line = indent.copy()
+            line.append_text(wrapped)
+            out.print(line)
 
 
 def _print_table(out: Console, table: HumanTable) -> None:

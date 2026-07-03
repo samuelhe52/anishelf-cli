@@ -76,6 +76,17 @@ library_app = typer.Typer(
     rich_markup_mode=None,
 )
 library_lock_factory = None
+_LIBRARY_GET_ENTRY_FIELDS_TO_DROP = frozenset(
+    {
+        "kind",
+        "using_custom_poster",
+        "custom_poster_path",
+        "library_updated_at",
+        "tracking_updated_at",
+        "schema_version",
+    }
+)
+_LIBRARY_GET_METADATA_FIELDS_TO_DROP = frozenset({"poster_path"})
 
 
 def _make_http_client() -> httpx.Client:
@@ -162,6 +173,7 @@ def library_get(
                     preferred_language=preferred_language,
                 ),
             )
+        _sanitize_library_get_payload(payload)
         emit_json(payload)
     else:
         display_titles = (
@@ -730,6 +742,51 @@ def _add_parent_series_titles_to_get_payload(
         entry = item.get("entry")
         if isinstance(entry, dict):
             _add_parent_series_title_to_entry_payload(entry, parent_series_titles)
+
+
+def _sanitize_library_get_payload(payload: dict[str, object]) -> None:
+    items = payload.get("items")
+    if not isinstance(items, list):
+        return
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        entry = item.get("entry")
+        if isinstance(entry, dict):
+            _sanitize_library_get_entry_payload(entry)
+
+
+def _sanitize_library_get_entry_payload(entry: dict[str, object]) -> None:
+    for field in _LIBRARY_GET_ENTRY_FIELDS_TO_DROP:
+        entry.pop(field, None)
+    metadata = entry.get("metadata")
+    if isinstance(metadata, dict):
+        for field in _LIBRARY_GET_METADATA_FIELDS_TO_DROP:
+            metadata.pop(field, None)
+    _compact_library_get_dates(entry)
+
+
+def _compact_library_get_dates(value: object) -> None:
+    if isinstance(value, dict):
+        for key, nested in value.items():
+            if isinstance(nested, str) and _library_get_date_field(key):
+                value[key] = _compact_date_value(nested)
+                continue
+            _compact_library_get_dates(nested)
+        return
+    if isinstance(value, list):
+        for item in value:
+            _compact_library_get_dates(item)
+
+
+def _library_get_date_field(key: str) -> bool:
+    return key.startswith("date_") or key.endswith("_date") or key.endswith("_at")
+
+
+def _compact_date_value(value: str) -> str:
+    if len(value) >= 10 and value[4] == "-" and value[7] == "-":
+        return value[:10]
+    return value
 
 
 def _add_parent_series_titles_to_entries_payload(

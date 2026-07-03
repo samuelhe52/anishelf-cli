@@ -271,16 +271,22 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
     assert payload["items"][0]["id"] == "movie:55"
     assert payload["items"][0]["status"] == "found"
     entry = payload["items"][0]["entry"]
-    assert entry["kind"] == "snapshot"
+    assert "kind" not in entry
     assert entry["entry_type"] == "movie"
     assert entry["tmdb_id"] == 55
-    assert entry["date_saved"] == "2026-05-01T00:00:00Z"
+    assert entry["date_saved"] == "2026-05-01"
+    assert entry["date_started"] == "2026-05-02"
+    assert entry["date_finished"] == "2026-05-09"
     assert entry["watch_status"] == "watched"
-    assert entry["custom_poster_path"] == "/current/custom.jpg"
+    assert "using_custom_poster" not in entry
+    assert "custom_poster_path" not in entry
+    assert "library_updated_at" not in entry
+    assert "tracking_updated_at" not in entry
+    assert "schema_version" not in entry
     assert entry["episode_progresses"] == [
         {
             "season_number": 1,
-            "updated_at": "2026-05-08T00:00:00Z",
+            "updated_at": "2026-05-08",
             "watched_through_episode": 12,
         }
     ]
@@ -480,6 +486,31 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     assert other_entry.metadata is None
 
 
+def test_library_get_json_omits_internal_fields_and_compacts_metadata_dates(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 55, name="Alien").with_updates(
+            fetched_at="2026-05-13T12:34:56Z",
+        )
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--metadata", "summary"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    entry = payload["items"][0]["entry"]
+    metadata = entry["metadata"]
+    assert "poster_path" not in metadata
+    assert metadata["fetched_at"] == "2026-05-13"
+    assert metadata["on_air_date"] == "1979-05-25"
+    assert "kind" not in entry
+    assert "schema_version" not in entry
+    assert "custom_poster_path" not in entry
+
+
 def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
     tmp_path,
     monkeypatch,
@@ -576,9 +607,16 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     assert "  Score             4\n" in result.stdout
     assert "  Favorite          yes\n" in result.stdout
     assert "  Date saved        2026-05-01\n" in result.stdout
-    assert "  Custom poster     /current/custom.jpg\n" in result.stdout
-    assert "  Episode progress  S1:E12 (2026-05-08T00:00:00Z)\n" in result.stdout
-    assert "  Notes             Round trip\n" in result.stdout
+    assert "  Date started      2026-05-02\n" in result.stdout
+    assert "  Date finished     2026-05-09\n" in result.stdout
+    assert "  Custom poster" not in result.stdout
+    assert "  Kind" not in result.stdout
+    assert "  Library updated" not in result.stdout
+    assert "  Tracking updated" not in result.stdout
+    assert "  Schema" not in result.stdout
+    assert "  Episode progress  S1:E12 (2026-05-08)\n" in result.stdout
+    assert "  Notes\n" in result.stdout
+    assert "    Round trip\n" in result.stdout
 
 
 def test_library_get_human_output_accepts_live_envelope_model() -> None:
@@ -632,6 +670,7 @@ def test_library_get_human_output_accepts_live_envelope_model() -> None:
     assert "Alien\n" in output
     assert "  Status            found\n" in output
     assert "  ID                movie:55\n" in output
+    assert "  Overview\n" in output
     assert "decode-error" not in output
 
 

@@ -1,4 +1,5 @@
 from anishelf_cli.core.output import (
+    HumanParagraph,
     HumanSection,
     HumanTable,
     HumanTableColumn,
@@ -60,6 +61,38 @@ def test_emit_human_blocks_formats_empty_table(capsys) -> None:
     )
 
     assert capsys.readouterr().out == "Library\n  No library entries.\n"
+
+
+def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, monkeypatch) -> None:
+    from rich.console import Console
+
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.setattr(
+        output_module,
+        "console",
+        lambda stderr=False: Console(width=28, stderr=stderr),
+    )
+
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Entry",
+                (
+                    ("ID", "movie:550"),
+                    ("Overview", HumanParagraph("Alpha beta gamma\ndelta epsilon")),
+                ),
+            )
+        ]
+    )
+
+    assert capsys.readouterr().out == (
+        "Entry\n"
+        "  ID        movie:550\n"
+        "  Overview\n"
+        "    Alpha beta gamma\n"
+        "    delta epsilon\n"
+    )
 
 
 def test_emit_verbose_is_disabled_without_app_state(capsys) -> None:

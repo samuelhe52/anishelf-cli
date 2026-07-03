@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from anishelf_cli.core.output import (
+    HumanParagraph,
     HumanSection,
     HumanTable,
     HumanTableColumn,
@@ -112,13 +113,11 @@ def _library_get_item_section(
             (
                 ("Status", item.status),
                 ("ID", identity),
-                ("Kind", entry_model.kind),
                 ("Type", entry_model.entry_type),
                 ("TMDb ID", entry_model.tmdb_id),
                 ("Parent series", entry_model.parent_series_id),
                 ("Season", entry_model.season_number),
-                ("Deleted", entry_model.deleted_at),
-                ("Schema", entry_model.schema_version),
+                ("Deleted", _compact_date(entry_model.deleted_at)),
             ),
         )
 
@@ -132,12 +131,13 @@ def _library_get_item_section(
             ("Season title", _season_metadata_title(entry_model, display_title=title)),
             (
                 "Overview",
-                _truncate_text(
-                    metadata.overview if metadata is not None else None,
-                    limit=220,
+                _human_block_text(
+                    _truncate_text(
+                        metadata.overview if metadata is not None else None,
+                        limit=220,
+                    )
                 ),
             ),
-            ("Kind", entry_model.kind),
             ("Type", entry_model.entry_type),
             ("TMDb ID", entry_model.tmdb_id),
             ("Parent series", entry_model.parent_series_id),
@@ -147,16 +147,16 @@ def _library_get_item_section(
             ("Favorite", entry_model.favorite),
             ("On display", entry_model.on_display),
             ("Date saved", _compact_date(entry_model.date_saved)),
-            ("Date started", entry_model.date_started),
-            ("Date finished", entry_model.date_finished),
+            ("Date started", _compact_date(entry_model.date_started)),
+            ("Date finished", _compact_date(entry_model.date_finished)),
             ("Date tracking", entry_model.is_date_tracking_enabled),
-            ("Poster", metadata.poster_path if metadata is not None else None),
-            ("Custom poster", entry_model.custom_poster_path),
             ("Episode progress", _format_episode_progresses(entry_model.episode_progresses)),
-            ("Library updated", entry_model.library_updated_at),
-            ("Tracking updated", entry_model.tracking_updated_at),
-            ("Notes", _truncate_text(_optional_human_text(entry_model.notes), limit=160)),
-            ("Schema", entry_model.schema_version),
+            (
+                "Notes",
+                _human_block_text(
+                    _truncate_text(_optional_human_text(entry_model.notes), limit=160)
+                ),
+            ),
         ),
     )
 
@@ -169,7 +169,7 @@ def _format_episode_progresses(value: tuple[EpisodeProgress, ...]) -> str | None
     for item in value:
         label = f"S{item.season_number}:E{item.watched_through_episode}"
         if item.updated_at:
-            label += f" ({item.updated_at})"
+            label += f" ({_compact_date(item.updated_at)})"
         parts.append(label)
     return ", ".join(parts) if parts else None
 
@@ -178,6 +178,12 @@ def _optional_human_text(value: object) -> object:
     if value == "":
         return None
     return value
+
+
+def _human_block_text(value: object) -> object:
+    if not isinstance(value, str):
+        return value
+    return HumanParagraph(value)
 
 
 def _human_library_row(
