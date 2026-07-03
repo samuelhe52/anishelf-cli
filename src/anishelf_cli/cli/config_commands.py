@@ -22,6 +22,7 @@ from anishelf_cli.models.output import (
     ConfigShowResult,
     ConfigTMDbResult,
     LibraryDefaultsResult,
+    TMDbDefaultsResult,
 )
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
@@ -39,7 +40,9 @@ config_app = typer.Typer(
 
 def _config_payload() -> ConfigShowResult:
     api_token = resolve_cloudkit_api_token()
-    defaults = _user_defaults_or_exit().library_read
+    defaults = _user_defaults_or_exit()
+    library_defaults = defaults.library_read
+    tmdb_defaults = defaults.tmdb
     return ConfigShowResult(
         cloudkit=ConfigCloudKitResult(
             container=config.DEFAULT_CONTAINER,
@@ -49,17 +52,20 @@ def _config_payload() -> ConfigShowResult:
             app_auth_version=api_token.version,
         ),
         callback=ConfigCallbackResult(strategy=CallbackStrategy.MANUAL_PASTE),
-        tmdb=ConfigTMDbResult(api_key_envs=tuple(config.DEFAULT_TMDB_API_KEY_ENVS)),
+        tmdb=ConfigTMDbResult(
+            api_key_envs=tuple(config.DEFAULT_TMDB_API_KEY_ENVS),
+            defaults=TMDbDefaultsResult(metadata_language=tmdb_defaults.metadata_language),
+        ),
         library=ConfigLibraryResult(
             defaults=LibraryDefaultsResult(
-                metadata=defaults.metadata.value,
+                metadata=library_defaults.metadata.value,
                 display_fields=(
-                    tuple(defaults.display_fields)
-                    if defaults.display_fields is not None
+                    tuple(library_defaults.display_fields)
+                    if library_defaults.display_fields is not None
                     else None
                 ),
-                output_style=defaults.output_style.value,
-                show_hidden=defaults.show_hidden,
+                output_style=library_defaults.output_style.value,
+                show_hidden=library_defaults.show_hidden,
             )
         ),
         paths=ConfigPathsResult(
@@ -111,7 +117,10 @@ def config_show(
             ),
             HumanSection(
                 "TMDb",
-                (("API key envs", ", ".join(config.DEFAULT_TMDB_API_KEY_ENVS)),),
+                (
+                    ("API key envs", ", ".join(config.DEFAULT_TMDB_API_KEY_ENVS)),
+                    ("Metadata language", payload.tmdb.defaults.metadata_language),
+                ),
             ),
             HumanSection(
                 "Library",
@@ -158,6 +167,17 @@ def config_set_defaults(
             show_default=False,
         ),
     ] = None,
+    tmdb_language: Annotated[
+        str | None,
+        typer.Option(
+            "--tmdb-language",
+            help=(
+                "Preferred TMDb metadata language such as en-US, ja-JP, or zh-CN. "
+                "Use default to reset to en-US."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     show_hidden: Annotated[
         bool | None,
         typer.Option(
@@ -174,6 +194,7 @@ def config_set_defaults(
         metadata is not None
         or fields is not None
         or output_style is not None
+        or tmdb_language is not None
         or show_hidden is not None
     )
     try:
@@ -184,6 +205,7 @@ def config_set_defaults(
             raise typer.Exit(code=2) from exc
         defaults = config.UserDefaults()
     library_defaults = defaults.library_read
+    tmdb_defaults = defaults.tmdb
 
     if metadata is not None:
         try:
@@ -215,10 +237,21 @@ def config_set_defaults(
                 raise typer.Exit(code=2) from exc
         library_defaults = replace(library_defaults, output_style=resolved_output_style)
 
+    if tmdb_language is not None:
+        if tmdb_language.strip().lower() == "default":
+            resolved_tmdb_language = config.TMDbDefaults().metadata_language
+        else:
+            try:
+                resolved_tmdb_language = config.resolve_configured_tmdb_language(tmdb_language)
+            except config.UserConfigError as exc:
+                emit_error(str(exc))
+                raise typer.Exit(code=2) from exc
+        tmdb_defaults = replace(tmdb_defaults, metadata_language=resolved_tmdb_language)
+
     if show_hidden is not None:
         library_defaults = replace(library_defaults, show_hidden=show_hidden)
 
-    defaults = config.UserDefaults(library_read=library_defaults)
+    defaults = config.UserDefaults(library_read=library_defaults, tmdb=tmdb_defaults)
     try:
         path = config.save_user_defaults(defaults)
     except config.UserConfigError as exc:
@@ -236,7 +269,8 @@ def config_set_defaults(
                 ),
                 output_style=library_defaults.output_style.value,
                 show_hidden=library_defaults.show_hidden,
-            )
+            ),
+            tmdb=TMDbDefaultsResult(metadata_language=tmdb_defaults.metadata_language),
         ),
         path=str(path),
     )
@@ -259,6 +293,7 @@ def config_set_defaults(
                     ),
                     ("Output style", library_defaults.output_style.value),
                     ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
+                    ("TMDb language", tmdb_defaults.metadata_language),
                     ("Config file", str(path)),
                 ),
             )

@@ -387,6 +387,7 @@ def tmdb_search_payload(
         query=TMDbSearchQueryResult(
             mode=query.mode,
             type=query.entry_type,
+            language=query.language,
             title=query.title,
             year=query.year,
         ),
@@ -412,6 +413,7 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
         summary_rows.append(("Type", query.entry_type))
     if query.year is not None:
         summary_rows.append(("Year", query.year))
+    summary_rows.append(("Language", query.language))
     summary_rows.extend(
         [
             ("Movies", len(result.movies)),

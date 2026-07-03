@@ -16,6 +16,7 @@ DEFAULT_CONTAINER = "iCloud.com.samuelhe.MyAnimeList"
 DEFAULT_ENVIRONMENT = "production"
 DEFAULT_DATABASE = "private"
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
+DEFAULT_TMDB_METADATA_LANGUAGE = "en-US"
 
 KEYCHAIN_ACCOUNT = "anishelf-cli"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
@@ -46,8 +47,14 @@ class LibraryReadDefaults:
 
 
 @dataclass(frozen=True, slots=True)
+class TMDbDefaults:
+    metadata_language: str = DEFAULT_TMDB_METADATA_LANGUAGE
+
+
+@dataclass(frozen=True, slots=True)
 class UserDefaults:
     library_read: LibraryReadDefaults = LibraryReadDefaults()
+    tmdb: TMDbDefaults = TMDbDefaults()
 
 
 def app_dir() -> Path:
@@ -95,13 +102,14 @@ def load_user_defaults() -> UserDefaults:
         raise UserConfigError(f"User config file {path} must contain a TOML table.")
     _reject_unknown_keys(
         payload,
-        allowed_keys={"library"},
+        allowed_keys={"library", "tmdb"},
         path=path,
         scope="top-level config",
     )
 
     return UserDefaults(
         library_read=_load_library_read_defaults(payload.get("library"), path),
+        tmdb=_load_tmdb_defaults(payload.get("tmdb"), path),
     )
 
 
@@ -184,6 +192,27 @@ def resolve_configured_output_style(
         ) from exc
 
 
+def resolve_configured_tmdb_language(
+    value: object,
+    *,
+    path: Path | None = None,
+) -> str:
+    candidate = str(value).strip()
+    location = f" in {path}" if path is not None else ""
+    if not candidate:
+        raise UserConfigError(f"Invalid TMDb metadata language{location}: value cannot be empty.")
+    if any(character.isspace() for character in candidate):
+        raise UserConfigError(
+            f"Invalid TMDb metadata language {candidate!r}{location}. "
+            "Use a BCP 47-style TMDb language tag such as en-US or ja-JP."
+        )
+    if len(candidate) > 35:
+        raise UserConfigError(
+            f"Invalid TMDb metadata language {candidate!r}{location}. Value is too long."
+        )
+    return candidate
+
+
 def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefaults:
     if value is None:
         return LibraryReadDefaults()
@@ -223,6 +252,24 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
     )
 
 
+def _load_tmdb_defaults(value: object, path: Path) -> TMDbDefaults:
+    if value is None:
+        return TMDbDefaults()
+    if not isinstance(value, dict):
+        raise UserConfigError(f"TMDb defaults in {path} must be a TOML table.")
+    _reject_unknown_keys(
+        value,
+        allowed_keys={"metadata_language"},
+        path=path,
+        scope="TMDb defaults",
+    )
+
+    language_value = value.get("metadata_language", DEFAULT_TMDB_METADATA_LANGUAGE)
+    return TMDbDefaults(
+        metadata_language=resolve_configured_tmdb_language(language_value, path=path),
+    )
+
+
 def _serialize_user_defaults(defaults: UserDefaults) -> str:
     lines: list[str] = []
     library_lines: list[str] = []
@@ -239,6 +286,16 @@ def _serialize_user_defaults(defaults: UserDefaults) -> str:
     if library_lines:
         lines.append("[library]")
         lines.extend(library_lines)
+
+    tmdb_lines: list[str] = []
+    if defaults.tmdb.metadata_language != DEFAULT_TMDB_METADATA_LANGUAGE:
+        tmdb_lines.append(f'metadata_language = "{defaults.tmdb.metadata_language}"')
+
+    if tmdb_lines:
+        if lines:
+            lines.append("")
+        lines.append("[tmdb]")
+        lines.extend(tmdb_lines)
 
     if not lines:
         return ""

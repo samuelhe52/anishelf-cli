@@ -310,6 +310,7 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert payload["cloudkit"]["app_auth_source"] == "env"
     assert payload["cloudkit"]["app_auth_version"] is None
     assert payload["tmdb"]["api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
+    assert payload["tmdb"]["defaults"] == {"metadata_language": "en-US"}
     assert payload["library"]["defaults"] == {
         "metadata": "summary",
         "display_fields": None,
@@ -431,6 +432,8 @@ def test_config_show_human_output_uses_readable_sections() -> None:
     assert "\nTMDb\n" in result.stdout
     assert "  API key envs" in result.stdout
     assert "ANI_TMDB_API_KEY, TMDB_API_KEY" in result.stdout
+    assert "  Metadata language" in result.stdout
+    assert "en-US" in result.stdout
     assert "\nLibrary\n" in result.stdout
     assert "  Metadata" in result.stdout
     assert "  Display fields" in result.stdout
@@ -531,6 +534,8 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
             "title,id,saved",
             "--style",
             "list",
+            "--tmdb-language",
+            "ja-JP",
             "--show-hidden",
         ],
     )
@@ -544,11 +549,12 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
         "output_style": "list",
         "show_hidden": True,
     }
+    assert payload["defaults"]["tmdb"] == {"metadata_language": "ja-JP"}
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id", "saved"]\n'
-        'output_style = "list"\nshow_hidden = true\n'
+        'output_style = "list"\nshow_hidden = true\n\n[tmdb]\nmetadata_language = "ja-JP"\n'
     )
 
 
@@ -572,6 +578,7 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
         "output_style": "table",
         "show_hidden": False,
     }
+    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
 
@@ -595,6 +602,7 @@ def test_config_set_defaults_can_reset_output_style_to_builtin(tmp_path, monkeyp
         "output_style": "table",
         "show_hidden": False,
     }
+    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
 
@@ -603,7 +611,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\n'
-        'output_style = "list"\nshow_hidden = true\n'
+        'output_style = "list"\nshow_hidden = true\n\n[tmdb]\nmetadata_language = "zh-CN"\n'
     )
 
     result = runner.invoke(
@@ -620,6 +628,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
         "output_style": "list",
         "show_hidden": True,
     }
+    assert payload["tmdb"]["defaults"] == {"metadata_language": "zh-CN"}
 
 
 @pytest.mark.parametrize(
@@ -641,6 +650,12 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
             ["config", "set-defaults", "--style", "grid"],
             None,
             "Invalid output style 'grid'",
+            None,
+        ),
+        (
+            ["config", "set-defaults", "--tmdb-language", "bad value"],
+            None,
+            "Invalid TMDb metadata language 'bad value'",
             None,
         ),
         (
@@ -713,6 +728,7 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
         "output_style": "table",
         "show_hidden": False,
     }
+    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
     assert config_file.read_text() == ('[library]\nmetadata = "none"\n')
 
 
@@ -777,7 +793,7 @@ def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {
-        "query": {"mode": "search", "title": "Alien", "type": "all"},
+        "query": {"language": "en-US", "mode": "search", "title": "Alien", "type": "all"},
         "results": {
             "movies": [
                 {
@@ -831,7 +847,7 @@ def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
     assert payload == {
-        "query": {"mode": "search", "title": "Alien", "type": "all"},
+        "query": {"language": "en-US", "mode": "search", "title": "Alien", "type": "all"},
         "results": {
             "movies": [
                 {
@@ -872,8 +888,9 @@ def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "TMDb search\n" in result.stdout
-    assert "  Mode    search\n" in result.stdout
-    assert "  Query   Alien\n" in result.stdout
+    assert "  Mode      search\n" in result.stdout
+    assert "  Query     Alien\n" in result.stdout
+    assert "  Language  en-US\n" in result.stdout
     assert "\nMovies\n" in result.stdout
     assert "TMDb ID" in result.stdout
     assert "Alien" in result.stdout
@@ -900,7 +917,7 @@ def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["query"] == {"mode": "discover", "type": "all"}
+    assert payload["query"] == {"language": "en-US", "mode": "discover", "type": "all"}
     assert payload["summary"] == {"movies": 0, "series": 1, "total": 1}
     assert payload["results"]["movies"] == []
     assert payload["results"]["series"][0]["tmdb_id"] == 1399
@@ -916,7 +933,7 @@ def test_tmdb_search_treats_whitespace_title_as_discover_query(monkeypatch) -> N
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["query"] == {"mode": "discover", "type": "all"}
+    assert payload["query"] == {"language": "en-US", "mode": "discover", "type": "all"}
     assert payload["summary"] == {"movies": 0, "series": 0, "total": 0}
 
 
@@ -940,7 +957,12 @@ def test_tmdb_search_discovers_without_title_and_forwards_filters(monkeypatch) -
 
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
-    assert payload["query"] == {"mode": "discover", "type": "movie", "year": 1979}
+    assert payload["query"] == {
+        "language": "en-US",
+        "mode": "discover",
+        "type": "movie",
+        "year": 1979,
+    }
     assert payload["summary"] == {"movies": 1, "series": 0, "total": 1}
     assert payload["results"]["movies"][0]["tmdb_id"] == 55
     assert payload["results"]["series"] == []
@@ -956,10 +978,11 @@ def test_tmdb_search_human_output_reports_no_results(monkeypatch) -> None:
 
     assert result.exit_code == 0
     assert "TMDb search\n" in result.stdout
-    assert "  Mode    search\n" in result.stdout
-    assert "  Query   Alien\n" in result.stdout
-    assert "  Movies  0\n" in result.stdout
-    assert "  Series  0\n" in result.stdout
+    assert "  Mode      search\n" in result.stdout
+    assert "  Query     Alien\n" in result.stdout
+    assert "  Language  en-US\n" in result.stdout
+    assert "  Movies    0\n" in result.stdout
+    assert "  Series    0\n" in result.stdout
     assert "No TMDb titles matched the query." in result.stdout
 
 

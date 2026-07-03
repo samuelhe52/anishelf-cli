@@ -234,6 +234,7 @@ class LibraryRefreshMetadataResult(AniShelfBaseModel):
 class TMDbSearchQueryResult(AniShelfBaseModel):
     mode: str
     type: str
+    language: str
     title: str | None = None
     year: int | None = None
 
@@ -319,6 +320,10 @@ class LibraryDefaultsResult(AniShelfBaseModel):
     show_hidden: bool = False
 
 
+class TMDbDefaultsResult(AniShelfBaseModel):
+    metadata_language: str
+
+
 class ConfigCloudKitResult(AniShelfBaseModel):
     container: str
     environment: str
@@ -333,6 +338,7 @@ class ConfigCallbackResult(AniShelfBaseModel):
 
 class ConfigTMDbResult(AniShelfBaseModel):
     api_key_envs: tuple[str, ...]
+    defaults: TMDbDefaultsResult
 
 
 class ConfigLibraryResult(AniShelfBaseModel):
@@ -356,6 +362,7 @@ class ConfigShowResult(AniShelfBaseModel):
 
 class ConfigSetDefaultsPayloadResult(AniShelfBaseModel):
     library: LibraryDefaultsResult
+    tmdb: TMDbDefaultsResult
 
 
 class ConfigSetDefaultsResult(AniShelfBaseModel):

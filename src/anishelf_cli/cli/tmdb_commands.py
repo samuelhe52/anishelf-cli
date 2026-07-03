@@ -5,6 +5,7 @@ from typing import Annotated
 
 import typer
 
+from anishelf_cli import config
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.presentation import (
     normalized_tmdb_title,
@@ -70,10 +71,12 @@ def tmdb_search(
         typer.Option("--json", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    defaults = _user_defaults_or_exit()
     query = TMDbTitleSearchQuery(
         title=normalized_tmdb_title(title),
         year=year,
         entry_type=entry_type.value,
+        language=defaults.tmdb.metadata_language,
     )
     try:
         result = _tmdb_summary_client_or_exit().search_titles(query)
@@ -87,3 +90,11 @@ def tmdb_search(
         return
 
     render_tmdb_search(query, result)
+
+
+def _user_defaults_or_exit() -> config.UserDefaults:
+    try:
+        return config.load_user_defaults()
+    except config.UserConfigError as exc:
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc

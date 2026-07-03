@@ -11,6 +11,7 @@ class TMDbTitleSearchQuery(AniShelfBaseModel):
     title: StrictStr | None = None
     year: StrictInt | None = None
     entry_type: Literal["all", "movie", "series"] = "all"
+    language: StrictStr = "en-US"
 
     @property
     def mode(self) -> str:
