@@ -22,7 +22,7 @@ from anishelf_cli.models.tmdb import (
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
-from tests.support import MemorySecretStore, runner
+from tests.support import MemorySecretStore, isolate_paths, runner
 
 
 def _fake_store() -> object:
@@ -297,7 +297,9 @@ def test_implemented_commands_have_help_text() -> None:
     assert missing == []
 
 
-def test_config_show_json_shows_effective_config_without_secrets() -> None:
+def test_config_show_json_shows_effective_config_without_secrets(tmp_path, monkeypatch) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
     result = runner.invoke(
         app,
         ["--json", "config", "show"],
@@ -328,7 +330,9 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert "ckWebAuthToken" not in result.stdout
 
 
-def test_config_show_accepts_command_level_json() -> None:
+def test_config_show_accepts_command_level_json(tmp_path, monkeypatch) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
     result = runner.invoke(
         app,
         ["config", "show", "--json"],
@@ -417,7 +421,9 @@ def test_verbose_flag_resets_across_multiple_invocations(monkeypatch) -> None:
     assert plain_result.stderr == ""
 
 
-def test_config_show_human_output_uses_readable_sections() -> None:
+def test_config_show_human_output_uses_readable_sections(tmp_path, monkeypatch) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
     result = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
 
     assert result.exit_code == 0
