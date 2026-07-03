@@ -25,7 +25,7 @@ from anishelf_cli.cli.library_service import (
 from anishelf_cli.cli.library_service import (
     library_status as service_library_status,
 )
-from anishelf_cli.cli.options import FieldListOption, MetadataOption
+from anishelf_cli.cli.options import FieldListOption, MetadataOption, OutputStyleOption
 from anishelf_cli.cli.presentation import (
     LIBRARY_LIST_DEFAULT_FIELDS,
     LIBRARY_SEARCH_DEFAULT_FIELDS,
@@ -49,7 +49,7 @@ from anishelf_cli.library.queries import (
     cache_summary_payload,
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
-from anishelf_cli.models import LibraryListSort, MetadataDepth
+from anishelf_cli.models import HumanOutputStyle, LibraryListSort, MetadataDepth
 from anishelf_cli.models.domain import LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import (
     CacheStatusResult,
@@ -324,6 +324,7 @@ def library_list(
         ),
     ] = None,
     fields: FieldListOption = None,
+    output_style: OutputStyleOption = None,
     watch_status: Annotated[
         str | None,
         typer.Option("--watch-status", help="Filter by watch status."),
@@ -350,6 +351,7 @@ def library_list(
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
+    _reject_style_with_json(ctx, json_output, output_style)
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
@@ -380,6 +382,7 @@ def library_list(
     render_library_list(
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
+        style=_resolve_output_style(output_style),
         display_titles=_display_titles_for_entries(store, display_entries),
     )
 
@@ -397,6 +400,7 @@ def library_search(
         ),
     ] = None,
     fields: FieldListOption = None,
+    output_style: OutputStyleOption = None,
     show_hidden: Annotated[
         bool,
         typer.Option("--show-hidden", help="Include entries hidden from display."),
@@ -407,6 +411,7 @@ def library_search(
     ] = False,
 ) -> None:
     _reject_fields_with_json(ctx, json_output, fields)
+    _reject_style_with_json(ctx, json_output, output_style)
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
     _reject_reserved_metadata_depth(metadata_depth)
@@ -434,6 +439,7 @@ def library_search(
         title,
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
+        style=_resolve_output_style(output_style),
         display_titles=_display_titles_for_entries(store, display_entries),
     )
 
@@ -764,6 +770,17 @@ def _resolve_display_fields(
     return command_default
 
 
+def _resolve_output_style(value: str | None) -> HumanOutputStyle:
+    if value is not None and value.strip().lower() != "default":
+        try:
+            return config.resolve_configured_output_style(value)
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+
+    return _user_defaults_or_exit().library_read.output_style
+
+
 def _reject_fields_with_json(
     ctx: typer.Context,
     json_output: bool,
@@ -771,7 +788,18 @@ def _reject_fields_with_json(
 ) -> None:
     if fields is None or not json_output_requested(ctx, json_output):
         return
-    emit_error("--fields only applies to human table output.")
+    emit_error("--fields only applies to human output.")
+    raise typer.Exit(code=2)
+
+
+def _reject_style_with_json(
+    ctx: typer.Context,
+    json_output: bool,
+    style: str | None,
+) -> None:
+    if style is None or not json_output_requested(ctx, json_output):
+        return
+    emit_error("--style only applies to human output.")
     raise typer.Exit(code=2)
 
 

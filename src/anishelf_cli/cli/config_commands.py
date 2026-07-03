@@ -58,6 +58,7 @@ def _config_payload() -> ConfigShowResult:
                     if defaults.display_fields is not None
                     else None
                 ),
+                output_style=defaults.output_style.value,
                 show_hidden=defaults.show_hidden,
             )
         ),
@@ -117,6 +118,7 @@ def config_show(
                 (
                     ("Metadata", library_defaults.metadata),
                     ("Display fields", display_fields_label),
+                    ("Output style", library_defaults.output_style),
                     ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                 ),
             ),
@@ -145,6 +147,17 @@ def config_set_defaults(
         ),
     ] = None,
     fields: FieldListOption = None,
+    output_style: Annotated[
+        str | None,
+        typer.Option(
+            "--style",
+            help=(
+                "Default human output style for library list/search: table or list. "
+                "Use default to reset to the built-in table style."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     show_hidden: Annotated[
         bool | None,
         typer.Option(
@@ -158,7 +171,10 @@ def config_set_defaults(
     ] = False,
 ) -> None:
     has_replacements = (
-        metadata is not None or fields is not None or show_hidden is not None
+        metadata is not None
+        or fields is not None
+        or output_style is not None
+        or show_hidden is not None
     )
     try:
         defaults = config.load_user_defaults()
@@ -188,6 +204,17 @@ def config_set_defaults(
                 raise typer.Exit(code=2) from exc
         library_defaults = replace(library_defaults, display_fields=display_fields)
 
+    if output_style is not None:
+        if output_style.strip().lower() == "default":
+            resolved_output_style = config.LibraryReadDefaults().output_style
+        else:
+            try:
+                resolved_output_style = config.resolve_configured_output_style(output_style)
+            except config.UserConfigError as exc:
+                emit_error(str(exc))
+                raise typer.Exit(code=2) from exc
+        library_defaults = replace(library_defaults, output_style=resolved_output_style)
+
     if show_hidden is not None:
         library_defaults = replace(library_defaults, show_hidden=show_hidden)
 
@@ -207,6 +234,7 @@ def config_set_defaults(
                     if library_defaults.display_fields is not None
                     else None
                 ),
+                output_style=library_defaults.output_style.value,
                 show_hidden=library_defaults.show_hidden,
             )
         ),
@@ -229,6 +257,7 @@ def config_set_defaults(
                         if display_fields is None
                         else ", ".join(str(field) for field in display_fields),
                     ),
+                    ("Output style", library_defaults.output_style.value),
                     ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                     ("Config file", str(path)),
                 ),

@@ -313,6 +313,7 @@ def test_config_show_json_shows_effective_config_without_secrets() -> None:
     assert payload["library"]["defaults"] == {
         "metadata": "summary",
         "display_fields": None,
+        "output_style": "table",
         "show_hidden": False,
     }
     assert "config_dir" in payload["paths"]
@@ -528,6 +529,8 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
             "none",
             "--fields",
             "title,id,saved",
+            "--style",
+            "list",
             "--show-hidden",
         ],
     )
@@ -538,13 +541,14 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": ["title", "id", "saved"],
+        "output_style": "list",
         "show_hidden": True,
     }
     config_file = tmp_path / "config" / "config.toml"
     assert payload["path"] == str(config_file)
     assert config_file.read_text() == (
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "id", "saved"]\n'
-        "show_hidden = true\n"
+        'output_style = "list"\nshow_hidden = true\n'
     )
 
 
@@ -565,6 +569,30 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": None,
+        "output_style": "table",
+        "show_hidden": False,
+    }
+    assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
+
+
+def test_config_set_defaults_can_reset_output_style_to_builtin(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text(
+        '[library]\nmetadata = "none"\noutput_style = "list"\n'
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-defaults", "--style", "default"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["defaults"]["library"] == {
+        "metadata": "none",
+        "display_fields": None,
+        "output_style": "table",
         "show_hidden": False,
     }
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
@@ -574,7 +602,8 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)
     (tmp_path / "config" / "config.toml").write_text(
-        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\nshow_hidden = true\n'
+        '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\n'
+        'output_style = "list"\nshow_hidden = true\n'
     )
 
     result = runner.invoke(
@@ -588,6 +617,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     assert payload["library"]["defaults"] == {
         "metadata": "none",
         "display_fields": ["title", "saved"],
+        "output_style": "list",
         "show_hidden": True,
     }
 
@@ -605,6 +635,12 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
             ["config", "set-defaults", "--fields", "title,bogus"],
             None,
             "Invalid display field 'bogus'",
+            None,
+        ),
+        (
+            ["config", "set-defaults", "--style", "grid"],
+            None,
+            "Invalid output style 'grid'",
             None,
         ),
         (
@@ -674,6 +710,7 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
     assert payload["defaults"]["library"] == {
         "metadata": "none",
         "display_fields": None,
+        "output_style": "table",
         "show_hidden": False,
     }
     assert config_file.read_text() == ('[library]\nmetadata = "none"\n')

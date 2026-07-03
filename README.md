@@ -62,6 +62,15 @@ one command, or persist that default with:
 uv run ani config set-defaults --show-hidden
 ```
 
+`lib list` and `lib search` use compact table output by default. Pass
+`--style list` for a per-entry human layout similar to `lib get`, and use
+`--fields` to choose which fields appear in either human style:
+
+```bash
+uv run ani lib list --style list --fields title,id,status
+uv run ani config set-defaults --style list
+```
+
 `lib get` looks up entries by id. Accepted id forms are
 `movie:<tmdbID>`, `series:<tmdbID>`, and
 `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`.

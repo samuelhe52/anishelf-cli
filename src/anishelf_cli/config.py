@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from anishelf_cli.models import MetadataDepth
+from anishelf_cli.models import HumanOutputStyle, MetadataDepth
 
 APP_NAME = "anishelf-cli"
 POSIX_APP_DIR = f".{APP_NAME}"
@@ -41,6 +41,7 @@ class UserConfigError(ValueError):
 class LibraryReadDefaults:
     metadata: MetadataDepth = MetadataDepth.SUMMARY
     display_fields: tuple[str, ...] | None = None
+    output_style: HumanOutputStyle = HumanOutputStyle.TABLE
     show_hidden: bool = False
 
 
@@ -167,6 +168,22 @@ def resolve_configured_metadata_depth(value: object, *, path: Path | None = None
     return depth
 
 
+def resolve_configured_output_style(
+    value: object,
+    *,
+    path: Path | None = None,
+) -> HumanOutputStyle:
+    candidate = str(value).strip().lower()
+    location = f" in {path}" if path is not None else ""
+    try:
+        return HumanOutputStyle(candidate)
+    except ValueError as exc:
+        valid = ", ".join(style.value for style in HumanOutputStyle)
+        raise UserConfigError(
+            f"Invalid output style {candidate!r}{location}. Expected one of: {valid}."
+        ) from exc
+
+
 def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefaults:
     if value is None:
         return LibraryReadDefaults()
@@ -174,7 +191,7 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
         raise UserConfigError(f"Library defaults in {path} must be a TOML table.")
     _reject_unknown_keys(
         value,
-        allowed_keys={"metadata", "display_fields", "show_hidden"},
+        allowed_keys={"metadata", "display_fields", "output_style", "show_hidden"},
         path=path,
         scope="library defaults",
     )
@@ -191,6 +208,9 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
     else:
         raise UserConfigError(f"library.display_fields in {path} must be a TOML array.")
 
+    output_style_value = value.get("output_style", HumanOutputStyle.TABLE.value)
+    output_style = resolve_configured_output_style(output_style_value, path=path)
+
     show_hidden_value = value.get("show_hidden", False)
     if not isinstance(show_hidden_value, bool):
         raise UserConfigError(f"library.show_hidden in {path} must be a TOML boolean.")
@@ -198,6 +218,7 @@ def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefault
     return LibraryReadDefaults(
         metadata=metadata,
         display_fields=display_fields,
+        output_style=output_style,
         show_hidden=show_hidden_value,
     )
 
@@ -210,6 +231,8 @@ def _serialize_user_defaults(defaults: UserDefaults) -> str:
     if defaults.library_read.display_fields is not None:
         fields = ", ".join(f'"{field}"' for field in defaults.library_read.display_fields)
         library_lines.append(f"display_fields = [{fields}]")
+    if defaults.library_read.output_style is not HumanOutputStyle.TABLE:
+        library_lines.append(f'output_style = "{defaults.library_read.output_style.value}"')
     if defaults.library_read.show_hidden:
         library_lines.append("show_hidden = true")
 

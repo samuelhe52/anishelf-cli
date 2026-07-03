@@ -55,8 +55,9 @@ include:
 - `lib clear-cache`
 - `lib refresh-meta`
 - `lib get <id...> [--sync] [--live-meta] [--metadata[=none|summary|details|full]]`
-- `lib list [--sync] [--metadata[=none|summary|details|full]]`
-- `lib search --title` with optional `--sync` and `--metadata`
+- `lib list [--sync] [--metadata[=none|summary|details|full]] [--style table|list]`
+- `lib search --title` with optional `--sync`, `--metadata`, and
+  `--style table|list`
 - `lib export` with optional `--sync` and `--metadata`
 - `tmdb search [--title]`
 

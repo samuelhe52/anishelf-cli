@@ -1650,6 +1650,57 @@ def test_library_list_fields_flag_overrides_configured_display_fields(
     assert "Saved" not in result.stdout
 
 
+def test_library_list_style_flag_renders_human_entries_as_sections(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list", "--style", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Library entries\n" in result.stdout
+    assert "  Entries  1\n" in result.stdout
+    assert "\nAlien\n" in result.stdout
+    assert "  ID       movie:55\n" in result.stdout
+
+
+def test_library_list_style_uses_configured_default_for_human_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\noutput_style = "list"\n')
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Library entries\n" in result.stdout
+    assert "\nAlien\n" in result.stdout
+    assert "  ID       movie:55\n" in result.stdout
+
+
+def test_library_list_style_list_respects_fields_selection(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list", "--style", "list", "--fields", "id,status"])
+
+    assert result.exit_code == 0, result.output
+    assert "\nmovie:55\n" in result.stdout
+    assert "  ID       movie:55\n" in result.stdout
+    assert "  Status   watched\n" in result.stdout
+    assert "Title" not in result.stdout
+    assert "Alien" not in result.stdout
+
+
 def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> None:
     create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
 
@@ -1657,7 +1708,17 @@ def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> 
 
     assert result.exit_code == 2
     assert result.stdout == ""
-    assert "--fields only applies to human table output." in result.stderr
+    assert "--fields only applies to human output." in result.stderr
+
+
+def test_library_list_style_rejected_for_json_output(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "lib", "list", "--style", "list"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "--style only applies to human output." in result.stderr
 
 
 def test_library_refresh_meta_updates_full_library_cache(
@@ -2054,6 +2115,22 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     assert "ID" in result.stdout
     assert "Status" in result.stdout
     assert "Title" not in result.stdout
+
+
+def test_library_search_style_flag_renders_human_entries_as_sections(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "search", "--title", "Alien", "--style", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Library search: Alien\n" in result.stdout
+    assert "  Entries  1\n" in result.stdout
+    assert "\nAlien\n" in result.stdout
+    assert "  ID       movie:55\n" in result.stdout
 
 
 def _index_columns(db: sqlite3.Connection, index_name: str) -> list[str]:

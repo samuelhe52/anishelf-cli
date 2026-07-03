@@ -315,6 +315,7 @@ class AuthRefreshResult(AniShelfBaseModel):
 class LibraryDefaultsResult(AniShelfBaseModel):
     metadata: str
     display_fields: tuple[str, ...] | None = None
+    output_style: str = "table"
     show_hidden: bool = False
 
 

@@ -24,6 +24,11 @@ class LibraryListSort(StrEnum):
     TITLE = "title"
 
 
+class HumanOutputStyle(StrEnum):
+    TABLE = "table"
+    LIST = "list"
+
+
 class CallbackStrategy(StrEnum):
     MANUAL_PASTE = "manual-paste"
     LOOPBACK = "loopback"
@@ -38,6 +43,7 @@ __all__ = [
     "AniShelfBaseModel",
     "AppState",
     "CallbackStrategy",
+    "HumanOutputStyle",
     "LibraryIdentity",
     "LibraryIdentityError",
     "LibraryListSort",

@@ -23,8 +23,9 @@ spec.
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.
-- Human output uses shared `core.output` blocks: sections for detail views and
-  aligned tables for collections.
+- Human output uses shared `core.output` blocks: sections for detail views,
+  aligned tables for collections, and an opt-in list style for `lib list` /
+  `lib search`.
 - `lib init` initializes a rebuildable SQLite cache of `LibraryEntry`
   records from CloudKit, and `lib sync` refreshes that initialized cache.
 - `lib init` now keeps JSON stdout clean while still emitting cache and
@@ -50,7 +51,8 @@ spec.
   supports `--live-meta` for targeted per-entry refresh.
 - `lib list` has first-pass ergonomic filters and ordering for common
   questions: watch status, favorites, saved/updated/title sort, and result
-  limits. Hidden entries are excluded from collection reads by default and can
+  limits. Human output supports `--style table|list` and configurable display
+  fields. Hidden entries are excluded from collection reads by default and can
   be included with `--show-hidden` or a library config default.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.

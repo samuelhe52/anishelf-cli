@@ -25,9 +25,17 @@ FieldListOption = Annotated[
     typer.Option(
         "--fields",
         help=(
-            "Comma-separated human table fields. Use default to use the built-in "
+            "Comma-separated human output fields. Use default to use the built-in "
             "fields for this invocation."
         ),
+        show_default=False,
+    ),
+]
+OutputStyleOption = Annotated[
+    str | None,
+    typer.Option(
+        "--style",
+        help="Human output style: table or list. Use default to use the configured style.",
         show_default=False,
     ),
 ]

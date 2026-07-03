@@ -8,6 +8,7 @@ from anishelf_cli.core.output import (
     HumanTableColumn,
     emit_human_blocks,
 )
+from anishelf_cli.models import HumanOutputStyle
 from anishelf_cli.models.domain import (
     EpisodeProgress,
     LibraryEntryMetadata,
@@ -256,16 +257,30 @@ def render_library_list(
     entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
+    style: HumanOutputStyle = HumanOutputStyle.TABLE,
     display_titles: Mapping[str, str] | None = None,
 ) -> None:
     rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
+    title = "Library entries"
+    empty_message = "No cached library entries."
+    if style is HumanOutputStyle.LIST:
+        emit_human_blocks(
+            _library_rows_as_sections(
+                title,
+                fields,
+                rows,
+                empty_message=empty_message,
+            )
+        )
+        return
+
     emit_human_blocks(
         [
             HumanTable(
-                "Library entries",
+                title,
                 _columns_for_display_fields(fields),
                 rows,
-                empty_message="No cached library entries.",
+                empty_message=empty_message,
             )
         ]
     )
@@ -276,16 +291,30 @@ def render_library_search(
     entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
+    style: HumanOutputStyle = HumanOutputStyle.TABLE,
     display_titles: Mapping[str, str] | None = None,
 ) -> None:
     rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
+    block_title = f"Library search: {title}"
+    empty_message = "No cached library entries matched the title search."
+    if style is HumanOutputStyle.LIST:
+        emit_human_blocks(
+            _library_rows_as_sections(
+                block_title,
+                fields,
+                rows,
+                empty_message=empty_message,
+            )
+        )
+        return
+
     emit_human_blocks(
         [
             HumanTable(
-                f"Library search: {title}",
+                block_title,
                 _columns_for_display_fields(fields),
                 rows,
-                empty_message="No cached library entries matched the title search.",
+                empty_message=empty_message,
             )
         ]
     )
@@ -293,6 +322,41 @@ def render_library_search(
 
 def _columns_for_display_fields(fields: tuple[str, ...]) -> tuple[HumanTableColumn, ...]:
     return tuple(DISPLAY_FIELD_COLUMNS[field] for field in fields)
+
+
+def _library_rows_as_sections(
+    title: str,
+    fields: tuple[str, ...],
+    rows: list[dict[str, object]],
+    *,
+    empty_message: str,
+) -> list[HumanSection]:
+    if not rows:
+        return [HumanSection(title, (("Entries", 0), ("Result", empty_message)))]
+
+    sections = [HumanSection(title, (("Entries", len(rows)),))]
+    for row in rows:
+        section_title = _library_list_item_title(row, fields)
+        sections.append(
+            HumanSection(
+                section_title,
+                tuple(
+                    (DISPLAY_FIELD_COLUMNS[field].label, row.get(field))
+                    for field in fields
+                    if field != "title"
+                ),
+            )
+        )
+    return sections
+
+
+def _library_list_item_title(row: Mapping[str, object], fields: tuple[str, ...]) -> str:
+    if "title" in fields:
+        title = row.get("title")
+        if title is not None:
+            return str(title)
+    identity = row.get("id")
+    return str(identity) if identity is not None else "Library entry"
 
 
 def render_library_export_result(
