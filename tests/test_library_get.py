@@ -915,15 +915,20 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
 
     assert result.exit_code == 0, result.output
     assert (
-        "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/"
+        "[debug] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/"
         in result.stderr
     )
     assert (
-        "[verbose] CloudKit request -> POST https://api.apple-cloudkit.com/database/1/"
+        "[debug] CloudKit request -> POST https://api.apple-cloudkit.com/database/1/"
         in result.stderr
     )
-    assert "[verbose] CloudKit response <- HTTP 200 GET" in result.stderr
-    assert "[verbose] CloudKit payload <- HTTP 200" in result.stderr
+    assert "[debug] CloudKit response <- HTTP 200 GET" in result.stderr
+    assert "[debug] CloudKit payload <- HTTP 200" in result.stderr
+    assert "[debug] Library cache refresh decision -> rebuild" in result.stderr
+    assert "[debug] TMDb summary client -> unavailable reason=missing-api-key" in result.stderr
+    assert "json={" not in result.stderr
+    assert '"syncToken"' not in result.stderr
+    assert "t1" not in result.stderr
     assert "api-secret-token" not in result.stderr
     assert "web-secret-token" not in result.stderr
     assert "ckWebAuthToken=web-secret-token" not in result.stderr

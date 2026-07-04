@@ -15,7 +15,7 @@ from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.auth import database_endpoint_url, successor_web_auth_token
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.core.output import emit_verbose
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.models.transport.cloudkit import (
@@ -34,6 +34,7 @@ from anishelf_cli.secrets import (
 )
 
 DEFAULT_PROFILE_ID = "default"
+logger = get_logger(__name__)
 
 API_TOKEN_PARAM = "ckAPIToken"
 WEB_AUTH_TOKEN_PARAM = "ckWebAuthToken"
@@ -247,8 +248,8 @@ class CloudKitExecutor:
             f"params={json.dumps(request_params, sort_keys=True)}"
         )
         if json_payload is not None:
-            message += f" json={json.dumps(json_payload, sort_keys=True)}"
-        emit_verbose(message, redactor=redactor)
+            message += f" {_cloudkit_request_payload_log(json_payload)}"
+        logger.debug(message, extra={"redactor": redactor})
         try:
             response = self.client.request(
                 method,
@@ -256,17 +257,17 @@ class CloudKitExecutor:
                 params=request_params,
                 json=json_payload,
             )
-            emit_verbose(
+            logger.debug(
                 "CloudKit response <- "
                 f"HTTP {response.status_code} {method.upper()} {response.request.url}",
-                redactor=redactor,
+                extra={"redactor": redactor},
             )
             return response
         except httpx.HTTPError as exc:
-            emit_verbose(
+            logger.debug(
                 "CloudKit transport error <- "
                 f"{method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc}",
-                redactor=redactor,
+                extra={"redactor": redactor},
             )
             raise CloudKitRequestFailedError(
                 f"{error_context} failed.",
@@ -300,9 +301,9 @@ class CloudKitExecutor:
                 message,
                 redactor=redactor,
             )
-        emit_verbose(
+        logger.debug(
             _cloudkit_payload_log(response, payload),
-            redactor=redactor,
+            extra={"redactor": redactor},
         )
         return payload
 
@@ -461,6 +462,37 @@ def _cloudkit_payload_log(response: httpx.Response, payload: dict[str, Any]) -> 
     else:
         parts.append(f"keys={sorted(payload.keys())}")
     return " ".join(parts)
+
+
+def _cloudkit_request_payload_log(payload: dict[str, Any]) -> str:
+    records = payload.get("records")
+    if isinstance(records, list):
+        return f"json=records:{len(records)} {_zone_payload_log(payload.get('zoneID'))}"
+
+    zones = payload.get("zones")
+    if isinstance(zones, list):
+        parts = [f"json=zones:{len(zones)}"]
+        first_zone = zones[0] if zones and isinstance(zones[0], dict) else {}
+        if isinstance(first_zone, dict):
+            parts.append(_zone_payload_log(first_zone.get("zoneID")))
+            parts.append(f"hasSyncToken={bool(first_zone.get('syncToken'))}")
+        if results_limit := payload.get("resultsLimit"):
+            parts.append(f"resultsLimit={results_limit}")
+        desired_record_types = payload.get("desiredRecordTypes")
+        if isinstance(desired_record_types, list):
+            parts.append(f"desiredRecordTypes={len(desired_record_types)}")
+        return " ".join(part for part in parts if part)
+
+    return f"jsonKeys={sorted(payload.keys())}"
+
+
+def _zone_payload_log(zone_payload: object) -> str:
+    if not isinstance(zone_payload, dict):
+        return ""
+    zone_name = nonempty_string_or_none(zone_payload.get("zoneName"))
+    if not zone_name:
+        return ""
+    return f"zone={zone_name}"
 
 
 def _safe_lock_name(value: str) -> str:

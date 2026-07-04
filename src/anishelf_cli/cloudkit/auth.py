@@ -12,11 +12,12 @@ import httpx
 
 from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
-from anishelf_cli.core.output import emit_verbose
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 
 APPLE_CLOUDKIT_API_BASE_URL = "https://api.apple-cloudkit.com"
 CK_WEB_AUTH_TOKEN_QUERY_KEY = "ckWebAuthToken"
+logger = get_logger(__name__)
 
 # Verified against Apple's archived CloudKit Web Services reference on 2026-06-29:
 # - database v1 endpoints are rooted at /database/1/{container}/{environment}/{operation}
@@ -94,33 +95,33 @@ def initiate_login(
     redactor = SecretRedactor()
     redactor.register(api_token.value, "cloudkit-api-token")
     params_log = json.dumps({"ckAPIToken": api_token.value}, sort_keys=True)
-    emit_verbose(
+    logger.debug(
         f"CloudKit request -> GET {endpoint_url} params={params_log}",
-        redactor=redactor,
+        extra={"redactor": redactor},
     )
     try:
         response = client.get(endpoint_url, params={"ckAPIToken": api_token.value})
     except httpx.HTTPError as exc:
-        emit_verbose(
+        logger.debug(
             f"CloudKit transport error <- GET {endpoint_url}: {exc.__class__.__name__}: {exc}",
-            redactor=redactor,
+            extra={"redactor": redactor},
         )
         raise CloudKitLoginInitiationError("CloudKit login initiation request failed") from exc
 
     try:
         payload = response.json()
     except json.JSONDecodeError as exc:
-        emit_verbose(
+        logger.debug(
             f"CloudKit response <- HTTP {response.status_code} GET {response.request.url} non-json",
-            redactor=redactor,
+            extra={"redactor": redactor},
         )
         raise CloudKitLoginInitiationError(
             "CloudKit login initiation returned a non-JSON response"
         ) from exc
 
-    emit_verbose(
+    logger.debug(
         _cloudkit_login_response_log(response, payload),
-        redactor=redactor,
+        extra={"redactor": redactor},
     )
     if not isinstance(payload, dict):
         raise CloudKitLoginInitiationError(

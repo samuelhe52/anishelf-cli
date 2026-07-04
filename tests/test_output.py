@@ -105,5 +105,5 @@ def test_emit_verbose_uses_request_scoped_app_state(capsys) -> None:
 
     emit_verbose("visible")
 
-    assert capsys.readouterr().err == "[verbose] visible\n"
+    assert capsys.readouterr().err == "[debug] visible\n"
     assert verbose_output_enabled()

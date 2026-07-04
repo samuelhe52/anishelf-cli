@@ -36,6 +36,7 @@ from anishelf_cli.cli.presentation import (
     render_library_list,
     render_library_search,
 )
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import HumanSection, emit_error, emit_human_blocks, emit_json
 from anishelf_cli.library import (
     has_any_found_item,
@@ -76,6 +77,7 @@ library_app = typer.Typer(
     rich_markup_mode=None,
 )
 library_lock_factory = None
+logger = get_logger(__name__)
 _LIBRARY_GET_ENTRY_FIELDS_TO_DROP = frozenset(
     {
         "kind",
@@ -869,9 +871,16 @@ def _preferred_metadata_language() -> str:
 
 def _metadata_language(value: str | None, *, preferred_language: str) -> str:
     if value is None:
+        logger.debug("TMDb metadata language -> preferred=%s", preferred_language)
         return preferred_language
     try:
-        return config.resolve_configured_tmdb_language(value)
+        language = config.resolve_configured_tmdb_language(value)
+        logger.debug(
+            "TMDb metadata language -> override=%s preferred=%s",
+            language,
+            preferred_language,
+        )
+        return language
     except config.UserConfigError as exc:
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
@@ -888,6 +897,12 @@ def _attach_live_metadata_for_entries(
             for entry in entries
             if (target := cache_metadata.metadata_target_from_entry(entry)) is not None
         ]
+    )
+    logger.debug(
+        "Library metadata source -> live language=%s entries=%s targets=%s",
+        language,
+        len(entries),
+        len(targets),
     )
     summaries, error_messages = fetch_metadata_summaries(
         _tmdb_summary_client_or_exit(language=language),
@@ -998,9 +1013,15 @@ def _tmdb_summary_client_or_none() -> TMDbClient | None:
     try:
         tmdb_token = resolve_tmdb_api_token(default_secret_store())
     except MissingTMDbAPITokenError:
+        logger.debug("TMDb summary client -> unavailable reason=missing-api-key")
         return None
     client = TMDbClient(tmdb_token.value)
     client.language = _preferred_metadata_language()
+    logger.debug(
+        "TMDb summary client -> configured source=%s language=%s",
+        tmdb_token.source_label,
+        client.language,
+    )
     return client
 
 
@@ -1012,6 +1033,11 @@ def _tmdb_summary_client_or_exit(*, language: str) -> TMDbClient:
         raise typer.Exit(code=2) from exc
     client = TMDbClient(tmdb_token.value)
     client.language = language
+    logger.debug(
+        "TMDb summary client -> configured source=%s language=%s",
+        tmdb_token.source_label,
+        client.language,
+    )
     return client
 
 

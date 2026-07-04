@@ -395,10 +395,8 @@ def test_tmdb_search_verbose_logs_are_redacted(monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert requests != []
     assert '"total": 1' in result.stdout
-    assert (
-        "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in result.stderr
-    )
-    assert "[verbose] TMDb response <- HTTP 200 GET" in result.stderr
+    assert "[debug] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in result.stderr
+    assert "[debug] TMDb response <- HTTP 200 GET" in result.stderr
     assert "tmdb-secret-token" not in result.stderr
     assert "api_key=tmdb-secret-token" not in result.stderr
     assert "<redacted:sensitive-url>" in result.stderr or "<redacted:api_key>" in result.stderr
@@ -435,7 +433,7 @@ def test_verbose_flag_resets_across_multiple_invocations(monkeypatch) -> None:
 
     assert verbose_result.exit_code == 0, verbose_result.output
     assert plain_result.exit_code == 0, plain_result.output
-    assert "[verbose] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in (
+    assert "[debug] TMDb request -> GET https://api.themoviedb.org/3/search/movie" in (
         verbose_result.stderr
     )
     assert plain_result.stderr == ""

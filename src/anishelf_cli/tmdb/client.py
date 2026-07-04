@@ -9,7 +9,7 @@ import httpx
 from pydantic import ValidationError
 
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.core.output import emit_verbose
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
@@ -30,6 +30,7 @@ from anishelf_cli.models.transport.tmdb import (
 
 ModelT = TypeVar("ModelT", bound=AniShelfBaseModel)
 TMDB_ANIME_GENRE_ID = 16
+logger = get_logger(__name__)
 
 
 class TMDbRequestError(RuntimeError):
@@ -167,9 +168,9 @@ class TMDbClient:
         redactor = self._redactor()
         for attempt in range(1, attempts + 1):
             params_log = json.dumps(params, sort_keys=True)
-            emit_verbose(
+            logger.debug(
                 f"TMDb request -> GET {url} params={params_log} attempt={attempt}/{attempts}",
-                redactor=redactor,
+                extra={"redactor": redactor},
             )
             try:
                 response = self.client.get(
@@ -178,23 +179,23 @@ class TMDbClient:
                     headers={"Accept": "application/json"},
                     timeout=self.timeout_seconds,
                 )
-                emit_verbose(
+                logger.debug(
                     f"TMDb response <- HTTP {response.status_code} GET {response.request.url}",
-                    redactor=redactor,
+                    extra={"redactor": redactor},
                 )
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:
-                emit_verbose(
+                logger.debug(
                     f"TMDb HTTP error <- HTTP {exc.response.status_code} GET {exc.request.url}",
-                    redactor=redactor,
+                    extra={"redactor": redactor},
                 )
                 if not _retryable_status(exc.response.status_code) or attempt == attempts:
                     raise
                 last_error = exc
             except httpx.TransportError as exc:
-                emit_verbose(
+                logger.debug(
                     f"TMDb transport error <- GET {url}: {exc.__class__.__name__}: {exc}",
-                    redactor=redactor,
+                    extra={"redactor": redactor},
                 )
                 if attempt == attempts:
                     raise

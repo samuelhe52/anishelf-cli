@@ -159,10 +159,10 @@ def test_manual_paste_login_verbose_non_json_error_redacts_secrets(monkeypatch) 
 
     assert result.exit_code == 2
     assert store.values == {}
-    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
+    assert "[debug] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
         result.stderr
     )
-    assert "[verbose] CloudKit response <- HTTP 502 GET" in result.stderr
+    assert "[debug] CloudKit response <- HTTP 502 GET" in result.stderr
     assert "non-json" in result.stderr
     assert "CloudKit login initiation returned a non-JSON response" in result.stderr
     assert "api-secret-token" not in result.stdout + result.stderr
@@ -188,11 +188,11 @@ def test_manual_paste_login_verbose_transport_error_redacts_secrets(monkeypatch)
 
     assert result.exit_code == 2
     assert store.values == {}
-    assert "[verbose] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
+    assert "[debug] CloudKit request -> GET https://api.apple-cloudkit.com/database/1/" in (
         result.stderr
     )
     assert (
-        "[verbose] CloudKit transport error <- GET https://api.apple-cloudkit.com/database/1/"
+        "[debug] CloudKit transport error <- GET https://api.apple-cloudkit.com/database/1/"
         in result.stderr
     )
     assert "ConnectError" in result.stderr

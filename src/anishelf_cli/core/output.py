@@ -10,6 +10,7 @@ import typer
 from rich.console import Console
 from rich.text import Text
 
+from anishelf_cli.core.logging import configure_logging, get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState
 
@@ -53,6 +54,7 @@ def console(stderr: bool = False) -> Console:
 
 def set_current_app_state(state: AppState) -> None:
     _APP_STATE.set(state)
+    configure_logging(verbose=state.verbose)
 
 
 def verbose_output_enabled() -> bool:
@@ -199,5 +201,5 @@ def emit_progress(message: str, *, redactor: SecretRedactor | None = None) -> No
 def emit_verbose(message: str, *, redactor: SecretRedactor | None = None) -> None:
     if not verbose_output_enabled():
         return
-    output = redactor.redact(message) if redactor else message
-    typer.echo(f"[verbose] {output}", err=True)
+    extra = {"redactor": redactor} if redactor is not None else None
+    get_logger("core.output").debug(message, extra=extra)

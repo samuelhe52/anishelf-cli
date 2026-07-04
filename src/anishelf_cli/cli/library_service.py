@@ -25,6 +25,7 @@ from anishelf_cli.cache.sync import (
 )
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError, LockFactory
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.queries import cache_summary_payload
@@ -42,6 +43,8 @@ from anishelf_cli.models.output import (
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, SecretStore
 from anishelf_cli.tmdb.client import TMDbClient
+
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,6 +128,7 @@ def library_status() -> CacheStatusResult:
     except LibraryCacheError:
         store = None
     if store is not None:
+        logger.debug("Library status -> active cache path=%s", store.path)
         with store.locked():
             store.initialize()
             entries = store.list_entry_models(include_tombstones=False)
@@ -138,6 +142,8 @@ def library_status() -> CacheStatusResult:
                 scope=CacheScopeResult.model_validate(store.scope.key_payload()),
                 metadata=store.metadata_summary_status(language=metadata_language),
             )
+    else:
+        logger.debug("Library status -> no active cache")
 
     return CacheStatusResult(
         initialized=active.initialized,
@@ -175,6 +181,11 @@ def initialize_library_store(
         from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
 
         api_token = resolve_cloudkit_api_token()
+        logger.debug(
+            "CloudKit app token -> resolved source=%s version=%s",
+            api_token.source,
+            api_token.version or "unknown",
+        )
         with make_http_client() as client:
             executor = CloudKitExecutor(
                 client=client,
@@ -186,8 +197,15 @@ def initialize_library_store(
             store = LibraryCacheStore.for_scope(
                 LibraryCacheScope.default_for_user(current_user.user_record_name)
             )
+            logger.debug("Library cache scope -> path=%s", store.path)
             store.initialize()
             cache_has_entries = store.has_entries()
+            logger.debug(
+                "Library cache initialize -> requireMissing=%s requireExisting=%s hasEntries=%s",
+                require_missing_cache,
+                require_existing_cache,
+                cache_has_entries,
+            )
             if require_missing_cache and cache_has_entries:
                 raise LibraryCacheError(
                     "Local library cache already exists. Run `ani lib sync` instead."
@@ -197,6 +215,7 @@ def initialize_library_store(
                     "No local library cache is available. Run `ani lib init` first."
                 )
             tmdb_client = tmdb_summary_client_or_none()
+            logger.debug("TMDb summary hydration source -> enabled=%s", tmdb_client is not None)
             refresh_result = LibraryCacheSync(
                 store=store,
                 executor=executor,
@@ -225,6 +244,11 @@ def refresh_metadata_targets(
     emit_progress_updates: bool = False,
 ) -> MetadataHydrationResult:
     progress_callback = emit_library_cache_progress if emit_progress_updates else None
+    logger.debug(
+        "TMDb summary refresh -> requested targets=%s progress=%s",
+        len(targets),
+        emit_progress_updates,
+    )
     result = hydrate_metadata_targets(
         store,
         tmdb_client,

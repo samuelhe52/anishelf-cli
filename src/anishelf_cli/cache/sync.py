@@ -11,6 +11,7 @@ from anishelf_cli.cache.metadata import dedupe_summary_targets
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
@@ -70,6 +71,7 @@ class LibraryCacheRefreshResult(AniShelfBaseModel):
 
 
 MAX_METADATA_HYDRATION_WORKERS = 8
+logger = get_logger(__name__)
 
 
 class TMDbSummaryClient(Protocol):
@@ -123,19 +125,47 @@ class LibraryCacheSync:
     progress_callback: LibraryCacheProgressCallback | None = None
 
     def refresh(self) -> LibraryCacheRefreshResult:
-        with self.store.locked():
-            self.store.initialize()
-            sync_token = self.store.read_sync_token()
-            if not sync_token or not self.store.has_entries():
-                refresh_result = self._rebuild()
-            else:
-                try:
-                    refresh_result = self._incremental(sync_token)
-                except CloudKitChangeTokenExpiredError:
+        logger.debug("Library cache lock -> acquiring %s", self.store.lock_path)
+        lock_acquired = False
+        try:
+            with self.store.locked():
+                lock_acquired = True
+                logger.debug("Library cache lock -> acquired %s", self.store.lock_path)
+                self.store.initialize()
+                sync_token = self.store.read_sync_token()
+                cache_has_entries = self.store.has_entries()
+                logger.debug(
+                    "Library cache refresh state -> path=%s hasSyncToken=%s hasEntries=%s "
+                    "metadataLanguage=%s collectMetadataTargets=%s",
+                    self.store.path,
+                    bool(sync_token),
+                    cache_has_entries,
+                    self.metadata_language,
+                    self.collect_metadata_targets,
+                )
+                if not sync_token or not cache_has_entries:
+                    logger.debug("Library cache refresh decision -> rebuild")
                     refresh_result = self._rebuild()
+                else:
+                    try:
+                        logger.debug("Library cache refresh decision -> incremental")
+                        refresh_result = self._incremental(sync_token)
+                    except CloudKitChangeTokenExpiredError:
+                        logger.debug("Library cache sync token expired -> rebuilding")
+                        refresh_result = self._rebuild()
+        finally:
+            if lock_acquired:
+                logger.debug("Library cache lock -> released %s", self.store.lock_path)
 
         targets_to_hydrate = list(refresh_result.metadata_targets)
-        if self.tmdb_client is None or not targets_to_hydrate:
+        if self.tmdb_client is None:
+            logger.debug(
+                "TMDb summary hydration -> skipped reason=no-client targets=%s",
+                len(targets_to_hydrate),
+            )
+            return refresh_result
+        if not targets_to_hydrate:
+            logger.debug("TMDb summary hydration -> skipped reason=no-targets")
             return refresh_result
 
         hydration_result = hydrate_metadata_targets(
@@ -157,6 +187,7 @@ class LibraryCacheSync:
         )
         next_token: str | None = sync_token
         self._emit_progress("sync-started", rebuilt=False)
+        logger.debug("Library cache incremental sync -> started")
         while True:
             page = self.executor.fetch_zone_changes(
                 sync_token=next_token,
@@ -184,6 +215,13 @@ class LibraryCacheSync:
                     metadata_targets,
                     limit_targets=True,
                 )
+                logger.debug(
+                    "Library cache incremental sync -> complete pages=%s records=%s "
+                    "metadataTargets=%s",
+                    pages,
+                    records,
+                    len(targets_to_hydrate),
+                )
                 return LibraryCacheRefreshResult(
                     rebuilt=False,
                     pages=pages,
@@ -198,6 +236,7 @@ class LibraryCacheSync:
         metadata_targets: list[TMDbSummaryIdentity] = []
         next_token: str | None = None
         self._emit_progress("rebuild-started", rebuilt=True)
+        logger.debug("Library cache rebuild -> started")
         while True:
             page = self.executor.fetch_zone_changes(
                 sync_token=next_token,
@@ -225,6 +264,12 @@ class LibraryCacheSync:
                 targets_to_hydrate = self._metadata_targets_to_hydrate(
                     metadata_targets,
                     limit_targets=False,
+                )
+                logger.debug(
+                    "Library cache rebuild -> complete pages=%s records=%s metadataTargets=%s",
+                    pages,
+                    records,
+                    len(targets_to_hydrate),
                 )
                 return LibraryCacheRefreshResult(
                     rebuilt=True,
@@ -284,8 +329,14 @@ def hydrate_metadata_targets(
 ) -> MetadataHydrationResult:
     targets_to_hydrate = dedupe_summary_targets(targets)
     if not targets_to_hydrate:
+        logger.debug("TMDb summary hydration -> skipped reason=no-targets")
         return MetadataHydrationResult(requested=0, hydrated=0, errors=0)
 
+    logger.debug(
+        "TMDb summary hydration -> started targets=%s workers=%s",
+        len(targets_to_hydrate),
+        max(1, min(max_workers, len(targets_to_hydrate))),
+    )
     last_emitted_metadata_completed = 0
     if progress_callback is not None:
         progress_callback(
@@ -323,6 +374,12 @@ def hydrate_metadata_targets(
         progress_callback=metadata_progress,
     )
     store.upsert_metadata_summaries(summaries)
+    logger.debug(
+        "TMDb summary hydration -> complete requested=%s hydrated=%s errors=%s",
+        len(targets_to_hydrate),
+        len(summaries),
+        len(error_messages),
+    )
     return MetadataHydrationResult(
         requested=len(targets_to_hydrate),
         hydrated=len(summaries),
