@@ -175,7 +175,7 @@ def build_library_search_result(
         entries=tuple(entries),
         cache=cache,
         metadata=metadata_payload(metadata_depth),
-        query=LibrarySearchQueryResult(query=query),
+        query=LibrarySearchQueryResult(text=query),
     )
 
 

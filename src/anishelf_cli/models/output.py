@@ -114,7 +114,7 @@ class LibraryListFiltersResult(AniShelfBaseModel):
 
 
 class LibrarySearchQueryResult(AniShelfBaseModel):
-    query: str
+    text: str
 
 
 class LibraryEntriesResult(AniShelfBaseModel):

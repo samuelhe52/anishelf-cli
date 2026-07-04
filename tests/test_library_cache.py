@@ -2079,7 +2079,7 @@ def test_library_search_accepts_raw_query(monkeypatch) -> None:
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["query"] == {"query": "Alien"}
+    assert payload["query"] == {"text": "Alien"}
     assert [entry["id"] for entry in payload["entries"]] == [
         "movie:55",
         "series:22",
@@ -2253,9 +2253,7 @@ def test_cache_search_matches_cached_on_air_date(tmp_path, monkeypatch) -> None:
         _live_record("movie:55", "movie", 55),
     )
     store.upsert_metadata_summary(
-        _metadata_summary("movie", 55, name="Date Match").with_updates(
-            on_air_date="2030-12-25"
-        )
+        _metadata_summary("movie", 55, name="Date Match").with_updates(on_air_date="2030-12-25")
     )
 
     entries = store.search_entry_models("2030", metadata_language="en-US")

@@ -156,7 +156,7 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
 
     assert store.search_query == "Alien"
     payload = result.model_dump(mode="json")
-    assert payload["query"] == {"query": "Alien"}
+    assert payload["query"] == {"text": "Alien"}
     assert payload["metadata"] == {
         "requested": "summary",
         "attached": True,
