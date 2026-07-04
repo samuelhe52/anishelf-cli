@@ -8,10 +8,13 @@ from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import (
     LibraryEntryMetadata,
+    LibraryEntryMetadataEpisode,
+    LibraryEntryMetadataGenre,
+    LibraryEntryMetadataSeason,
     TMDbSummaryIdentity,
 )
 
-TMDB_SUMMARY_SOURCE_VERSION = "tmdb.http.summary.v3"
+TMDB_METADATA_SOURCE_VERSION = "tmdb.http.metadata.v1"
 
 
 class TMDbTransportModel(AniShelfBaseModel):
@@ -75,35 +78,55 @@ class _TMDbSummaryBase(TMDbTransportModel):
     poster_path: StrictStr | None = None
     backdrop_path: StrictStr | None = None
     original_language: StrictStr | None = None
+    genres: tuple[TMDbGenre, ...] = ()
+    vote_average: StrictFloat | StrictInt | None = None
+    vote_count: StrictInt | None = None
+    popularity: StrictFloat | StrictInt | None = None
+    status: StrictStr | None = None
 
     def _base_domain_metadata(
         self,
         identity: TMDbSummaryIdentity,
         *,
         language: str,
-        translations: TranslationDictionaries,
+        translations: TranslationDictionaries | None = None,
         link_to_details: str | None,
         original_language_code: str | None = None,
+        logo_path: str | None = None,
+        extra: dict[str, object] | None = None,
     ) -> LibraryEntryMetadata:
-        return LibraryEntryMetadata(
-            entry_type=identity.entry_type,
-            tmdb_id=identity.tmdb_id,
-            parent_series_id=identity.parent_series_id,
-            season_number=identity.season_number,
-            language=language,
-            name=nonempty_string_or_none(self.title) or nonempty_string_or_none(self.name),
-            name_translations=translations.name,
-            overview=nonempty_string_or_none(self.overview),
-            overview_translations=translations.overview,
-            poster_path=nonempty_string_or_none(self.poster_path),
-            backdrop_path=nonempty_string_or_none(self.backdrop_path),
-            logo_path=None,
-            original_language_code=original_language_code
+        translation_payload = translations or TranslationDictionaries()
+        payload: dict[str, object] = {
+            "entry_type": identity.entry_type,
+            "tmdb_id": identity.tmdb_id,
+            "parent_series_id": identity.parent_series_id,
+            "season_number": identity.season_number,
+            "language": language,
+            "name": nonempty_string_or_none(self.title) or nonempty_string_or_none(self.name),
+            "name_translations": translation_payload.name,
+            "overview": nonempty_string_or_none(self.overview),
+            "overview_translations": translation_payload.overview,
+            "poster_path": nonempty_string_or_none(self.poster_path),
+            "backdrop_path": nonempty_string_or_none(self.backdrop_path),
+            "logo_path": logo_path,
+            "original_language_code": original_language_code
             or nonempty_string_or_none(self.original_language),
-            on_air_date=self.on_air_date,
-            link_to_details=link_to_details,
-            source_version=TMDB_SUMMARY_SOURCE_VERSION,
-        )
+            "on_air_date": self.on_air_date,
+            "link_to_details": link_to_details,
+            "genres": tuple(
+                domain_genre
+                for genre in self.genres
+                if (domain_genre := genre.to_domain()) is not None
+            ),
+            "vote_average": optional_number(self.vote_average),
+            "vote_count": self.vote_count,
+            "popularity": optional_number(self.popularity),
+            "status": nonempty_string_or_none(self.status),
+            "source_version": TMDB_METADATA_SOURCE_VERSION,
+        }
+        if extra:
+            payload.update(extra)
+        return LibraryEntryMetadata.model_validate(payload)
 
     @property
     def on_air_date(self) -> str | None:
@@ -136,13 +159,18 @@ class TMDbMovieSummaryResponse(_TMDbSummaryBase):
         identity: TMDbSummaryIdentity,
         *,
         language: str,
-        translations: TranslationDictionaries,
+        translations: TranslationDictionaries | None = None,
     ) -> LibraryEntryMetadata:
         return self._base_domain_metadata(
             identity,
             language=language,
             translations=translations,
             link_to_details=nonempty_string_or_none(self.homepage),
+            extra={
+                "runtime_minutes": self.runtime,
+                "release_date": nonempty_string_or_none(self.release_date),
+                "tagline": nonempty_string_or_none(self.tagline),
+            },
         )
 
 
@@ -163,7 +191,7 @@ class TMDbSeriesSummaryResponse(_TMDbSummaryBase):
     origin_country: tuple[StrictStr, ...] = ()
     production_companies: tuple[dict[str, Any], ...] = ()
     production_countries: tuple[dict[str, Any], ...] = ()
-    seasons: tuple[dict[str, Any], ...] = ()
+    seasons: tuple[TMDbSeasonListItem, ...] = ()
     spoken_languages: tuple[dict[str, Any], ...] = ()
     tagline: StrictStr | None = None
     type: StrictStr | None = None
@@ -177,20 +205,32 @@ class TMDbSeriesSummaryResponse(_TMDbSummaryBase):
         identity: TMDbSummaryIdentity,
         *,
         language: str,
-        translations: TranslationDictionaries,
+        translations: TranslationDictionaries | None = None,
+        season_summaries: tuple[LibraryEntryMetadataSeason, ...] = (),
+        episode_summaries: tuple[LibraryEntryMetadataEpisode, ...] = (),
     ) -> LibraryEntryMetadata:
         return self._base_domain_metadata(
             identity,
             language=language,
             translations=translations,
             link_to_details=nonempty_string_or_none(self.homepage),
+            extra={
+                "number_of_seasons": self.number_of_seasons,
+                "number_of_episodes": self.number_of_episodes,
+                "episode_run_time_minutes": self.episode_run_time,
+                "first_air_date": nonempty_string_or_none(self.first_air_date),
+                "last_air_date": nonempty_string_or_none(self.last_air_date),
+                "tagline": nonempty_string_or_none(self.tagline),
+                "season_summaries": season_summaries,
+                "episode_summaries": episode_summaries,
+            },
         )
 
 
 class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
     mongo_id: StrictStr | None = Field(default=None, validation_alias="_id")
     air_date: StrictStr | None = None
-    episodes: tuple[dict[str, Any], ...] = ()
+    episodes: tuple[TMDbEpisodeSummaryItem, ...] = ()
     season_number: StrictInt | None = None
 
     @field_validator("episodes", mode="before")
@@ -209,7 +249,7 @@ class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
         identity: TMDbSummaryIdentity,
         *,
         language: str,
-        translations: TranslationDictionaries,
+        translations: TranslationDictionaries | None = None,
         parent_series: TMDbSeriesSummaryResponse,
     ) -> LibraryEntryMetadata:
         return self._base_domain_metadata(
@@ -218,6 +258,66 @@ class TMDbSeasonSummaryResponse(_TMDbSummaryBase):
             translations=translations,
             link_to_details=nonempty_string_or_none(parent_series.homepage),
             original_language_code=nonempty_string_or_none(parent_series.original_language),
+            extra={
+                "number_of_episodes": len(self.episodes) if self.episodes else None,
+                "episode_summaries": tuple(
+                    episode.to_domain(default_season_number=identity.season_number)
+                    for episode in self.episodes
+                ),
+            },
+        )
+
+
+class TMDbGenre(TMDbTransportModel):
+    id: StrictInt | None = None
+    name: StrictStr | None = None
+
+    def to_domain(self) -> LibraryEntryMetadataGenre | None:
+        name = nonempty_string_or_none(self.name)
+        if self.id is None or name is None:
+            return None
+        return LibraryEntryMetadataGenre(id=self.id, name=name)
+
+
+class TMDbSeasonListItem(TMDbTransportModel):
+    air_date: StrictStr | None = None
+    episode_count: StrictInt | None = None
+    name: StrictStr | None = None
+    overview: StrictStr | None = None
+    poster_path: StrictStr | None = None
+    season_number: StrictInt | None = None
+
+    def to_domain(self) -> LibraryEntryMetadataSeason:
+        return LibraryEntryMetadataSeason(
+            season_number=self.season_number,
+            name=nonempty_string_or_none(self.name),
+            overview=nonempty_string_or_none(self.overview),
+            air_date=nonempty_string_or_none(self.air_date),
+            episode_count=self.episode_count,
+            poster_path=nonempty_string_or_none(self.poster_path),
+        )
+
+
+class TMDbEpisodeSummaryItem(TMDbTransportModel):
+    episode_number: StrictInt | None = None
+    season_number: StrictInt | None = None
+    name: StrictStr | None = None
+    overview: StrictStr | None = None
+    air_date: StrictStr | None = None
+    still_path: StrictStr | None = None
+
+    def to_domain(
+        self,
+        *,
+        default_season_number: int | None = None,
+    ) -> LibraryEntryMetadataEpisode:
+        return LibraryEntryMetadataEpisode(
+            episode_number=self.episode_number,
+            season_number=self.season_number or default_season_number,
+            name=nonempty_string_or_none(self.name),
+            overview=nonempty_string_or_none(self.overview),
+            air_date=nonempty_string_or_none(self.air_date),
+            still_path=nonempty_string_or_none(self.still_path),
         )
 
 

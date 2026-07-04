@@ -17,6 +17,7 @@ DEFAULT_ENVIRONMENT = "production"
 DEFAULT_DATABASE = "private"
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
 DEFAULT_TMDB_METADATA_LANGUAGE = "en-US"
+DEFAULT_TMDB_HYDRATION_DEPTH = MetadataDepth.DETAILS
 
 KEYCHAIN_ACCOUNT = "anishelf-cli"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
@@ -50,6 +51,7 @@ class LibraryReadDefaults:
 @dataclass(frozen=True, slots=True)
 class TMDbDefaults:
     metadata_language: str = DEFAULT_TMDB_METADATA_LANGUAGE
+    hydration_depth: MetadataDepth = DEFAULT_TMDB_HYDRATION_DEPTH
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,7 +174,25 @@ def resolve_configured_metadata_depth(value: object, *, path: Path | None = None
     if depth not in {MetadataDepth.NONE, MetadataDepth.SUMMARY}:
         raise UserConfigError(
             f"Invalid metadata default {candidate!r}{location}. "
-            "Details and full are reserved until TMDb detail metadata caching exists."
+            "Library output defaults accept none or summary. Use tmdb.hydration_depth "
+            "or --hydration-depth for details/full cache hydration."
+        )
+    return depth
+
+
+def resolve_configured_hydration_depth(value: object, *, path: Path | None = None) -> MetadataDepth:
+    candidate = str(value).strip().lower()
+    location = f" in {path}" if path is not None else ""
+    try:
+        depth = MetadataDepth(candidate)
+    except ValueError as exc:
+        valid = ", ".join((MetadataDepth.DETAILS.value, MetadataDepth.FULL.value))
+        raise UserConfigError(
+            f"Invalid TMDb hydration depth {candidate!r}{location}. Expected one of: {valid}."
+        ) from exc
+    if depth not in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        raise UserConfigError(
+            f"Invalid TMDb hydration depth {candidate!r}{location}. Expected details or full."
         )
     return depth
 
@@ -260,14 +280,19 @@ def _load_tmdb_defaults(value: object, path: Path) -> TMDbDefaults:
         raise UserConfigError(f"TMDb defaults in {path} must be a TOML table.")
     _reject_unknown_keys(
         value,
-        allowed_keys={"metadata_language"},
+        allowed_keys={"metadata_language", "hydration_depth"},
         path=path,
         scope="TMDb defaults",
     )
 
     language_value = value.get("metadata_language", DEFAULT_TMDB_METADATA_LANGUAGE)
+    hydration_depth_value = value.get(
+        "hydration_depth",
+        DEFAULT_TMDB_HYDRATION_DEPTH.value,
+    )
     return TMDbDefaults(
         metadata_language=resolve_configured_tmdb_language(language_value, path=path),
+        hydration_depth=resolve_configured_hydration_depth(hydration_depth_value, path=path),
     )
 
 
@@ -291,6 +316,8 @@ def _serialize_user_defaults(defaults: UserDefaults) -> str:
     tmdb_lines: list[str] = []
     if defaults.tmdb.metadata_language != DEFAULT_TMDB_METADATA_LANGUAGE:
         tmdb_lines.append(f'metadata_language = "{defaults.tmdb.metadata_language}"')
+    if defaults.tmdb.hydration_depth is not DEFAULT_TMDB_HYDRATION_DEPTH:
+        tmdb_lines.append(f'hydration_depth = "{defaults.tmdb.hydration_depth.value}"')
 
     if tmdb_lines:
         if lines:

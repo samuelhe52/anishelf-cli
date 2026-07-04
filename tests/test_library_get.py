@@ -13,6 +13,7 @@ from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.executor import ZoneChangesPage
 from anishelf_cli.library import LibraryRecordDecodeError, decode_library_entry_record
 from anishelf_cli.library.metadata import LibraryEntryMetadata
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
 from anishelf_cli.tmdb.client import TMDbRequestError
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
@@ -28,9 +29,6 @@ from tests.support import (
 )
 from tests.support import (
     cloudkit_record as _cloudkit_record,
-)
-from tests.support import (
-    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
 )
 from tests.support import (
     isolate_paths as _isolate_paths,
@@ -127,16 +125,14 @@ def test_library_status_reports_metadata_ready_when_summary_is_cached(
     }
 
 
-def test_library_status_treats_legacy_v1_summary_as_incomplete(
+def test_library_status_reports_summary_ready_when_details_are_cached(
     tmp_path,
     monkeypatch,
 ) -> None:
     store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
-    _insert_legacy_v1_metadata_summary(
-        store,
-        metadata_key="movie:55",
-        entry_type="movie",
-        tmdb_id=55,
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=library_commands.MetadataDepth.DETAILS,
     )
 
     result = runner.invoke(app, ["--json", "lib", "status"])
@@ -145,9 +141,9 @@ def test_library_status_treats_legacy_v1_summary_as_incomplete(
     payload = json.loads(result.stdout)
     assert payload["active"]["metadata"] == {
         "tracked_entries": 1,
-        "hydrated_entries": 0,
-        "missing_entries": 1,
-        "ready": False,
+        "hydrated_entries": 1,
+        "missing_entries": 0,
+        "ready": True,
     }
 
 
@@ -465,7 +461,11 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
         _live_record("movie:55", "movie", 55),
         _live_record("series:22", "series", 22),
     )
-    requested: list[tuple[str, int]] = []
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Stale")],
+        depth=MetadataDepth.DETAILS,
+    )
+    requested: list[tuple[str, int, MetadataDepth]] = []
     monkeypatch.setattr(
         library_commands,
         "resolve_tmdb_api_token",
@@ -476,8 +476,12 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
 
-        def fetch_summary(self, identity) -> LibraryEntryMetadata:
-            requested.append((identity.entry_type, identity.tmdb_id))
+        def fetch_metadata(
+            self,
+            identity,
+            depth: MetadataDepth,
+        ) -> LibraryEntryMetadata:
+            requested.append((identity.entry_type, identity.tmdb_id, depth))
             return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
 
     monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
@@ -486,10 +490,18 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert requested == [("movie", 55)]
+    assert requested == [("movie", 55, MetadataDepth.DETAILS)]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "Alien"
-    assert payload["items"][0]["entry"]["metadata"]["language"] == "en-US"
-    assert payload["items"][0]["entry"]["metadata"]["name_translations"] == {"ja-JP": "Alien JP"}
+    assert "poster_path" not in payload["items"][0]["entry"]["metadata"]
+    assert "language" not in payload["items"][0]["entry"]["metadata"]
+    assert "name_translations" not in payload["items"][0]["entry"]["metadata"]
+    refreshed_entry = store.attach_metadata_summary_models(
+        list(store.get_entry_models_by_identity(["movie:55"]).values()),
+        depth=MetadataDepth.DETAILS,
+    )[0]
+    assert refreshed_entry.metadata is not None
+    assert refreshed_entry.metadata.name == "Alien"
+    assert refreshed_entry.metadata.poster_path == "/poster.jpg"
     other_entry = store.attach_metadata_summary_models(
         list(store.get_entry_models_by_identity(["series:22"]).values())
     )[0]
@@ -514,11 +526,49 @@ def test_library_get_json_omits_internal_fields_and_compacts_metadata_dates(
     entry = payload["items"][0]["entry"]
     metadata = entry["metadata"]
     assert "poster_path" not in metadata
-    assert metadata["fetched_at"] == "2026-05-13"
+    assert "fetched_at" not in metadata
     assert metadata["on_air_date"] == "1979-05-25"
     assert "kind" not in entry
     assert "schema_version" not in entry
     assert "custom_poster_path" not in entry
+
+
+def test_library_get_json_details_includes_detail_metadata_fields(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.DETAILS,
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--metadata", "details"])
+
+    assert result.exit_code == 0, result.output
+    metadata = json.loads(result.stdout)["items"][0]["entry"]["metadata"]
+    assert metadata["poster_path"] == "/poster.jpg"
+    assert metadata["backdrop_path"] == "/backdrop.jpg"
+    assert metadata["link_to_details"] == "https://example.com/movie/55"
+    assert "name_translations" not in metadata
+
+
+def test_library_get_json_details_does_not_attach_summary_cache_row(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.SUMMARY,
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--metadata", "details"])
+
+    assert result.exit_code == 0, result.output
+    entry = json.loads(result.stdout)["items"][0]["entry"]
+    assert entry["id"] == "movie:55"
+    assert "metadata" not in entry
 
 
 def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
@@ -561,7 +611,8 @@ def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert requested == [("movie", 55, "ja-JP")]
-    assert payload["items"][0]["entry"]["metadata"]["language"] == "ja-JP"
+    assert payload["items"][0]["entry"]["metadata"]["name"] == "エイリアン"
+    assert "language" not in payload["items"][0]["entry"]["metadata"]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "エイリアン"
     cached = store.attach_metadata_summary_models(store.list_entry_models(), language="ja-JP")[0]
     assert cached.metadata is None
@@ -874,9 +925,9 @@ def test_library_init_emits_stderr_progress_without_touching_json_stdout(
     assert payload["summary"]["cache"]["records"] == 2
     assert "[progress] Starting local library cache rebuild from CloudKit." in result.stderr
     assert "[progress] Fetched page 1: 2 records (2 total)." in result.stderr
-    assert "[progress] Hydrating TMDb summary metadata for 2 entries." in result.stderr
-    assert "[progress] TMDb summary metadata 1/2 complete (0 errors)." in result.stderr
-    assert "[progress] TMDb summary metadata 2/2 complete (0 errors)." in result.stderr
+    assert "[progress] Hydrating TMDb metadata for 2 entries." in result.stderr
+    assert "[progress] TMDb metadata 1/2 complete (0 errors)." in result.stderr
+    assert "[progress] TMDb metadata 2/2 complete (0 errors)." in result.stderr
     assert "tmdb-secret-token" not in result.stderr
     assert "api-secret-token" not in result.stderr
 

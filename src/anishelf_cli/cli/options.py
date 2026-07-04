@@ -13,8 +13,7 @@ MetadataOption = Annotated[
         "-m",
         help=(
             "Include TMDb metadata. Bare --metadata uses summary; explicit values may "
-            "be passed as --metadata none or --metadata=none. Details and full are "
-            "reserved until detail metadata caching exists. "
+            "be passed as --metadata none, summary, details, or full. "
             "Use -- before a positional id or title named none, summary, details, "
             "or full."
         ),

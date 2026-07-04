@@ -37,6 +37,12 @@ def _fake_store() -> object:
         list_entry_models=lambda *, include_tombstones=False: [],
         list_entry_models_filtered=lambda **kwargs: [],
         search_entry_models=lambda query, **kwargs: [],
+        metadata_summary_status=lambda **kwargs: SimpleNamespace(
+            tracked_entries=0,
+            hydrated_entries=0,
+            missing_entries=0,
+            ready=True,
+        ),
         attach_metadata_summary_models=lambda entries, **kwargs: entries,
     )
 
@@ -218,9 +224,9 @@ def test_normalize_metadata_args(args: list[str], expected: list[str]) -> None:
         (["--json", "lib", "list", "-m"], 0, 0, None),
         (
             ["--json", "lib", "list", "--metadata", "full"],
-            2,
+            0,
+            0,
             None,
-            "reserved until TMDb detail metadata caching exists",
         ),
         (["--json", "lib", "list", "--metadata", "none"], 0, 0, None),
     ],
@@ -278,7 +284,7 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
         (["lib", "list"], ("--sync", "-f", "-s", "-w", "-l", "-j"), ("--refresh-meta",)),
         (["lib"], ("refresh-meta",), ("changes",)),
         (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
-        (["lib", "refresh-meta"], ("--json", "-j"), ()),
+        (["lib", "refresh-meta"], ("--json", "-j"), ("--metadata",)),
         (["lib", "search"], ("QUERY", "--sync"), ("--title",)),
         (["lib", "export"], ("--sync",), ()),
         (["tmdb", "search"], ("--title", "-t", "--type", "--year", "-y", "--json", "-j"), ()),
@@ -291,6 +297,13 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
 )
 def test_help_text(args: list[str], contains: tuple[str, ...], absent: tuple[str, ...]) -> None:
     _assert_help(args, contains=contains, absent=absent)
+
+
+def test_library_refresh_meta_rejects_ad_hoc_metadata_depth() -> None:
+    result = runner.invoke(app, ["lib", "refresh-meta", "--metadata", "full"])
+
+    assert result.exit_code == 2
+    assert "No such option: --metadata" in result.stderr
 
 
 def test_unknown_command_error_uses_plain_formatting() -> None:
@@ -332,7 +345,10 @@ def test_config_show_json_shows_effective_config_without_secrets(tmp_path, monke
     assert payload["cloudkit"]["app_auth_source"] == "env"
     assert payload["cloudkit"]["app_auth_version"] is None
     assert payload["tmdb"]["api_key_envs"] == ["ANI_TMDB_API_KEY", "TMDB_API_KEY"]
-    assert payload["tmdb"]["defaults"] == {"metadata_language": "en-US"}
+    assert payload["tmdb"]["defaults"] == {
+        "metadata_language": "en-US",
+        "hydration_depth": "details",
+    }
     assert payload["library"]["defaults"] == {
         "metadata": "summary",
         "display_fields": None,
@@ -574,7 +590,10 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
         "output_style": "list",
         "show_hidden": True,
     }
-    assert payload["defaults"]["tmdb"] == {"metadata_language": "ja-JP"}
+    assert payload["defaults"]["tmdb"] == {
+        "metadata_language": "ja-JP",
+        "hydration_depth": "details",
+    }
     assert "TMDb metadata language changed" in result.stderr
     assert "ani lib clear-cache --yes" in result.stderr
     config_file = tmp_path / "config" / "config.toml"
@@ -636,7 +655,10 @@ def test_config_set_defaults_can_reset_display_fields_to_builtin(tmp_path, monke
         "output_style": "table",
         "show_hidden": False,
     }
-    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
+    assert payload["defaults"]["tmdb"] == {
+        "metadata_language": "en-US",
+        "hydration_depth": "details",
+    }
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
 
@@ -660,7 +682,10 @@ def test_config_set_defaults_can_reset_output_style_to_builtin(tmp_path, monkeyp
         "output_style": "table",
         "show_hidden": False,
     }
-    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
+    assert payload["defaults"]["tmdb"] == {
+        "metadata_language": "en-US",
+        "hydration_depth": "details",
+    }
     assert (tmp_path / "config" / "config.toml").read_text() == ('[library]\nmetadata = "none"\n')
 
 
@@ -686,7 +711,10 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
         "output_style": "list",
         "show_hidden": True,
     }
-    assert payload["tmdb"]["defaults"] == {"metadata_language": "zh-CN"}
+    assert payload["tmdb"]["defaults"] == {
+        "metadata_language": "zh-CN",
+        "hydration_depth": "details",
+    }
 
 
 @pytest.mark.parametrize(
@@ -695,7 +723,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
         (
             ["config", "set-defaults", "--metadata", "details"],
             None,
-            "reserved until TMDb detail metadata caching exists",
+            "Library output defaults accept none or summary",
             None,
         ),
         (
@@ -786,7 +814,10 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
         "output_style": "table",
         "show_hidden": False,
     }
-    assert payload["defaults"]["tmdb"] == {"metadata_language": "en-US"}
+    assert payload["defaults"]["tmdb"] == {
+        "metadata_language": "en-US",
+        "hydration_depth": "details",
+    }
     assert config_file.read_text() == ('[library]\nmetadata = "none"\n')
 
 

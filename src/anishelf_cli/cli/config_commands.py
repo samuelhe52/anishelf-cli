@@ -60,7 +60,10 @@ def _config_payload() -> ConfigShowResult:
         callback=ConfigCallbackResult(strategy=CallbackStrategy.MANUAL_PASTE),
         tmdb=ConfigTMDbResult(
             api_key_envs=tuple(config.DEFAULT_TMDB_API_KEY_ENVS),
-            defaults=TMDbDefaultsResult(metadata_language=tmdb_defaults.metadata_language),
+            defaults=TMDbDefaultsResult(
+                metadata_language=tmdb_defaults.metadata_language,
+                hydration_depth=tmdb_defaults.hydration_depth.value,
+            ),
         ),
         library=ConfigLibraryResult(
             defaults=LibraryDefaultsResult(
@@ -184,6 +187,17 @@ def config_set_defaults(
             show_default=False,
         ),
     ] = None,
+    hydration_depth: Annotated[
+        str | None,
+        typer.Option(
+            "--hydration-depth",
+            help=(
+                "Default TMDb cache hydration depth: details or full. "
+                "Use default to reset to details."
+            ),
+            show_default=False,
+        ),
+    ] = None,
     show_hidden: Annotated[
         bool | None,
         typer.Option(
@@ -201,6 +215,7 @@ def config_set_defaults(
         or fields is not None
         or output_style is not None
         or tmdb_language is not None
+        or hydration_depth is not None
         or show_hidden is not None
     )
     try:
@@ -255,6 +270,19 @@ def config_set_defaults(
                 raise typer.Exit(code=2) from exc
         tmdb_defaults = replace(tmdb_defaults, metadata_language=resolved_tmdb_language)
 
+    if hydration_depth is not None:
+        if hydration_depth.strip().lower() == "default":
+            resolved_hydration_depth = config.TMDbDefaults().hydration_depth
+        else:
+            try:
+                resolved_hydration_depth = config.resolve_configured_hydration_depth(
+                    hydration_depth
+                )
+            except config.UserConfigError as exc:
+                emit_error(str(exc))
+                raise typer.Exit(code=2) from exc
+        tmdb_defaults = replace(tmdb_defaults, hydration_depth=resolved_hydration_depth)
+
     if show_hidden is not None:
         library_defaults = replace(library_defaults, show_hidden=show_hidden)
 
@@ -283,7 +311,10 @@ def config_set_defaults(
                 output_style=library_defaults.output_style.value,
                 show_hidden=library_defaults.show_hidden,
             ),
-            tmdb=TMDbDefaultsResult(metadata_language=tmdb_defaults.metadata_language),
+            tmdb=TMDbDefaultsResult(
+                metadata_language=tmdb_defaults.metadata_language,
+                hydration_depth=tmdb_defaults.hydration_depth.value,
+            ),
         ),
         path=str(path),
     )
@@ -307,6 +338,7 @@ def config_set_defaults(
                     ("Output style", library_defaults.output_style.value),
                     ("Show hidden", "yes" if library_defaults.show_hidden else "no"),
                     ("TMDb language", tmdb_defaults.metadata_language),
+                    ("Hydration depth", tmdb_defaults.hydration_depth.value),
                     (
                         "Cache rebuild",
                         ("recommended" if tmdb_language_changed else "not needed for this change"),

@@ -11,8 +11,14 @@ from pydantic import ValidationError
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.redaction import SecretRedactor
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.common import AniShelfBaseModel
-from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
+from anishelf_cli.models.domain import (
+    LibraryEntryMetadata,
+    LibraryEntryMetadataEpisode,
+    LibraryEntryMetadataSeason,
+    TMDbSummaryIdentity,
+)
 from anishelf_cli.models.tmdb import (
     TMDbTitleSearchMatch,
     TMDbTitleSearchQuery,
@@ -25,6 +31,7 @@ from anishelf_cli.models.transport.tmdb import (
     TMDbSeasonSummaryResponse,
     TMDbSeriesSummaryResponse,
     TMDbTranslationsResponse,
+    TranslationDictionaries,
     details_link,
 )
 
@@ -79,6 +86,13 @@ class TMDbClient:
         )
 
     def fetch_summary(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata:
+        return self.fetch_metadata(identity, MetadataDepth.SUMMARY)
+
+    def fetch_metadata(
+        self,
+        identity: TMDbSummaryIdentity,
+        depth: MetadataDepth = MetadataDepth.DETAILS,
+    ) -> LibraryEntryMetadata:
         try:
             if identity.entry_type == "movie":
                 movie_response = self._get_model(
@@ -86,14 +100,10 @@ class TMDbClient:
                     TMDbMovieSummaryResponse,
                     params={"language": self.language},
                 )
-                translations_response = self._get_model(
-                    f"movie/{identity.tmdb_id}/translations",
-                    TMDbTranslationsResponse,
-                )
                 return movie_response.to_domain(
                     identity,
                     language=self.language,
-                    translations=translations_response.to_dictionaries(),
+                    translations=self._translations(f"movie/{identity.tmdb_id}", depth),
                 )
             elif identity.entry_type == "series":
                 series_response = self._get_model(
@@ -101,14 +111,26 @@ class TMDbClient:
                     TMDbSeriesSummaryResponse,
                     params={"language": self.language},
                 )
-                translations_response = self._get_model(
-                    f"tv/{identity.tmdb_id}/translations",
-                    TMDbTranslationsResponse,
-                )
+                season_summaries: tuple[LibraryEntryMetadataSeason, ...] = ()
+                episode_summaries: tuple[LibraryEntryMetadataEpisode, ...] = ()
+                if depth is MetadataDepth.FULL:
+                    season_summaries = tuple(
+                        season.to_domain() for season in series_response.seasons
+                    )
+                    episode_summaries = tuple(
+                        episode
+                        for season in series_response.seasons
+                        for episode in self._series_season_episodes(
+                            identity.tmdb_id,
+                            season.season_number,
+                        )
+                    )
                 return series_response.to_domain(
                     identity,
                     language=self.language,
-                    translations=translations_response.to_dictionaries(),
+                    translations=self._translations(f"tv/{identity.tmdb_id}", depth),
+                    season_summaries=season_summaries,
+                    episode_summaries=episode_summaries,
                 )
             elif identity.entry_type == "season":
                 if identity.parent_series_id is None or identity.season_number is None:
@@ -123,14 +145,13 @@ class TMDbClient:
                     TMDbSeasonSummaryResponse,
                     params={"language": self.language},
                 )
-                translations_response = self._get_model(
-                    f"tv/{identity.parent_series_id}/season/{identity.season_number}/translations",
-                    TMDbTranslationsResponse,
-                )
                 return season_response.to_domain(
                     identity,
                     language=self.language,
-                    translations=translations_response.to_dictionaries(),
+                    translations=self._translations(
+                        f"tv/{identity.parent_series_id}/season/{identity.season_number}",
+                        depth,
+                    ),
                     parent_series=parent_series_response,
                 )
             else:
@@ -138,7 +159,35 @@ class TMDbClient:
         except TMDbRequestError:
             raise
         except Exception as exc:
-            raise TMDbRequestError("TMDb summary metadata request failed.") from exc
+            raise TMDbRequestError("TMDb metadata request failed.") from exc
+
+    def _translations(self, base_path: str, depth: MetadataDepth) -> TranslationDictionaries | None:
+        if depth is MetadataDepth.SUMMARY:
+            return None
+        # Details hydration feeds cached library search, which matches translated
+        # titles and overviews even though those fields are projected only in full output.
+        translations_response = self._get_model(
+            f"{base_path}/translations",
+            TMDbTranslationsResponse,
+        )
+        return translations_response.to_dictionaries()
+
+    def _series_season_episodes(
+        self,
+        series_id: int,
+        season_number: int | None,
+    ) -> tuple[LibraryEntryMetadataEpisode, ...]:
+        if season_number is None:
+            return ()
+        season_response = self._get_model(
+            f"tv/{series_id}/season/{season_number}",
+            TMDbSeasonSummaryResponse,
+            params={"language": self.language},
+        )
+        return tuple(
+            episode.to_domain(default_season_number=season_number)
+            for episode in season_response.episodes
+        )
 
     def _get_model(
         self,

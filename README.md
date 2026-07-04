@@ -19,7 +19,7 @@ uv run ani lib list
 ```
 
 `ani lib init` is the required first library step. It fetches the full
-library into the local SQLite cache and hydrates TMDb summary metadata when a
+library into the local SQLite cache and hydrates TMDb metadata when a
 TMDb key is available. Later reads use the local cache by default.
 
 TMDb metadata is fetched in the configured preferred language, `en-US` by
@@ -94,10 +94,12 @@ metadata, overviews, notes, and on-air dates. Use `ani tmdb search --title
 "Alien"` for global TMDb discovery, or omit `--title` to discover popular TMDb
 titles.
 
-Use `ani lib refresh-meta` to refetch TMDb summary metadata for the full
-local library cache. Use `--live-meta` on `lib get` to refetch TMDb summary
-metadata only for the requested entries and write the refreshed summaries back
-to the cache.
+Use `ani lib refresh-meta` to refetch TMDb metadata for the full local library
+cache at the configured hydration depth (`details` unless changed). Use
+`ani config set-defaults --hydration-depth full` to change the persisted refresh
+depth. Use `--live-meta` on `lib get` to refetch TMDb metadata only for the
+requested entries at the configured hydration depth, or at `full` when full
+output is requested, and write the refreshed rows back to the cache.
 
 Use `--tmdb-language <tag>` on `lib get`, `lib list`, `lib search`, `lib export`,
 or `tmdb search` for a one-off language override. For library commands, a
@@ -113,15 +115,19 @@ Library read commands include cached TMDb summary metadata by default. Pass
 `--metadata none` to omit metadata from the output without making TMDb requests.
 Bare `--metadata` selects the default `summary` level.
 
-Summary metadata is intentionally AniShelf-aligned: requested `language`,
-localized `name` and `overview`, `name_translations`, `overview_translations`,
-poster/backdrop/logo paths, `original_language_code`, `on_air_date`,
-homepage-backed `link_to_details`, and internal TMDb identity fields. Fields
-such as runtime, genres, vote counts, popularity, credits, seasons, and episodes
-belong to future detail caching, not the summary payload.
+Summary output includes compact fields only: `name`, `overview`, type-specific
+counts or runtime, `on_air_date`, and derived `parent_series_title` for seasons
+when cached. Details output adds image paths, original language, link, genres,
+ratings/counts, popularity, status/date fields, runtime/count fields, and
+tagline/subtitle. Full output adds translations plus season and episode
+summaries.
 
-`details` and `full` are reserved for future TMDb detail caching. Passing either
-level currently fails with a clear error.
+Hydration depth is separate from output depth. `lib init` and `lib sync` hydrate
+the configured default depth, which is `details` by default and can be changed
+to `full` with `ani config set-defaults --hydration-depth full`. The same
+configured depth applies to `lib refresh-meta` and targeted `lib get --live-meta`,
+so a user-configured `full` default can perform full hydration even when the
+command projects `--metadata details`.
 
 ## JSON Output
 

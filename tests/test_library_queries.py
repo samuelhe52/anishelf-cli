@@ -10,6 +10,7 @@ from anishelf_cli.library.entries import LibraryEntryModel, validate_library_ent
 from anishelf_cli.library.metadata import LibraryEntryMetadata
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
+    build_library_export_result,
     build_library_list_result,
     build_library_search_result,
     cache_summary_payload,
@@ -132,7 +133,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     assert exc.hydrated == 0
     assert exc.missing == 1
     assert str(exc) == (
-        "Cannot search cached library entries because TMDb summary metadata "
+        "Cannot search cached library entries because TMDb metadata "
         "is incomplete (0/1 hydrated, 1 missing). Run `ani lib refresh-meta`."
     )
 
@@ -186,6 +187,49 @@ def test_search_show_hidden_includes_hidden_matches() -> None:
     assert [entry.identity for entry in result.entries] == ["movie:55"]
 
 
+def test_live_metadata_skips_deep_cache_readiness_gate() -> None:
+    store = FakeQueryStore(
+        [_entry("movie:55", "movie", 55)],
+        metadata={"movie:55": {"name": "Alien"}},
+        metadata_ready_by_depth={
+            MetadataDepth.SUMMARY: True,
+            MetadataDepth.DETAILS: False,
+        },
+    )
+
+    list_result = build_library_list_result(
+        store,
+        metadata_depth=MetadataDepth.DETAILS,
+        cache=cache_summary_payload(store, None),
+        watch_status=None,
+        show_hidden=False,
+        favorite=False,
+        sort=LibraryListSort.UPDATED,
+        limit=None,
+        live_metadata=True,
+    )
+    search_result = build_library_search_result(
+        store,
+        query="Alien",
+        metadata_depth=MetadataDepth.DETAILS,
+        cache=cache_summary_payload(store, None),
+        show_hidden=False,
+        live_metadata=True,
+    )
+    export_result = build_library_export_result(
+        store,
+        metadata_depth=MetadataDepth.DETAILS,
+        cache=cache_summary_payload(store, None),
+        show_hidden=False,
+        live_metadata=True,
+    )
+
+    assert [entry.identity for entry in list_result.entries] == ["movie:55"]
+    assert [entry.identity for entry in search_result.entries] == ["movie:55"]
+    assert [entry.identity for entry in export_result.entries] == ["movie:55"]
+    assert store.status_requests == [MetadataDepth.SUMMARY]
+
+
 class FakeQueryStore:
     def __init__(
         self,
@@ -193,6 +237,7 @@ class FakeQueryStore:
         *,
         metadata: dict[str, dict[str, object]],
         metadata_ready: bool = True,
+        metadata_ready_by_depth: dict[MetadataDepth, bool] | None = None,
     ) -> None:
         self.scope = SimpleNamespace(
             container="container",
@@ -204,8 +249,10 @@ class FakeQueryStore:
         self.entries = entries
         self.metadata = metadata
         self.metadata_ready = metadata_ready
+        self.metadata_ready_by_depth = metadata_ready_by_depth or {}
         self.list_filter_kwargs: dict[str, Any] = {}
         self.search_query: str | None = None
+        self.status_requests: list[MetadataDepth] = []
 
     def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
         _ = include_tombstones
@@ -244,15 +291,22 @@ class FakeQueryStore:
         self.search_query = query
         return [validate_library_entry(entry) for entry in self.entries]
 
-    def metadata_summary_status(self, *, language: str = "en-US") -> CacheMetadataStatusResult:
+    def metadata_summary_status(
+        self,
+        *,
+        language: str = "en-US",
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
+    ) -> CacheMetadataStatusResult:
         _ = language
+        self.status_requests.append(depth)
+        ready = self.metadata_ready_by_depth.get(depth, self.metadata_ready)
         tracked = len(self.entries)
-        missing = 0 if self.metadata_ready else tracked
+        missing = 0 if ready else tracked
         return CacheMetadataStatusResult(
             tracked_entries=tracked,
             hydrated_entries=tracked - missing,
             missing_entries=missing,
-            ready=self.metadata_ready,
+            ready=ready,
         )
 
     def attach_metadata_summary_models(
@@ -260,8 +314,10 @@ class FakeQueryStore:
         entries: list[LibraryEntryModel],
         *,
         language: str = "en-US",
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[LibraryEntryModel]:
         _ = language
+        _ = depth
         attached: list[LibraryEntryModel] = []
         for entry in entries:
             attached.append(

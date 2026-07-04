@@ -41,6 +41,24 @@ class LibraryEntryMetadataGenre(AniShelfBaseModel):
     name: NonEmptyStr
 
 
+class LibraryEntryMetadataSeason(AniShelfBaseModel):
+    season_number: StrictInt | None = None
+    name: NonEmptyStr | None = None
+    overview: NonEmptyStr | None = None
+    air_date: NonEmptyStr | None = None
+    episode_count: StrictInt | None = None
+    poster_path: NonEmptyStr | None = None
+
+
+class LibraryEntryMetadataEpisode(AniShelfBaseModel):
+    episode_number: StrictInt | None = None
+    season_number: StrictInt | None = None
+    name: NonEmptyStr | None = None
+    overview: NonEmptyStr | None = None
+    air_date: NonEmptyStr | None = None
+    still_path: NonEmptyStr | None = None
+
+
 class LibraryEntryMetadata(AniShelfBaseModel):
     """Typed TMDb metadata attached to a library entry."""
 
@@ -53,12 +71,28 @@ class LibraryEntryMetadata(AniShelfBaseModel):
     name_translations: tuple[tuple[str, str], ...] = ()
     overview: NonEmptyStr | None = None
     overview_translations: tuple[tuple[str, str], ...] = ()
+    runtime_minutes: StrictInt | None = None
+    number_of_seasons: StrictInt | None = None
+    number_of_episodes: StrictInt | None = None
     poster_path: NonEmptyStr | None = None
     backdrop_path: NonEmptyStr | None = None
     logo_path: NonEmptyStr | None = None
     original_language_code: NonEmptyStr | None = None
     on_air_date: NonEmptyStr | None = None
     link_to_details: NonEmptyStr | None = None
+    episode_run_time_minutes: tuple[StrictInt, ...] = ()
+    genres: tuple[LibraryEntryMetadataGenre, ...] = ()
+    vote_average: float | None = None
+    vote_count: StrictInt | None = None
+    popularity: float | None = None
+    status: NonEmptyStr | None = None
+    first_air_date: NonEmptyStr | None = None
+    last_air_date: NonEmptyStr | None = None
+    release_date: NonEmptyStr | None = None
+    tagline: NonEmptyStr | None = None
+    subtitle: NonEmptyStr | None = None
+    season_summaries: tuple[LibraryEntryMetadataSeason, ...] = ()
+    episode_summaries: tuple[LibraryEntryMetadataEpisode, ...] = ()
     fetched_at: NonEmptyStr | None = None
     source_version: NonEmptyStr | None = None
 
@@ -156,6 +190,56 @@ class LibraryEntryMetadata(AniShelfBaseModel):
         }
         payload.update(updates)
         return self.__class__.model_validate(payload)
+
+    def project(self, depth: str) -> LibraryEntryMetadata:
+        if depth == "full":
+            return self
+        if depth == "details":
+            return self._with_only_fields(_DETAILS_METADATA_FIELDS)
+        if depth == "summary":
+            return self._with_only_fields(_SUMMARY_METADATA_FIELDS)
+        raise ValueError(f"Unsupported metadata projection depth: {depth}.")
+
+    def _with_only_fields(self, field_names: frozenset[str]) -> LibraryEntryMetadata:
+        payload = {
+            field_name: getattr(self, field_name)
+            for field_name in self.model_fields_set
+            if field_name in field_names
+        }
+        return self.__class__.model_validate(payload)
+
+
+_SUMMARY_METADATA_FIELDS = frozenset(
+    {
+        "name",
+        "overview",
+        "runtime_minutes",
+        "number_of_seasons",
+        "number_of_episodes",
+        "on_air_date",
+    }
+)
+
+_DETAILS_METADATA_FIELDS = _SUMMARY_METADATA_FIELDS | frozenset(
+    {
+        "poster_path",
+        "backdrop_path",
+        "logo_path",
+        "original_language_code",
+        "link_to_details",
+        "episode_run_time_minutes",
+        "genres",
+        "vote_average",
+        "vote_count",
+        "popularity",
+        "status",
+        "first_air_date",
+        "last_air_date",
+        "release_date",
+        "tagline",
+        "subtitle",
+    }
+)
 
 
 class _LibraryEntryBase(AniShelfBaseModel):

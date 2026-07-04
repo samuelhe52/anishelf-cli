@@ -13,6 +13,7 @@ from anishelf_cli import config
 from anishelf_cli.cache import metadata, records, schema
 from anishelf_cli.cache.scope import LibraryCacheScope, scope_from_existing_database
 from anishelf_cli.cloudkit.executor import ANI_SHELF_LIBRARY_ZONE_NAME
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import CacheMetadataStatusResult, RemovedCacheFilesResult
 from anishelf_cli.models.transport.cloudkit import ZoneChangesPage
@@ -151,6 +152,7 @@ class LibraryCacheStore:
         *,
         staging: bool,
         metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[TMDbSummaryIdentity]:
         table = "library_entries_stage" if staging else "library_entries"
         token_key = (
@@ -163,10 +165,15 @@ class LibraryCacheStore:
                 for record in page.records:
                     target = records.summary_target_from_record(db, table, record)
                     records.apply_record(db, table, record)
-                    if target is not None and not metadata.metadata_summary_exists(
-                        db,
-                        target,
-                        language=metadata_language,
+                    if (
+                        target is not None
+                        and metadata.metadata_summary_state(
+                            db,
+                            target,
+                            language=metadata_language,
+                            depth=metadata_depth,
+                        )
+                        != "current"
                     ):
                         new_targets.append(target)
                 schema.write_meta(db, token_key, page.sync_token)
@@ -337,35 +344,35 @@ class LibraryCacheStore:
                         library_entries.identity,
                         library_entries.date_saved,
                         library_entries.decoded_json,
-                        entry_tmdb_metadata_summary.name AS entry_name,
-                        entry_tmdb_metadata_summary.name_translations_json
+                        entry_tmdb_metadata_items.name AS entry_name,
+                        entry_tmdb_metadata_items.name_translations_json
                             AS entry_name_translations,
-                        entry_tmdb_metadata_summary.overview AS entry_overview,
-                        entry_tmdb_metadata_summary.overview_translations_json
+                        entry_tmdb_metadata_items.overview AS entry_overview,
+                        entry_tmdb_metadata_items.overview_translations_json
                             AS entry_overview_translations,
-                        entry_tmdb_metadata_summary.on_air_date AS entry_on_air_date,
-                        parent_tmdb_metadata_summary.name AS parent_name,
-                        parent_tmdb_metadata_summary.name_translations_json
+                        entry_tmdb_metadata_items.on_air_date AS entry_on_air_date,
+                        parent_tmdb_metadata_items.name AS parent_name,
+                        parent_tmdb_metadata_items.name_translations_json
                             AS parent_name_translations,
-                        parent_tmdb_metadata_summary.overview AS parent_overview,
-                        parent_tmdb_metadata_summary.overview_translations_json
+                        parent_tmdb_metadata_items.overview AS parent_overview,
+                        parent_tmdb_metadata_items.overview_translations_json
                             AS parent_overview_translations,
                         library_entries.notes
                     FROM library_entries
-                    LEFT JOIN tmdb_metadata_summary AS entry_tmdb_metadata_summary
-                        ON entry_tmdb_metadata_summary.metadata_key = CASE
+                    LEFT JOIN tmdb_metadata_items AS entry_tmdb_metadata_items
+                        ON entry_tmdb_metadata_items.metadata_key = CASE
                             WHEN library_entries.entry_type = 'season' THEN
                                 'season:' || library_entries.parent_series_id || ':' ||
                                 library_entries.season_number || ':' || library_entries.tmdb_id
                             ELSE
                                 library_entries.entry_type || ':' || library_entries.tmdb_id
                         END
-                        AND entry_tmdb_metadata_summary.language = ?
-                    LEFT JOIN tmdb_metadata_summary AS parent_tmdb_metadata_summary
+                        AND entry_tmdb_metadata_items.language = ?
+                    LEFT JOIN tmdb_metadata_items AS parent_tmdb_metadata_items
                         ON library_entries.entry_type = 'season'
-                        AND parent_tmdb_metadata_summary.metadata_key =
+                        AND parent_tmdb_metadata_items.metadata_key =
                             'series:' || library_entries.parent_series_id
-                        AND parent_tmdb_metadata_summary.language = ?
+                        AND parent_tmdb_metadata_items.language = ?
                     WHERE library_entries.kind = 'snapshot'
                 ),
                 candidate_matches AS (
@@ -456,12 +463,17 @@ class LibraryCacheStore:
         with self._connect_initialized() as db:
             metadata.upsert_metadata_summary(db, summary)
 
-    def upsert_metadata_summaries(self, summaries: list[LibraryEntryMetadata]) -> None:
+    def upsert_metadata_summaries(
+        self,
+        summaries: list[LibraryEntryMetadata],
+        *,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
+    ) -> None:
         if not summaries:
             return
         with self._connect_initialized() as db:
             for summary in summaries:
-                metadata.upsert_metadata_summary(db, summary)
+                metadata.upsert_metadata_item(db, summary, depth=depth)
 
     def metadata_summary_targets_for_entries(
         self,
@@ -474,30 +486,43 @@ class LibraryCacheStore:
         self,
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[TMDbSummaryIdentity]:
-        return self._metadata_summary_targets_by_state({"missing"}, language=language)
+        return self._metadata_summary_targets_by_state(
+            {"missing"},
+            language=language,
+            depth=depth,
+        )
 
     def outdated_metadata_summary_targets(
         self,
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[TMDbSummaryIdentity]:
-        return self._metadata_summary_targets_by_state({"outdated"}, language=language)
+        return self._metadata_summary_targets_by_state(
+            {"outdated"},
+            language=language,
+            depth=depth,
+        )
 
     def incomplete_metadata_summary_targets(
         self,
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[TMDbSummaryIdentity]:
         return self._metadata_summary_targets_by_state(
             {"missing", "outdated"},
             language=language,
+            depth=depth,
         )
 
     def metadata_summary_status(
         self,
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> CacheMetadataStatusResult:
         entries = self.list_entry_models(include_tombstones=False)
         if not entries:
@@ -509,7 +534,7 @@ class LibraryCacheStore:
             )
 
         tracked = self.metadata_summary_targets_for_entries(entries)
-        missing = self.incomplete_metadata_summary_targets(language=language)
+        missing = self.incomplete_metadata_summary_targets(language=language, depth=depth)
         tracked_count = len(tracked)
         missing_count = len(missing)
         return CacheMetadataStatusResult(
@@ -524,6 +549,7 @@ class LibraryCacheStore:
         entries: list[LibraryEntryModel],
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[LibraryEntryModel]:
         if not entries:
             return []
@@ -531,8 +557,8 @@ class LibraryCacheStore:
         with self._connect_initialized() as db:
             rows = db.execute(
                 f"""
-                SELECT metadata_json
-                FROM tmdb_metadata_summary
+                SELECT metadata_depth, metadata_json
+                FROM tmdb_metadata_items
                 WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
                 AND language = ?
                 """,
@@ -540,8 +566,12 @@ class LibraryCacheStore:
             ).fetchall()
         metadata_by_key: dict[str, LibraryEntryMetadata] = {}
         for row in rows:
+            if not metadata.metadata_depth_satisfies(row["metadata_depth"], depth):
+                continue
             summary = metadata.metadata_row(row)
-            metadata_by_key[metadata.metadata_key_from_summary(summary)] = summary
+            metadata_by_key[metadata.metadata_key_from_summary(summary)] = summary.project(
+                depth.value
+            )
         return [
             entry.with_metadata(metadata_by_key.get(metadata.metadata_key_from_entry(entry)))
             for entry in entries
@@ -566,7 +596,7 @@ class LibraryCacheStore:
             rows = db.execute(
                 f"""
                 SELECT metadata_key, metadata_json
-                FROM tmdb_metadata_summary
+                FROM tmdb_metadata_items
                 WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
                 AND language = ?
                 """,
@@ -586,6 +616,7 @@ class LibraryCacheStore:
         states: set[str],
         *,
         language: str,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[TMDbSummaryIdentity]:
         entries = self.list_entry_models(include_tombstones=False)
         if not entries:
@@ -596,7 +627,13 @@ class LibraryCacheStore:
                 target = metadata.metadata_target_from_entry(entry)
                 if (
                     target is not None
-                    and metadata.metadata_summary_state(db, target, language=language) in states
+                    and metadata.metadata_summary_state(
+                        db,
+                        target,
+                        language=language,
+                        depth=depth,
+                    )
+                    in states
                 ):
                     targets.append(target)
         return metadata.dedupe_summary_targets(targets)

@@ -3,6 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
 from anishelf_cli.models.transport.tmdb import (
     TMDbMovieSummaryResponse,
@@ -46,9 +47,9 @@ def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> No
 
     assert series.last_episode_to_air == {"id": 7, "name": "Finale"}
     assert series.networks == ({"id": 2, "name": "FOX"},)
-    assert series.seasons == ({"id": 33, "season_number": 1},)
+    assert series.seasons[0].season_number == 1
 
-    assert season.episodes == ({"id": 1, "episode_number": 1},)
+    assert season.episodes[0].episode_number == 1
 
 
 def test_tmdb_transport_ignores_additive_tmdb_fields() -> None:
@@ -118,15 +119,65 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
 
     assert summary.name == "Alien"
     assert summary.language == "en-US"
-    assert summary.name_translation_map == {"ja-JP": "エイリアン"}
-    assert summary.overview_translation_map == {"ja-JP": "宇宙ホラー映画。"}
+    assert summary.name_translation_map == {}
+    assert summary.overview_translation_map == {}
     assert summary.link_to_details == "https://example.com/alien"
-    assert summary.source_version == "tmdb.http.summary.v3"
-    assert len(requests) == 2
+    assert summary.source_version == "tmdb.http.metadata.v1"
+    assert len(requests) == 1
     assert requests[0].url.path == "/3/movie/55"
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
     assert requests[0].url.params["language"] == "en-US"
-    assert requests[1].url.path == "/3/movie/55/translations"
+
+
+def test_tmdb_client_fetches_details_translations_for_search_cache() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/translations"):
+            return httpx.Response(
+                200,
+                json={
+                    "translations": [
+                        {
+                            "iso_639_1": "ja",
+                            "iso_3166_1": "JP",
+                            "data": {
+                                "title": "エイリアン",
+                                "overview": "宇宙ホラー映画。",
+                            },
+                        }
+                    ]
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": 55,
+                "title": "Alien",
+                "original_title": "Alien",
+                "overview": "A space horror film.",
+                "release_date": "1979-05-25",
+                "poster_path": "/poster.jpg",
+                "backdrop_path": "/backdrop.jpg",
+                "original_language": "en",
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", client=client)
+
+    metadata = tmdb.fetch_metadata(
+        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55),
+        MetadataDepth.DETAILS,
+    )
+
+    assert metadata.name_translation_map == {"ja-JP": "エイリアン"}
+    assert metadata.overview_translation_map == {"ja-JP": "宇宙ホラー映画。"}
+    assert [request.url.path for request in requests] == [
+        "/3/movie/55",
+        "/3/movie/55/translations",
+    ]
 
 
 def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
@@ -176,10 +227,83 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
     assert season_summary.link_to_details == "https://example.com/alien-nation"
     assert [request.url.path for request in requests] == [
         "/3/tv/22",
-        "/3/tv/22/translations",
         "/3/tv/22",
         "/3/tv/22/season/1",
-        "/3/tv/22/season/1/translations",
+    ]
+
+
+def test_tmdb_client_full_metadata_fetches_translations_and_series_episode_summaries() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/translations"):
+            return httpx.Response(
+                200,
+                json={
+                    "translations": [
+                        {
+                            "iso_639_1": "ja",
+                            "iso_3166_1": "JP",
+                            "data": {"name": "カウボーイビバップ", "overview": "宇宙の賞金稼ぎ。"},
+                        }
+                    ]
+                },
+            )
+        if request.url.path == "/3/tv/22":
+            return httpx.Response(
+                200,
+                json={
+                    "id": 22,
+                    "name": "Cowboy Bebop",
+                    "overview": "Bounty hunters in space.",
+                    "first_air_date": "1998-04-03",
+                    "number_of_seasons": 1,
+                    "number_of_episodes": 26,
+                    "seasons": [
+                        {
+                            "name": "Season 1",
+                            "season_number": 1,
+                            "episode_count": 26,
+                            "air_date": "1998-04-03",
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "id": 100,
+                "name": "Season 1",
+                "episodes": [
+                    {
+                        "episode_number": 1,
+                        "season_number": 1,
+                        "name": "Asteroid Blues",
+                        "air_date": "1998-04-03",
+                        "still_path": "/still.jpg",
+                    }
+                ],
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", client=client)
+
+    metadata = tmdb.fetch_metadata(
+        TMDbSummaryIdentity(entry_type="series", tmdb_id=22),
+        MetadataDepth.FULL,
+    )
+
+    assert metadata.name_translation_map == {"ja-JP": "カウボーイビバップ"}
+    assert len(metadata.season_summaries) == 1
+    assert metadata.season_summaries[0].episode_count == 26
+    assert len(metadata.episode_summaries) == 1
+    assert metadata.episode_summaries[0].name == "Asteroid Blues"
+    assert [request.url.path for request in requests] == [
+        "/3/tv/22",
+        "/3/tv/22/season/1",
+        "/3/tv/22/translations",
     ]
 
 

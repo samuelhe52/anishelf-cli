@@ -229,7 +229,7 @@ def test_library_entry_metadata_round_trips_normalized_summary_payload() -> None
         "on_air_date": "1989-09-18",
         "link_to_details": "https://example.com/alien-nation",
         "fetched_at": "2026-06-30T00:00:00Z",
-        "source_version": "tmdbsummary.v3",
+        "source_version": "tmdb.metadata.v1",
     }
 
     metadata = LibraryEntryMetadata.model_validate(payload)
@@ -288,12 +288,28 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
         "name_translations": {},
         "overview": None,
         "overview_translations": {},
+        "runtime_minutes": None,
+        "number_of_seasons": None,
+        "number_of_episodes": None,
         "poster_path": None,
         "backdrop_path": None,
         "logo_path": None,
         "original_language_code": None,
         "on_air_date": None,
         "link_to_details": None,
+        "episode_run_time_minutes": [],
+        "genres": [],
+        "vote_average": None,
+        "vote_count": None,
+        "popularity": None,
+        "status": None,
+        "first_air_date": None,
+        "last_air_date": None,
+        "release_date": None,
+        "tagline": None,
+        "subtitle": None,
+        "season_summaries": [],
+        "episode_summaries": [],
         "fetched_at": None,
         "source_version": None,
     }
@@ -318,7 +334,7 @@ def test_library_entry_metadata_with_updates_preserves_full_payload_shape() -> N
             "on_air_date": None,
             "link_to_details": None,
             "fetched_at": None,
-            "source_version": "tmdbsummary.v3",
+            "source_version": "tmdb.metadata.v1",
         }
     )
 

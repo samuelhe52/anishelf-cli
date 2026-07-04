@@ -27,6 +27,7 @@ from anishelf_cli.cloudkit.executor import (
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.entries import LibraryEntryModel, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.output import CacheMetadataStatusResult
 from anishelf_cli.models.transport.cloudkit import (
     CloudKitLibraryEntrySnapshotFields,
@@ -43,9 +44,6 @@ from tests.support import (
     null_lock,
     runner,
     tombstone_record,
-)
-from tests.support import (
-    insert_legacy_v1_metadata_summary as _insert_legacy_v1_metadata_summary,
 )
 from tests.support import (
     isolate_paths as _isolate_paths,
@@ -212,9 +210,7 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
             "entry_type",
             "parent_series_id",
         ]
-        metadata_columns = {
-            row[1] for row in db.execute("PRAGMA table_info(tmdb_metadata_summary)")
-        }
+        metadata_columns = {row[1] for row in db.execute("PRAGMA table_info(tmdb_metadata_items)")}
         assert {
             "metadata_key",
             "entry_type",
@@ -222,9 +218,12 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
             "parent_series_id",
             "season_number",
             "language",
+            "metadata_depth",
             "name",
             "overview",
+            "runtime_minutes",
             "poster_path",
+            "genres_json",
             "source_version",
         } <= metadata_columns
 
@@ -306,9 +305,9 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
     attached = store.attach_metadata_summary_models([raw_entry], language="en-US")[0]
     assert attached.metadata is not None
     assert attached.metadata.name == "Alien"
-    assert attached.metadata.poster_path == "/poster.jpg"
-    assert attached.metadata.language == "en-US"
-    assert attached.metadata.name_translation_map == {"ja-JP": "Alien JP"}
+    assert attached.metadata.poster_path is None
+    assert attached.metadata.language is None
+    assert attached.metadata.name_translation_map == {}
 
     with sqlite3.connect(store.path) as db:
         decoded_json = db.execute("SELECT decoded_json FROM library_entries").fetchone()[0]
@@ -328,24 +327,141 @@ def test_metadata_summary_cache_is_keyed_by_language(tmp_path, monkeypatch) -> N
     assert store.metadata_summary_status(language="ja-JP").ready is False
 
 
-def test_metadata_summary_read_normalizes_legacy_rows_with_new_fields(
+def test_metadata_projection_splits_summary_and_details_fields(
     tmp_path,
     monkeypatch,
 ) -> None:
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
-    _insert_legacy_v1_metadata_summary(
-        store,
-        metadata_key="movie:55",
-        entry_type="movie",
-        tmdb_id=55,
+    metadata = _metadata_summary("movie", 55, name="Alien").with_updates(runtime_minutes=117)
+    store.upsert_metadata_summaries([metadata], depth=MetadataDepth.DETAILS)
+
+    summary = store.attach_metadata_summary_models(
+        store.list_entry_models(),
+        depth=MetadataDepth.SUMMARY,
+    )[0].metadata
+    details = store.attach_metadata_summary_models(
+        store.list_entry_models(),
+        depth=MetadataDepth.DETAILS,
+    )[0].metadata
+
+    assert summary is not None
+    assert summary.name == "Alien"
+    assert summary.runtime_minutes == 117
+    assert summary.poster_path is None
+    assert details is not None
+    assert details.poster_path == "/poster.jpg"
+
+
+@pytest.mark.parametrize("stored_depth", [MetadataDepth.DETAILS, MetadataDepth.FULL])
+def test_metadata_upsert_does_not_downgrade_details_or_full_rows(
+    tmp_path,
+    monkeypatch,
+    stored_depth: MetadataDepth,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Canonical")],
+        depth=stored_depth,
     )
 
-    attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
-    assert attached is not None
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Shallow Refresh"))
 
-    assert attached.language == "en-US"
-    assert attached.name == "Alien"
-    assert attached.source_version == "tmdbsummary.v1"
+    with sqlite3.connect(store.path) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            """
+            SELECT metadata_depth, metadata_json
+            FROM tmdb_metadata_items
+            WHERE metadata_key = ? AND language = ?
+            """,
+            ("movie:55", "en-US"),
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(row["metadata_json"])
+    assert row["metadata_depth"] == stored_depth.value
+    assert payload["name"] == "Canonical"
+    assert payload["name_translations"] == {"ja-JP": "Canonical JP"}
+
+
+def test_metadata_upsert_replaces_shallow_row_with_richer_payload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Shallow"))
+
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Richer")],
+        depth=MetadataDepth.DETAILS,
+    )
+
+    with sqlite3.connect(store.path) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            """
+            SELECT metadata_depth, metadata_json
+            FROM tmdb_metadata_items
+            WHERE metadata_key = ? AND language = ?
+            """,
+            ("movie:55", "en-US"),
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(row["metadata_json"])
+    assert row["metadata_depth"] == MetadataDepth.DETAILS.value
+    assert payload["name"] == "Richer"
+    assert payload["poster_path"] == "/poster.jpg"
+
+
+def test_metadata_upsert_replaces_equal_depth_payload(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Original")],
+        depth=MetadataDepth.DETAILS,
+    )
+
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Replacement")],
+        depth=MetadataDepth.DETAILS,
+    )
+
+    with sqlite3.connect(store.path) as db:
+        db.row_factory = sqlite3.Row
+        row = db.execute(
+            """
+            SELECT metadata_depth, metadata_json
+            FROM tmdb_metadata_items
+            WHERE metadata_key = ? AND language = ?
+            """,
+            ("movie:55", "en-US"),
+        ).fetchone()
+
+    assert row is not None
+    payload = json.loads(row["metadata_json"])
+    assert row["metadata_depth"] == MetadataDepth.DETAILS.value
+    assert payload["name"] == "Replacement"
+
+
+def test_attach_metadata_summary_models_requires_requested_depth(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.SUMMARY,
+    )
+
+    attached = store.attach_metadata_summary_models(
+        store.list_entry_models(),
+        depth=MetadataDepth.DETAILS,
+    )[0]
+
+    assert attached.metadata is None
 
 
 def test_attach_metadata_summary_preserves_dict_compatibility(
@@ -363,29 +479,35 @@ def test_attach_metadata_summary_preserves_dict_compatibility(
     assert attached.identity == "movie:55"
     assert attached.metadata is not None
     assert attached.metadata.name == "Alien"
-    assert attached.metadata.poster_path == "/poster.jpg"
+    assert attached.metadata.poster_path is None
 
 
-def test_metadata_summary_status_treats_legacy_v1_rows_as_incomplete(
+def test_metadata_readiness_tracks_requested_depth(
     tmp_path,
     monkeypatch,
 ) -> None:
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
-    _insert_legacy_v1_metadata_summary(
-        store,
-        metadata_key="movie:55",
-        entry_type="movie",
-        tmdb_id=55,
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.SUMMARY,
     )
 
     assert store.missing_metadata_summary_targets() == []
-    assert store.outdated_metadata_summary_targets(language="en-US") == [
-        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
-    ]
-    assert store.incomplete_metadata_summary_targets(language="en-US") == [
-        TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)
-    ]
+    assert store.outdated_metadata_summary_targets(language="en-US") == []
+    assert store.outdated_metadata_summary_targets(
+        language="en-US",
+        depth=MetadataDepth.DETAILS,
+    ) == [TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)]
     assert store.metadata_summary_status(language="en-US").model_dump(mode="json") == {
+        "tracked_entries": 1,
+        "hydrated_entries": 1,
+        "missing_entries": 0,
+        "ready": True,
+    }
+    assert store.metadata_summary_status(
+        language="en-US",
+        depth=MetadataDepth.DETAILS,
+    ).model_dump(mode="json") == {
         "tracked_entries": 1,
         "hydrated_entries": 0,
         "missing_entries": 1,
@@ -451,16 +573,14 @@ def test_cache_sync_hydrates_tmdb_summary_for_new_entries_only(
     assert tmdb.targets == [("movie", 55), ("series", 22)]
 
 
-def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
+def test_cache_sync_upgrades_shallow_metadata_without_new_entries(
     tmp_path,
     monkeypatch,
 ) -> None:
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
-    _insert_legacy_v1_metadata_summary(
-        store,
-        metadata_key="movie:55",
-        entry_type="movie",
-        tmdb_id=55,
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.SUMMARY,
     )
 
     class FakeExecutor:
@@ -488,6 +608,7 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
         store=store,
         executor=FakeExecutor(),  # type: ignore[arg-type]
         tmdb_client=tmdb,
+        metadata_depth=MetadataDepth.DETAILS,
     ).refresh()
 
     assert result.rebuilt is False
@@ -497,8 +618,14 @@ def test_cache_sync_backfills_legacy_v1_metadata_without_new_entries(
     assert tmdb.targets == [("movie", 55)]
     refreshed = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert refreshed is not None
-    assert refreshed.source_version == "tmdbsummary.v3"
-    assert store.metadata_summary_status(language="en-US").ready is True
+    assert refreshed.source_version is None
+    assert (
+        store.metadata_summary_status(
+            language="en-US",
+            depth=MetadataDepth.DETAILS,
+        ).ready
+        is True
+    )
 
 
 def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled(
@@ -692,8 +819,8 @@ def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0]
     assert attached.metadata is not None
     assert attached.metadata.name == "Season 1"
-    assert attached.metadata.parent_series_id == 22
-    assert attached.metadata.season_number == 1
+    assert attached.metadata.parent_series_id is None
+    assert attached.metadata.season_number is None
 
 
 def test_display_titles_for_entries_uses_parent_series_metadata_for_seasons(
@@ -1223,8 +1350,8 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
     assert payload["summary"]["cache"]["metadata_errors"] == 0
     assert "[progress] Starting local library cache sync from CloudKit." in result.stderr
     assert "[progress] Fetched page 1: 1 records (1 total)." in result.stderr
-    assert "[progress] Hydrating TMDb summary metadata for 1 entries." in result.stderr
-    assert "[progress] TMDb summary metadata 1/1 complete (0 errors)." in result.stderr
+    assert "[progress] Hydrating TMDb metadata for 1 entries." in result.stderr
+    assert "[progress] TMDb metadata 1/1 complete (0 errors)." in result.stderr
     refreshed = initialized_store.attach_metadata_summary_models(
         initialized_store.list_entry_models()
     )
@@ -1435,6 +1562,20 @@ def test_library_export_reads_existing_cache_without_cloudkit_update(
     assert requests == []
 
 
+def test_library_export_metadata_readiness_error_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "lib", "export", "--metadata", "details"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Cannot attach details metadata" in result.stderr
+    assert "ani lib refresh-meta" in result.stderr
+
+
 def test_library_list_attaches_cached_metadata_by_default_and_none_suppresses_it(
     tmp_path,
     monkeypatch,
@@ -1465,6 +1606,64 @@ def test_library_list_attaches_cached_metadata_by_default_and_none_suppresses_it
     assert "Title" in human.stdout
     assert "Alien" in human.stdout
     assert "movie:55" in human.stdout
+
+
+def test_library_list_ad_hoc_language_fetches_details_live_without_cache_gate(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 55, name="Alien")],
+        depth=MetadataDepth.SUMMARY,
+    )
+    requested: list[tuple[str, int, str, str]] = []
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    class FakeTMDbClient:
+        language = "en-US"
+
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_metadata(self, identity, depth: MetadataDepth) -> LibraryEntryMetadata:
+            requested.append((identity.entry_type, identity.tmdb_id, depth.value, self.language))
+            return _metadata_summary(
+                identity.entry_type,
+                identity.tmdb_id,
+                name="エイリアン",
+            ).with_updates(language=self.language)
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
+
+    result = runner.invoke(
+        app,
+        [
+            "--json",
+            "lib",
+            "list",
+            "--metadata",
+            "details",
+            "--tmdb-language",
+            "ja-JP",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert requested == [("movie", 55, "details", "ja-JP")]
+    assert payload["entries"][0]["metadata"]["name"] == "エイリアン"
+    assert payload["entries"][0]["metadata"]["poster_path"] == "/poster.jpg"
+    cached = store.attach_metadata_summary_models(
+        store.list_entry_models(),
+        language="ja-JP",
+        depth=MetadataDepth.DETAILS,
+    )[0]
+    assert cached.metadata is None
 
 
 def test_library_list_uses_configured_metadata_none_by_default(
@@ -1913,6 +2112,7 @@ def test_library_refresh_meta_updates_full_library_cache(
         "requested": 1,
         "hydrated": 1,
         "errors": 0,
+        "depth": "details",
     }
     refreshed = store.attach_metadata_summary_models(store.list_entry_models())[0]
     assert refreshed.metadata is not None
@@ -1931,13 +2131,13 @@ def test_tmdb_summary_upsert_canonicalizes_source_version_for_storage(
 
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert attached is not None
-    assert attached.source_version == "tmdbsummary.v3"
+    assert attached.source_version is None
     with sqlite3.connect(store.path) as db:
         stored = db.execute(
-            "SELECT source_version FROM tmdb_metadata_summary WHERE metadata_key = ?",
+            "SELECT source_version FROM tmdb_metadata_items WHERE metadata_key = ?",
             ("movie:55",),
         ).fetchone()
-    assert stored[0] == "tmdbsummary.v3"
+    assert stored[0] == "tmdb.metadata.v1"
 
 
 def test_library_export_attaches_cached_metadata_by_default(
@@ -2270,8 +2470,10 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
             self,
             *,
             language: str = "en-US",
+            depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
             _ = language
+            _ = depth
             return CacheMetadataStatusResult(
                 tracked_entries=1,
                 hydrated_entries=1,
@@ -2292,8 +2494,10 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
             entries: list[LibraryEntryModel],
             *,
             language: str = "en-US",
+            depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> list[LibraryEntryModel]:
             _ = language
+            _ = depth
             self.attach_calls += 1
             return [
                 entry.with_metadata(_metadata_summary("movie", 55, name="Alien"))
@@ -2417,8 +2621,10 @@ def _fake_search_store() -> object:
             self,
             *,
             language: str = "en-US",
+            depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
             _ = language
+            _ = depth
             return CacheMetadataStatusResult(
                 tracked_entries=3,
                 hydrated_entries=3,
@@ -2451,8 +2657,10 @@ def _fake_search_store() -> object:
             entries: list[LibraryEntryModel],
             *,
             language: str = "en-US",
+            depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> list[LibraryEntryModel]:
             _ = language
+            _ = depth
             return entries
 
     return FakeStore()

@@ -19,8 +19,8 @@ spec.
 - `auth logout` removes the stored CloudKit web auth token and clears all local
   library cache files.
 - `config show`, `config set-defaults`, and `config set-tmdb-api-key` are
-  implemented. Defaults include library output behavior and the preferred TMDb
-  metadata language, which defaults to `en-US`.
+  implemented. Defaults include library output behavior, preferred TMDb
+  metadata language (`en-US`), and TMDb hydration depth (`details`).
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.
@@ -32,29 +32,31 @@ spec.
 - `lib init` now keeps JSON stdout clean while still emitting cache and
   TMDb hydration progress to stderr.
 - `lib status` reports local cache initialization state, visible/hidden entry
-  counts, TMDb summary metadata readiness, and
+  counts, TMDb metadata readiness, and
   `lib clear-cache` removes all local library cache files after explicit
   confirmation.
 - `lib get`, `lib list`, `lib export`, and `lib search <query>`
   read from the initialized local cache and fail closed until init has been
   run. These read commands also support `--sync` for an explicit CloudKit
   refresh before serving results.
-- `lib search <query>` requires complete cached TMDb summary metadata and
+- `lib search <query>` requires complete cached TMDb metadata and
   searches titles, translations, parent-series metadata, overviews, notes, and
   on-air dates in the same priority order as AniShelf's library search.
 - The SQLite cache keeps CloudKit-derived library state separate from
-  `tmdb_metadata_summary`. Library reads attach cached summary metadata by
-  default, `--metadata none` suppresses attachment, and `details`/`full` are
-  reserved until detail cache behavior exists. Cached summaries are keyed by
-  the configured preferred TMDb metadata language.
-- `lib init` hydrates TMDb summary metadata for the full fetched library
-  in the preferred language when a TMDb key is available. Later `lib sync`
-  refreshes hydrate all newly added entries automatically. `lib refresh-meta`
-  explicitly refreshes cached TMDb summaries for the full local library, and
-  `lib get` supports `--live-meta` for targeted per-entry refresh. A
+  `tmdb_metadata_items`. Library reads attach cached summary metadata by
+  default, `--metadata none` suppresses attachment, and `--metadata
+  summary|details|full` controls output projection. Cached metadata is keyed by
+  the configured preferred TMDb metadata language and stores a readiness depth.
+- `lib init` hydrates TMDb metadata for the full fetched library at the
+  configured hydration depth when a TMDb key is available. Later `lib sync`
+  refreshes hydrate all newly added or insufficiently hydrated entries
+  automatically. `lib refresh-meta` explicitly refreshes cached TMDb metadata
+  for the full local library, and `lib get` supports `--live-meta` for targeted
+  per-entry refresh at the configured hydration depth, promoted to `full` when
+  full output is requested. A
   per-command `--tmdb-language` override on library reads is ad-hoc when it
-  differs from the preferred language: summaries are fetched live for output
-  and are not written to the cache.
+  differs from the preferred language: metadata is fetched live for output
+  and is not written to the cache.
 - `lib list` has first-pass ergonomic filters and ordering for common
   questions: watch status, favorites, saved/updated/title sort, and result
   limits. Human output supports `--style table|list` and configurable display
@@ -96,5 +98,5 @@ spec.
 ## Decisions Still Open
 
 - Exact command grammar for filters and stdin/file batch inputs.
-- Staleness and invalidation rules for TMDb summaries and details.
+- Staleness and invalidation rules for TMDb metadata depth refreshes.
 - Whether low-level CloudKit diagnostics need a separate dev-only entry point.

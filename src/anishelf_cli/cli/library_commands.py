@@ -88,7 +88,7 @@ _LIBRARY_GET_ENTRY_FIELDS_TO_DROP = frozenset(
         "schema_version",
     }
 )
-_LIBRARY_GET_METADATA_FIELDS_TO_DROP = frozenset({"poster_path"})
+_LIBRARY_GET_METADATA_FIELDS_TO_DROP: frozenset[str] = frozenset()
 
 
 def _make_http_client() -> httpx.Client:
@@ -111,7 +111,7 @@ def library_get(
         bool,
         typer.Option(
             "--live-meta",
-            help="Fetch fresh TMDb summary metadata for the requested entries.",
+            help="Fetch fresh TMDb metadata for the requested entries.",
         ),
     ] = False,
     tmdb_language: Annotated[
@@ -131,7 +131,6 @@ def library_get(
     ] = False,
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
-    _reject_reserved_metadata_depth(metadata_depth)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
@@ -141,14 +140,21 @@ def library_get(
     if lookup_record_names:
         store, _ = _library_read_store(sync=sync)
         cached_entries = store.get_entry_models_by_identity(lookup_record_names)
-        if live_meta and not ad_hoc_language:
-            _refresh_metadata_for_entries(store, list(cached_entries.values()))
+        if live_meta and not ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
+            # Refresh the persisted row at hydration depth so live-meta can replace
+            # existing details/full cache rows, then project the requested output depth below.
+            _refresh_metadata_for_entries(
+                store,
+                list(cached_entries.values()),
+                depth=_metadata_hydration_depth_for_output(metadata_depth),
+            )
         if metadata_depth is not MetadataDepth.NONE and ad_hoc_language:
             cached_entries = {
                 entry.identity: entry
                 for entry in _attach_live_metadata_for_entries(
                     list(cached_entries.values()),
                     language=request_language,
+                    depth=metadata_depth,
                 )
             }
         elif metadata_depth is not MetadataDepth.NONE:
@@ -415,7 +421,6 @@ def library_list(
     _reject_style_with_json(ctx, json_output, output_style)
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
-    _reject_reserved_metadata_depth(metadata_depth)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
@@ -432,13 +437,18 @@ def library_list(
             sort=sort,
             limit=limit,
             metadata_language=preferred_language,
+            live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
-            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+            _attach_live_metadata_for_entries(
+                list(result.entries),
+                language=request_language,
+                depth=metadata_depth,
+            ),
         )
     payload = result.model_dump(mode="json")
     if machine_output:
@@ -509,7 +519,6 @@ def library_search(
     _reject_style_with_json(ctx, json_output, output_style)
     machine_output = json_output_requested(ctx, json_output)
     metadata_depth = _metadata_depth(metadata)
-    _reject_reserved_metadata_depth(metadata_depth)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
@@ -522,13 +531,18 @@ def library_search(
             cache=cache_summary_payload(store, refresh_result),
             show_hidden=_show_hidden_requested(show_hidden),
             metadata_language=preferred_language,
+            live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
-            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+            _attach_live_metadata_for_entries(
+                list(result.entries),
+                language=request_language,
+                depth=metadata_depth,
+            ),
         )
     payload = result.model_dump(mode="json")
     if machine_output:
@@ -594,22 +608,29 @@ def library_export(
     ] = False,
 ) -> None:
     metadata_depth = _metadata_depth(metadata)
-    _reject_reserved_metadata_depth(metadata_depth)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
     store, refresh_result = _library_read_store(sync=sync)
-    result = build_library_export_result(
-        store,
-        metadata_depth=metadata_depth,
-        cache=cache_summary_payload(store, refresh_result),
-        show_hidden=_show_hidden_requested(show_hidden),
-        metadata_language=preferred_language,
-    )
+    try:
+        result = build_library_export_result(
+            store,
+            metadata_depth=metadata_depth,
+            cache=cache_summary_payload(store, refresh_result),
+            show_hidden=_show_hidden_requested(show_hidden),
+            metadata_language=preferred_language,
+            live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,
+        )
+    except MetadataCompletenessError as exc:
+        _exit_metadata_completeness(exc)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
-            _attach_live_metadata_for_entries(list(result.entries), language=request_language),
+            _attach_live_metadata_for_entries(
+                list(result.entries),
+                language=request_language,
+                depth=metadata_depth,
+            ),
         )
     payload = result.model_dump(mode="json")
     if json_output_requested(ctx, json_output):
@@ -629,7 +650,7 @@ def library_export(
 
 @library_app.command(
     "refresh-meta",
-    help="Refresh cached TMDb summary metadata for the local library.",
+    help="Refresh cached TMDb metadata for the local library.",
 )
 def library_refresh_meta(
     ctx: typer.Context,
@@ -638,9 +659,10 @@ def library_refresh_meta(
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    metadata_depth = _user_defaults_or_exit().tmdb.hydration_depth
     store = _library_store_for_read()
     entries = store.list_entry_models(include_tombstones=False)
-    refresh_result = _refresh_metadata_for_entries(store, entries)
+    refresh_result = _refresh_metadata_for_entries(store, entries, depth=metadata_depth)
     payload = LibraryRefreshMetadataResult(
         summary=LibraryRefreshMetadataSummaryResult(
             entries=len(entries),
@@ -648,6 +670,7 @@ def library_refresh_meta(
                 requested=refresh_result.requested,
                 hydrated=refresh_result.hydrated,
                 errors=refresh_result.errors,
+                depth=metadata_depth.value,
             ),
             cache=LibraryRefreshMetadataCacheResult(
                 container=store.scope.container,
@@ -668,6 +691,7 @@ def library_refresh_meta(
                 "Library metadata refresh",
                 (
                     ("Entries", len(entries)),
+                    ("Depth", metadata_depth.value),
                     ("Requested", refresh_result.requested),
                     ("Hydrated", refresh_result.hydrated),
                     ("Errors", refresh_result.errors),
@@ -890,6 +914,7 @@ def _attach_live_metadata_for_entries(
     entries: list[LibraryEntryModel],
     *,
     language: str,
+    depth: MetadataDepth,
 ) -> list[LibraryEntryModel]:
     targets = cache_metadata.dedupe_summary_targets(
         [
@@ -907,6 +932,7 @@ def _attach_live_metadata_for_entries(
     summaries, error_messages = fetch_metadata_summaries(
         _tmdb_summary_client_or_exit(language=language),
         targets,
+        depth=depth,
     )
     if error_messages:
         emit_error(error_messages[0])
@@ -915,7 +941,12 @@ def _attach_live_metadata_for_entries(
         cache_metadata.metadata_key_from_summary(summary): summary for summary in summaries
     }
     return [
-        entry.with_metadata(summaries_by_key.get(cache_metadata.metadata_key_from_entry(entry)))
+        entry.with_metadata(
+            summary.project(depth.value)
+            if (summary := summaries_by_key.get(cache_metadata.metadata_key_from_entry(entry)))
+            is not None
+            else None
+        )
         for entry in entries
     ]
 
@@ -956,6 +987,13 @@ def _metadata_depth(value: MetadataDepth | None) -> MetadataDepth:
     return _user_defaults_or_exit().library_read.metadata
 
 
+def _metadata_hydration_depth_for_output(output_depth: MetadataDepth) -> MetadataDepth:
+    configured_depth = _user_defaults_or_exit().tmdb.hydration_depth
+    if output_depth is MetadataDepth.FULL or configured_depth is MetadataDepth.FULL:
+        return MetadataDepth.FULL
+    return configured_depth
+
+
 def _sync_requested(value: bool | None) -> bool:
     if value is not None:
         return value
@@ -966,15 +1004,6 @@ def _show_hidden_requested(value: bool) -> bool:
     if value:
         return True
     return _user_defaults_or_exit().library_read.show_hidden
-
-
-def _reject_reserved_metadata_depth(metadata_depth: MetadataDepth) -> None:
-    if metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
-        emit_error(
-            f"--metadata {metadata_depth.value} is reserved until TMDb detail metadata "
-            "caching exists."
-        )
-        raise typer.Exit(code=2)
 
 
 def _validate_watch_status(watch_status: str | None) -> None:
@@ -988,10 +1017,12 @@ def _validate_watch_status(watch_status: str | None) -> None:
 def _refresh_metadata_for_entries(
     store: LibraryCacheStore,
     entries: list[LibraryEntryModel],
+    *,
+    depth: MetadataDepth,
 ) -> MetadataHydrationResult:
     tmdb_client = _tmdb_summary_client_or_exit(language=_preferred_metadata_language())
     targets = store.metadata_summary_targets_for_entries(entries)
-    return _refresh_metadata_targets(store, tmdb_client, targets)
+    return _refresh_metadata_targets(store, tmdb_client, targets, depth=depth)
 
 
 def _refresh_metadata_targets(
@@ -999,12 +1030,14 @@ def _refresh_metadata_targets(
     tmdb_client: TMDbClient,
     targets: list[TMDbSummaryIdentity],
     *,
+    depth: MetadataDepth,
     emit_progress_updates: bool = False,
 ) -> MetadataHydrationResult:
     return _library_command_service().refresh_metadata_targets(
         store,
         tmdb_client,
         targets,
+        depth=depth,
         emit_progress_updates=emit_progress_updates,
     )
 

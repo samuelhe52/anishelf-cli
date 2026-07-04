@@ -211,6 +211,7 @@ class MetadataHydrationSummaryResult(AniShelfBaseModel):
     requested: int
     hydrated: int
     errors: int
+    depth: str | None = None
 
 
 class LibraryRefreshMetadataCacheResult(AniShelfBaseModel):
@@ -322,6 +323,7 @@ class LibraryDefaultsResult(AniShelfBaseModel):
 
 class TMDbDefaultsResult(AniShelfBaseModel):
     metadata_language: str
+    hydration_depth: str = "details"
 
 
 class ConfigCloudKitResult(AniShelfBaseModel):

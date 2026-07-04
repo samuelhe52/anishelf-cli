@@ -4,8 +4,9 @@ import os
 import sqlite3
 from pathlib import Path
 
-CACHE_SCHEMA_VERSION = "2"
-TMDB_SUMMARY_SOURCE_VERSION = "tmdbsummary.v3"
+CACHE_SCHEMA_VERSION = "3"
+TMDB_METADATA_SOURCE_VERSION = "tmdb.metadata.v1"
+TMDB_SUMMARY_SOURCE_VERSION = TMDB_METADATA_SOURCE_VERSION
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
 REBUILD_SYNC_TOKEN_META_KEY = "rebuild_sync_token"
 UPDATED_SORT_EXPRESSION = (
@@ -41,8 +42,8 @@ def initialize_schema(db: sqlite3.Connection) -> None:
         reset_schema(db)
     db.execute(entries_table_sql("library_entries"))
     create_entries_indexes(db, "library_entries", "idx_library_entries")
-    db.execute(metadata_summary_table_sql())
-    create_metadata_summary_indexes(db)
+    db.execute(metadata_items_table_sql())
+    create_metadata_items_indexes(db)
     write_meta(db, "schema_version", CACHE_SCHEMA_VERSION)
 
 
@@ -50,6 +51,9 @@ def reset_schema(db: sqlite3.Connection) -> None:
     db.execute("DROP TABLE IF EXISTS library_entries")
     db.execute("DROP TABLE IF EXISTS library_entries_stage")
     db.execute("DROP TABLE IF EXISTS tmdb_metadata_summary")
+    db.execute("DROP TABLE IF EXISTS tmdb_metadata_items")
+    db.execute("DROP TABLE IF EXISTS tmdb_metadata_seasons")
+    db.execute("DROP TABLE IF EXISTS tmdb_metadata_episodes")
     db.execute("DELETE FROM cache_meta")
 
 
@@ -100,25 +104,42 @@ def entries_table_sql(table: str) -> str:
     """
 
 
-def metadata_summary_table_sql() -> str:
+def metadata_items_table_sql() -> str:
     return """
-        CREATE TABLE IF NOT EXISTS tmdb_metadata_summary (
+        CREATE TABLE IF NOT EXISTS tmdb_metadata_items (
             metadata_key TEXT NOT NULL,
             entry_type TEXT NOT NULL,
             tmdb_id INTEGER NOT NULL,
             parent_series_id INTEGER,
             season_number INTEGER,
             language TEXT NOT NULL,
+            metadata_depth TEXT NOT NULL,
             name TEXT,
             name_translations_json TEXT NOT NULL,
             overview TEXT,
             overview_translations_json TEXT NOT NULL,
+            runtime_minutes INTEGER,
+            number_of_seasons INTEGER,
+            number_of_episodes INTEGER,
             poster_path TEXT,
             backdrop_path TEXT,
             logo_path TEXT,
             original_language_code TEXT,
             on_air_date TEXT,
             link_to_details TEXT,
+            episode_run_time_minutes_json TEXT NOT NULL,
+            genres_json TEXT NOT NULL,
+            vote_average REAL,
+            vote_count INTEGER,
+            popularity REAL,
+            status TEXT,
+            first_air_date TEXT,
+            last_air_date TEXT,
+            release_date TEXT,
+            tagline TEXT,
+            subtitle TEXT,
+            season_summaries_json TEXT NOT NULL,
+            episode_summaries_json TEXT NOT NULL,
             fetched_at TEXT NOT NULL,
             source_version TEXT NOT NULL,
             metadata_json TEXT NOT NULL,
@@ -127,10 +148,14 @@ def metadata_summary_table_sql() -> str:
     """
 
 
-def create_metadata_summary_indexes(db: sqlite3.Connection) -> None:
+def create_metadata_items_indexes(db: sqlite3.Connection) -> None:
     db.execute(
-        "CREATE INDEX IF NOT EXISTS idx_tmdb_metadata_summary_fetched "
-        "ON tmdb_metadata_summary(fetched_at)"
+        "CREATE INDEX IF NOT EXISTS idx_tmdb_metadata_items_fetched "
+        "ON tmdb_metadata_items(fetched_at)"
+    )
+    db.execute(
+        "CREATE INDEX IF NOT EXISTS idx_tmdb_metadata_items_depth "
+        "ON tmdb_metadata_items(language, metadata_depth, source_version)"
     )
 
 

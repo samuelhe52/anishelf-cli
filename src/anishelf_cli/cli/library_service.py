@@ -29,6 +29,7 @@ from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import emit_error, emit_progress
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.queries import cache_summary_payload
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.domain import (
     LibraryEntryModel,
     LibraryEntrySnapshot,
@@ -91,12 +92,14 @@ class LibraryCommandService:
         tmdb_client: TMDbClient,
         targets: list[TMDbSummaryIdentity],
         *,
+        depth: MetadataDepth,
         emit_progress_updates: bool = False,
     ) -> MetadataHydrationResult:
         return refresh_metadata_targets(
             store,
             tmdb_client,
             targets,
+            depth=depth,
             emit_progress_updates=emit_progress_updates,
         )
 
@@ -220,6 +223,7 @@ def initialize_library_store(
                 store=store,
                 executor=executor,
                 metadata_language=_preferred_metadata_language(),
+                metadata_depth=_preferred_hydration_depth(),
                 tmdb_client=tmdb_client,
                 collect_metadata_targets=tmdb_client is not None,
                 progress_callback=progress_callback,
@@ -241,11 +245,12 @@ def refresh_metadata_targets(
     tmdb_client: TMDbClient,
     targets: list[TMDbSummaryIdentity],
     *,
+    depth: MetadataDepth,
     emit_progress_updates: bool = False,
 ) -> MetadataHydrationResult:
     progress_callback = emit_library_cache_progress if emit_progress_updates else None
     logger.debug(
-        "TMDb summary refresh -> requested targets=%s progress=%s",
+        "TMDb metadata refresh -> requested targets=%s progress=%s",
         len(targets),
         emit_progress_updates,
     )
@@ -253,13 +258,12 @@ def refresh_metadata_targets(
         store,
         tmdb_client,
         targets,
+        depth=depth,
         progress_callback=progress_callback,
     )
     if result.requested == 1 and result.errors:
         emit_error(
-            result.error_messages[0]
-            if result.error_messages
-            else "TMDb summary metadata request failed."
+            result.error_messages[0] if result.error_messages else "TMDb metadata request failed."
         )
     return result
 
@@ -279,9 +283,7 @@ def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
         )
         return
     if progress.phase == "metadata-started":
-        emit_progress(
-            f"Hydrating TMDb summary metadata for {progress.metadata_requested or 0} entries."
-        )
+        emit_progress(f"Hydrating TMDb metadata for {progress.metadata_requested or 0} entries.")
         return
     if (
         progress.phase == "metadata-progress"
@@ -289,7 +291,7 @@ def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
         and progress.metadata_completed is not None
     ):
         emit_progress(
-            "TMDb summary metadata "
+            "TMDb metadata "
             f"{progress.metadata_completed}/{progress.metadata_requested} complete "
             f"({progress.metadata_errors or 0} errors)."
         )
@@ -297,3 +299,7 @@ def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
 
 def _preferred_metadata_language() -> str:
     return config.load_user_defaults().tmdb.metadata_language
+
+
+def _preferred_hydration_depth() -> MetadataDepth:
+    return config.load_user_defaults().tmdb.hydration_depth

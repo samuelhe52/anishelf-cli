@@ -13,6 +13,7 @@ from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, Clou
 from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
 from anishelf_cli.core.logging import get_logger
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
+from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
 from anishelf_cli.models.output import LibraryEntriesCacheResult
@@ -77,6 +78,12 @@ logger = get_logger(__name__)
 class TMDbSummaryClient(Protocol):
     def fetch_summary(self, identity: TMDbSummaryIdentity) -> LibraryEntryMetadata: ...
 
+    def fetch_metadata(
+        self,
+        identity: TMDbSummaryIdentity,
+        depth: MetadataDepth = MetadataDepth.DETAILS,
+    ) -> LibraryEntryMetadata: ...
+
 
 @dataclass(frozen=True, slots=True)
 class LibraryCacheProgress:
@@ -118,6 +125,7 @@ class LibraryCacheSync:
     store: LibraryCacheStore
     executor: CloudKitExecutor
     metadata_language: str = DEFAULT_TMDB_METADATA_LANGUAGE
+    metadata_depth: MetadataDepth = MetadataDepth.DETAILS
     tmdb_client: TMDbSummaryClient | None = None
     collect_metadata_targets: bool = True
     metadata_workers: int = MAX_METADATA_HYDRATION_WORKERS
@@ -136,11 +144,12 @@ class LibraryCacheSync:
                 cache_has_entries = self.store.has_entries()
                 logger.debug(
                     "Library cache refresh state -> path=%s hasSyncToken=%s hasEntries=%s "
-                    "metadataLanguage=%s collectMetadataTargets=%s",
+                    "metadataLanguage=%s metadataDepth=%s collectMetadataTargets=%s",
                     self.store.path,
                     bool(sync_token),
                     cache_has_entries,
                     self.metadata_language,
+                    self.metadata_depth.value,
                     self.collect_metadata_targets,
                 )
                 if not sync_token or not cache_has_entries:
@@ -172,6 +181,7 @@ class LibraryCacheSync:
             self.store,
             self.tmdb_client,
             targets_to_hydrate,
+            depth=self.metadata_depth,
             max_workers=self.metadata_workers,
             progress_callback=self.progress_callback,
         )
@@ -181,7 +191,10 @@ class LibraryCacheSync:
         pages = 0
         records = 0
         metadata_targets = (
-            self.store.outdated_metadata_summary_targets(language=self.metadata_language)
+            self.store.outdated_metadata_summary_targets(
+                language=self.metadata_language,
+                depth=self.metadata_depth,
+            )
             if self.collect_metadata_targets
             else []
         )
@@ -198,6 +211,7 @@ class LibraryCacheSync:
                     page,
                     staging=False,
                     metadata_language=self.metadata_language,
+                    metadata_depth=self.metadata_depth,
                 )
             )
             pages += 1
@@ -247,6 +261,7 @@ class LibraryCacheSync:
                     page,
                     staging=True,
                     metadata_language=self.metadata_language,
+                    metadata_depth=self.metadata_depth,
                 )
             )
             pages += 1
@@ -324,6 +339,7 @@ def hydrate_metadata_targets(
     tmdb_client: TMDbSummaryClient,
     targets: list[TMDbSummaryIdentity],
     *,
+    depth: MetadataDepth = MetadataDepth.DETAILS,
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
     progress_callback: LibraryCacheProgressCallback | None = None,
 ) -> MetadataHydrationResult:
@@ -333,8 +349,9 @@ def hydrate_metadata_targets(
         return MetadataHydrationResult(requested=0, hydrated=0, errors=0)
 
     logger.debug(
-        "TMDb summary hydration -> started targets=%s workers=%s",
+        "TMDb metadata hydration -> started targets=%s depth=%s workers=%s",
         len(targets_to_hydrate),
+        depth.value,
         max(1, min(max_workers, len(targets_to_hydrate))),
     )
     last_emitted_metadata_completed = 0
@@ -370,12 +387,13 @@ def hydrate_metadata_targets(
     summaries, error_messages = fetch_metadata_summaries(
         tmdb_client,
         targets_to_hydrate,
+        depth=depth,
         max_workers=max_workers,
         progress_callback=metadata_progress,
     )
-    store.upsert_metadata_summaries(summaries)
+    store.upsert_metadata_summaries(summaries, depth=depth)
     logger.debug(
-        "TMDb summary hydration -> complete requested=%s hydrated=%s errors=%s",
+        "TMDb metadata hydration -> complete requested=%s hydrated=%s errors=%s",
         len(targets_to_hydrate),
         len(summaries),
         len(error_messages),
@@ -392,6 +410,7 @@ def fetch_metadata_summaries(
     tmdb_client: TMDbSummaryClient,
     targets: list[TMDbSummaryIdentity],
     *,
+    depth: MetadataDepth = MetadataDepth.DETAILS,
     max_workers: int = MAX_METADATA_HYDRATION_WORKERS,
     progress_callback: Callable[[int, int, int], None] | None = None,
 ) -> tuple[list[LibraryEntryMetadata], list[str]]:
@@ -402,8 +421,12 @@ def fetch_metadata_summaries(
     summaries: list[LibraryEntryMetadata] = []
     error_messages: list[str] = []
 
+    fetch = getattr(tmdb_client, "fetch_metadata", None)
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
-        futures = [pool.submit(tmdb_client.fetch_summary, target) for target in targets]
+        if callable(fetch):
+            futures = [pool.submit(fetch, target, depth) for target in targets]
+        else:
+            futures = [pool.submit(tmdb_client.fetch_summary, target) for target in targets]
         for future in as_completed(futures):
             try:
                 summaries.append(future.result())

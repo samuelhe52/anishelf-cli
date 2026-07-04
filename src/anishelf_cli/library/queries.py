@@ -57,13 +57,19 @@ class LibraryQueryStore(Protocol):
         metadata_language: str,
     ) -> list[LibraryEntryModel]: ...
 
-    def metadata_summary_status(self, *, language: str) -> CacheMetadataStatusResult: ...
+    def metadata_summary_status(
+        self,
+        *,
+        language: str,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
+    ) -> CacheMetadataStatusResult: ...
 
     def attach_metadata_summary_models(
         self,
         entries: list[LibraryEntryModel],
         *,
         language: str,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[LibraryEntryModel]: ...
 
 
@@ -83,7 +89,7 @@ class MetadataCompletenessError(ValueError):
 
     def __str__(self) -> str:
         return (
-            f"Cannot {self.action} because TMDb summary metadata is incomplete "
+            f"Cannot {self.action} because TMDb metadata is incomplete "
             f"({self.hydrated}/{self.tracked} hydrated, {self.missing} missing). "
             f"{self.hint}"
         )
@@ -100,6 +106,7 @@ def build_library_list_result(
     sort: LibraryListSort,
     limit: int | None,
     metadata_language: str = "en-US",
+    live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     if sort is LibraryListSort.TITLE:
         require_metadata_ready(
@@ -107,6 +114,18 @@ def build_library_list_result(
             action="sort library entries by title",
             hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
             metadata_language=metadata_language,
+            metadata_depth=MetadataDepth.SUMMARY,
+        )
+    if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        require_metadata_ready(
+            store,
+            action=f"attach {metadata_depth.value} metadata",
+            hint=(
+                f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+            ),
+            metadata_language=metadata_language,
+            metadata_depth=metadata_depth,
         )
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
@@ -155,13 +174,26 @@ def build_library_search_result(
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
     metadata_language: str = "en-US",
+    live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     require_metadata_ready(
         store,
         action="search cached library entries",
         hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
         metadata_language=metadata_language,
+        metadata_depth=MetadataDepth.SUMMARY,
     )
+    if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        require_metadata_ready(
+            store,
+            action=f"attach {metadata_depth.value} metadata",
+            hint=(
+                f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+            ),
+            metadata_language=metadata_language,
+            metadata_depth=metadata_depth,
+        )
     entries = store.search_entry_models(query, metadata_language=metadata_language)
     if not show_hidden:
         entries = _visible_snapshots(entries)
@@ -186,10 +218,22 @@ def build_library_export_result(
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
     metadata_language: str = "en-US",
+    live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     entries = store.list_entry_models(include_tombstones=False)
     if not show_hidden:
         entries = _visible_snapshots(entries)
+    if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        require_metadata_ready(
+            store,
+            action=f"attach {metadata_depth.value} metadata",
+            hint=(
+                f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+            ),
+            metadata_language=metadata_language,
+            metadata_depth=metadata_depth,
+        )
     entries = attach_metadata_for_depth(
         store,
         entries,
@@ -241,7 +285,11 @@ def attach_metadata_for_depth(
 ) -> list[LibraryEntryModel]:
     if metadata_depth is MetadataDepth.NONE:
         return entries
-    return store.attach_metadata_summary_models(entries, language=metadata_language)
+    return store.attach_metadata_summary_models(
+        entries,
+        language=metadata_language,
+        depth=metadata_depth,
+    )
 
 
 def require_metadata_ready(
@@ -250,8 +298,9 @@ def require_metadata_ready(
     action: str,
     hint: str,
     metadata_language: str = "en-US",
+    metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
 ) -> None:
-    status = store.metadata_summary_status(language=metadata_language)
+    status = store.metadata_summary_status(language=metadata_language, depth=metadata_depth)
     if status.ready:
         return
     raise MetadataCompletenessError(

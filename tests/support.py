@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import base64
 import json
-import sqlite3
 from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
@@ -127,84 +126,6 @@ def metadata_summary(
             "source_version": source_version,
         }
     )
-
-
-def insert_legacy_v1_metadata_summary(
-    store: LibraryCacheStore,
-    *,
-    metadata_key: str,
-    entry_type: str,
-    tmdb_id: int,
-) -> None:
-    with sqlite3.connect(store.path) as db:
-        db.execute(
-            """
-            INSERT INTO tmdb_metadata_summary (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                parent_series_id,
-                season_number,
-                language,
-                name,
-                name_translations_json,
-                overview,
-                overview_translations_json,
-                poster_path,
-                backdrop_path,
-                logo_path,
-                original_language_code,
-                on_air_date,
-                link_to_details,
-                fetched_at,
-                source_version,
-                metadata_json
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                metadata_key,
-                entry_type,
-                tmdb_id,
-                None,
-                None,
-                "en-US",
-                "Alien",
-                "{}",
-                "Legacy overview.",
-                "{}",
-                "/poster.jpg",
-                "/backdrop.jpg",
-                None,
-                "en",
-                "1979-05-25",
-                f"https://example.com/{entry_type}/{tmdb_id}",
-                "2026-06-30T00:00:00Z",
-                "tmdbsummary.v1",
-                json.dumps(
-                    {
-                        "entry_type": entry_type,
-                        "tmdb_id": tmdb_id,
-                        "language": "en-US",
-                        "name": "Alien",
-                        "name_translations": {},
-                        "overview": "Legacy overview.",
-                        "overview_translations": {},
-                        "poster_path": "/poster.jpg",
-                        "backdrop_path": "/backdrop.jpg",
-                        "logo_path": None,
-                        "original_language_code": "en",
-                        "on_air_date": "1979-05-25",
-                        "link_to_details": f"https://example.com/{entry_type}/{tmdb_id}",
-                        "fetched_at": "2026-06-30T00:00:00Z",
-                        "source_version": "tmdbsummary.v1",
-                    },
-                    sort_keys=True,
-                    separators=(",", ":"),
-                ),
-            ),
-        )
-        db.commit()
 
 
 def snapshot_entry_payload(
