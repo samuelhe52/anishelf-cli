@@ -469,10 +469,10 @@ def library_list(
     )
 
 
-@library_app.command("search", help="Search cached library entries by title.")
+@library_app.command("search", help="Search cached library entries.")
 def library_search(
     ctx: typer.Context,
-    title: Annotated[str, typer.Option("--title", "-t")],
+    query: Annotated[str, typer.Argument(help="Search query.")],
     metadata: MetadataOption = None,
     sync: Annotated[
         bool | None,
@@ -515,7 +515,7 @@ def library_search(
     try:
         result = build_library_search_result(
             store,
-            title=title,
+            query=query,
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
             show_hidden=_show_hidden_requested(show_hidden),
@@ -547,7 +547,7 @@ def library_search(
         else store.attach_metadata_summary_models(list(result.entries), language=preferred_language)
     )
     render_library_search(
-        title,
+        query,
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
         style=_resolve_output_style(output_style),

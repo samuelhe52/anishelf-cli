@@ -301,7 +301,7 @@ def render_library_list(
 
 
 def render_library_search(
-    title: str,
+    query: str,
     entries: list[LibraryEntryModel],
     *,
     fields: tuple[str, ...],
@@ -309,8 +309,8 @@ def render_library_search(
     display_titles: Mapping[str, str] | None = None,
 ) -> None:
     rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
-    block_title = f"Library search: {title}"
-    empty_message = "No cached library entries matched the title search."
+    block_title = f"Library search: {query}"
+    empty_message = "No cached library entries matched the search query."
     if style is HumanOutputStyle.LIST:
         emit_human_blocks(
             _library_rows_as_sections(

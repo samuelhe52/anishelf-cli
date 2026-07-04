@@ -63,7 +63,7 @@ Common read commands:
 uv run ani lib status
 uv run ani lib list
 uv run ani lib get movie:55
-uv run ani lib search --title "Alien"
+uv run ani lib search "Alien"
 uv run ani lib export --json
 ```
 
@@ -88,9 +88,11 @@ uv run ani config set-defaults --style list
 `movie:<tmdbID>`, `series:<tmdbID>`, and
 `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`.
 
-`lib search --title` searches the initialized local cache by title. Use
-`ani tmdb search --title "Alien"` for global TMDb discovery, or omit `--title`
-to discover popular TMDb titles.
+`lib search <query>` searches the initialized local cache with the same broad
+library search shape used by AniShelf: titles, translations, parent-series
+metadata, overviews, notes, and on-air dates. Use `ani tmdb search --title
+"Alien"` for global TMDb discovery, or omit `--title` to discover popular TMDb
+titles.
 
 Use `ani lib refresh-meta` to refetch TMDb summary metadata for the full
 local library cache. Use `--live-meta` on `lib get` to refetch TMDb summary
@@ -147,5 +149,5 @@ uv run ani lib status --json | jq '.summary'
 uv run ani lib list --json | jq '.entries[] | {id, watch_status}'
 uv run ani lib list --sync --json | jq '.summary.cache.mode'
 uv run ani lib export --json | jq '.entries[] | {id, watch_status}'
-uv run ani lib search --title "Alien" --json | jq '.entries[].id'
+uv run ani lib search "Alien" --json | jq '.entries[].id'
 ```

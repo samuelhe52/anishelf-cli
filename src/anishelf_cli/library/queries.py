@@ -158,7 +158,7 @@ def build_library_search_result(
 ) -> LibraryEntriesResult:
     require_metadata_ready(
         store,
-        action="search cached library entries by title",
+        action="search cached library entries",
         hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
         metadata_language=metadata_language,
     )

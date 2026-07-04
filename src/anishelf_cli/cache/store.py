@@ -338,7 +338,8 @@ class LibraryCacheStore:
                         library_entries.date_saved,
                         library_entries.decoded_json,
                         entry_tmdb_metadata_summary.name AS entry_name,
-                        entry_tmdb_metadata_summary.name_translations_json AS entry_name_translations,
+                        entry_tmdb_metadata_summary.name_translations_json
+                            AS entry_name_translations,
                         entry_tmdb_metadata_summary.overview AS entry_overview,
                         entry_tmdb_metadata_summary.overview_translations_json
                             AS entry_overview_translations,

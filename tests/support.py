@@ -253,6 +253,7 @@ def live_record(
     custom_poster_path: str | None = None,
     custom_poster_url: str | None = None,
     episode_progresses: Any = None,
+    notes: str = "Round trip",
     parent_series_id: int | None = None,
     season_number: int | None = None,
 ) -> dict[str, Any]:
@@ -268,7 +269,7 @@ def live_record(
         "isDateTrackingEnabled": False,
         "score": 4,
         "favorite": True,
-        "notes": "Round trip",
+        "notes": notes,
         "usingCustomPoster": using_custom_poster,
         "episodeProgresses": [] if episode_progresses is None else episode_progresses,
         "libraryUpdatedAt": "2026-05-10T00:00:00Z",

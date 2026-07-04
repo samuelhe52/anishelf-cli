@@ -35,12 +35,13 @@ spec.
   counts, TMDb summary metadata readiness, and
   `lib clear-cache` removes all local library cache files after explicit
   confirmation.
-- `lib get`, `lib list`, `lib export`, and `lib search --title`
+- `lib get`, `lib list`, `lib export`, and `lib search <query>`
   read from the initialized local cache and fail closed until init has been
   run. These read commands also support `--sync` for an explicit CloudKit
   refresh before serving results.
-- `lib search --title` requires complete cached TMDb summary metadata and
-  fails explicitly when that metadata is unavailable or incomplete.
+- `lib search <query>` requires complete cached TMDb summary metadata and
+  searches titles, translations, parent-series metadata, overviews, notes, and
+  on-air dates in the same priority order as AniShelf's library search.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_summary`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `details`/`full` are

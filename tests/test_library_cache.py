@@ -2071,38 +2071,31 @@ def test_library_export_does_not_sync_from_config_by_default(
     assert requests == []
 
 
-def test_library_search_matches_cached_titles_without_tmdb(monkeypatch) -> None:
+def test_library_search_accepts_raw_query(monkeypatch) -> None:
     fake_store = _fake_search_store()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
-    result = runner.invoke(app, ["--json", "lib", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["query"] == {"title": "Alien"}
+    assert payload["query"] == {"query": "Alien"}
     assert [entry["id"] for entry in payload["entries"]] == [
         "movie:55",
         "series:22",
         "season:22:1:33",
     ]
-    assert fake_store.search_title_arg == "Alien"  # type: ignore[attr-defined]
+    assert fake_store.search_query_arg == "Alien"  # type: ignore[attr-defined]
 
 
-def test_library_search_accepts_short_title_and_json_options(monkeypatch) -> None:
+def test_library_search_rejects_title_option(monkeypatch) -> None:
     fake_store = _fake_search_store()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
-    result = runner.invoke(app, ["lib", "search", "-t", "Alien", "-j"])
+    result = runner.invoke(app, ["lib", "search", "--title", "Alien", "-j"])
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["query"] == {"title": "Alien"}
-    assert [entry["id"] for entry in payload["entries"]] == [
-        "movie:55",
-        "series:22",
-        "season:22:1:33",
-    ]
-    assert fake_store.search_title_arg == "Alien"  # type: ignore[attr-defined]
+    assert result.exit_code != 0
+    assert "No such option: --title" in result.output
 
 
 def test_library_search_human_output_labels_season_rows_with_series_and_season_number(
@@ -2120,7 +2113,7 @@ def test_library_search_human_output_labels_season_rows_with_series_and_season_n
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    result = runner.invoke(app, ["lib", "search", "--title", "Cowboy"])
+    result = runner.invoke(app, ["lib", "search", "Cowboy"])
 
     assert result.exit_code == 0, result.output
     assert "Cowboy Bebop (S1)" in result.stdout
@@ -2146,7 +2139,7 @@ def test_cache_title_search_matches_parent_series_titles_for_seasons(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models_by_title("Cowboy", metadata_language="en-US")
+    entries = store.search_entry_models("Cowboy", metadata_language="en-US")
 
     assert [entry.identity for entry in entries] == ["series:22", "season:22:1:33"]
     assert store.display_titles_for_entries(entries) == {
@@ -2167,9 +2160,107 @@ def test_cache_title_search_still_matches_raw_season_titles(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models_by_title("Season 1", metadata_language="en-US")
+    entries = store.search_entry_models("Season 1", metadata_language="en-US")
 
     assert [entry.identity for entry in entries] == ["season:22:1:33"]
+
+
+def test_cache_search_uses_anishelf_smart_priority_order(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:1", "movie", 1, date_saved="2026-05-01T00:00:00Z"),
+        _live_record("movie:2", "movie", 2, date_saved="2026-05-06T00:00:00Z"),
+        _live_record(
+            "series:22",
+            "series",
+            22,
+            date_saved="2026-05-07T00:00:00Z",
+            on_display=False,
+        ),
+        _live_record("season:22:1:33", "season", 33, date_saved="2026-05-05T00:00:00Z"),
+        _live_record("movie:3", "movie", 3, date_saved="2026-05-04T00:00:00Z"),
+        _live_record("movie:4", "movie", 4, date_saved="2026-05-03T00:00:00Z"),
+        _live_record(
+            "movie:5",
+            "movie",
+            5,
+            date_saved="2026-05-02T00:00:00Z",
+            notes="needle note",
+        ),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 1, name="Needle direct"))
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 2, name="Translated").with_updates(
+            name_translations=(("en-US", "Needle translated"),),
+            overview="No match.",
+            overview_translations=(),
+        )
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("series", 22, name="Needle parent").with_updates(
+            overview="Parent overview.",
+            overview_translations=(),
+        )
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary(
+            "season",
+            33,
+            name="Season 1",
+            parent_series_id=22,
+            season_number=1,
+        ).with_updates(overview="Season overview.", overview_translations=())
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 3, name="Overview").with_updates(
+            overview="Needle overview.",
+            name_translations=(),
+            overview_translations=(),
+        )
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 4, name="Overview Translation").with_updates(
+            overview="No match.",
+            name_translations=(),
+            overview_translations=(("en-US", "Needle translated overview"),),
+        )
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 5, name="Notes").with_updates(
+            overview="No match.",
+            name_translations=(),
+            overview_translations=(),
+        )
+    )
+
+    entries = [entry for entry in store.search_entry_models("needle") if entry.on_display]
+
+    assert [entry.identity for entry in entries] == [
+        "movie:1",
+        "movie:2",
+        "season:22:1:33",
+        "movie:3",
+        "movie:4",
+        "movie:5",
+    ]
+
+
+def test_cache_search_matches_cached_on_air_date(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 55, name="Date Match").with_updates(
+            on_air_date="2030-12-25"
+        )
+    )
+
+    entries = store.search_entry_models("2030", metadata_language="en-US")
+
+    assert [entry.identity for entry in entries] == ["movie:55"]
 
 
 def test_library_search_metadata_default_and_none(monkeypatch) -> None:
@@ -2190,12 +2281,12 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
                 ready=True,
             )
 
-        def search_entry_models_by_title(
+        def search_entry_models(
             self,
-            title: str,
+            query: str,
             metadata_language: str = "en-US",
         ) -> list[LibraryEntryModel]:
-            assert title == "Alien"
+            assert query == "Alien"
             return [validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))]
 
         def attach_metadata_summary_models(
@@ -2214,10 +2305,10 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
     fake_store = FakeStore()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
 
-    with_metadata = runner.invoke(app, ["--json", "lib", "search", "--title", "Alien"])
+    with_metadata = runner.invoke(app, ["--json", "lib", "search", "Alien"])
     without_metadata = runner.invoke(
         app,
-        ["--json", "lib", "search", "--title", "Alien", "--metadata", "none"],
+        ["--json", "lib", "search", "Alien", "--metadata", "none"],
     )
 
     assert with_metadata.exit_code == 0, with_metadata.output
@@ -2239,7 +2330,7 @@ def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
 
     default_result = runner.invoke(
         app,
-        ["--json", "lib", "search", "--title", "Alien", "--metadata", "none"],
+        ["--json", "lib", "search", "Alien", "--metadata", "none"],
     )
     show_hidden_result = runner.invoke(
         app,
@@ -2247,7 +2338,6 @@ def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
             "--json",
             "lib",
             "search",
-            "--title",
             "Alien",
             "--metadata",
             "none",
@@ -2274,7 +2364,7 @@ def test_library_search_human_uses_cached_titles_when_configured_metadata_defaul
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["lib", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["lib", "search", "Alien"])
 
     assert result.exit_code == 0, result.output
     assert "Alien" in result.stdout
@@ -2292,7 +2382,7 @@ def test_library_search_uses_configured_display_fields_for_human_output(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["lib", "search", "--title", "Alien"])
+    result = runner.invoke(app, ["lib", "search", "Alien"])
 
     assert result.exit_code == 0, result.output
     assert "ID" in result.stdout
@@ -2307,7 +2397,7 @@ def test_library_search_style_flag_renders_human_entries_as_sections(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["lib", "search", "--title", "Alien", "--style", "list"])
+    result = runner.invoke(app, ["lib", "search", "Alien", "--style", "list"])
 
     assert result.exit_code == 0, result.output
     assert "Library search: Alien\n" in result.stdout
@@ -2322,7 +2412,7 @@ def _index_columns(db: sqlite3.Connection, index_name: str) -> list[str]:
 
 def _fake_search_store() -> object:
     class FakeStore:
-        search_title_arg: str | None = None
+        search_query_arg: str | None = None
         scope = LibraryCacheScope.default_for_user("_user")
 
         def metadata_summary_status(
@@ -2338,12 +2428,12 @@ def _fake_search_store() -> object:
                 ready=True,
             )
 
-        def search_entry_models_by_title(
+        def search_entry_models(
             self,
-            title: str,
+            query: str,
             metadata_language: str = "en-US",
         ) -> list[LibraryEntryModel]:
-            self.search_title_arg = title
+            self.search_query_arg = query
             return [
                 validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55)),
                 validate_library_entry(_snapshot_entry_payload("series:22", "series", 22)),
@@ -2377,6 +2467,7 @@ def _live_record(
     *,
     date_saved: str = "2026-05-01T00:00:00Z",
     watch_status: str = "watched",
+    notes: str = "Round trip",
     on_display: bool = True,
 ) -> dict[str, Any]:
     return live_record(
@@ -2385,6 +2476,7 @@ def _live_record(
         tmdb_id,
         date_saved=date_saved,
         watch_status=watch_status,
+        notes=notes,
         on_display=on_display,
     )
 

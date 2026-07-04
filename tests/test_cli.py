@@ -36,7 +36,7 @@ def _fake_store() -> object:
         ),
         list_entry_models=lambda *, include_tombstones=False: [],
         list_entry_models_filtered=lambda **kwargs: [],
-        search_entry_models_by_title=lambda title, **kwargs: [],
+        search_entry_models=lambda query, **kwargs: [],
         attach_metadata_summary_models=lambda entries, **kwargs: entries,
     )
 
@@ -279,7 +279,7 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
         (["lib"], ("refresh-meta",), ("changes",)),
         (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
         (["lib", "refresh-meta"], ("--json", "-j"), ()),
-        (["lib", "search"], ("--sync",), ()),
+        (["lib", "search"], ("QUERY", "--sync"), ("--title",)),
         (["lib", "export"], ("--sync",), ()),
         (["tmdb", "search"], ("--title", "-t", "--type", "--year", "-y", "--json", "-j"), ()),
         (["lib", "init"], ("--json", "-j"), ()),

@@ -123,7 +123,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     with pytest.raises(MetadataCompletenessError) as exc_info:
         require_metadata_ready(
             store,
-            action="search cached library entries by title",
+            action="search cached library entries",
             hint="Run `ani lib refresh-meta`.",
         )
 
@@ -132,7 +132,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     assert exc.hydrated == 0
     assert exc.missing == 1
     assert str(exc) == (
-        "Cannot search cached library entries by title because TMDb summary metadata "
+        "Cannot search cached library entries because TMDb summary metadata "
         "is incomplete (0/1 hydrated, 1 missing). Run `ani lib refresh-meta`."
     )
 
@@ -148,15 +148,15 @@ def test_search_result_attaches_requested_metadata_and_query_payload() -> None:
 
     result = build_library_search_result(
         store,
-        title="Alien",
+        query="Alien",
         metadata_depth=MetadataDepth.SUMMARY,
         cache=cache_summary_payload(store, None),
         show_hidden=False,
     )
 
-    assert store.search_title == "Alien"
+    assert store.search_query == "Alien"
     payload = result.model_dump(mode="json")
-    assert payload["query"] == {"title": "Alien"}
+    assert payload["query"] == {"query": "Alien"}
     assert payload["metadata"] == {
         "requested": "summary",
         "attached": True,
@@ -177,7 +177,7 @@ def test_search_show_hidden_includes_hidden_matches() -> None:
 
     result = build_library_search_result(
         store,
-        title="Alien",
+        query="Alien",
         metadata_depth=MetadataDepth.SUMMARY,
         cache=cache_summary_payload(store, None),
         show_hidden=True,
@@ -205,7 +205,7 @@ class FakeQueryStore:
         self.metadata = metadata
         self.metadata_ready = metadata_ready
         self.list_filter_kwargs: dict[str, Any] = {}
-        self.search_title: str | None = None
+        self.search_query: str | None = None
 
     def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
         _ = include_tombstones
@@ -234,14 +234,14 @@ class FakeQueryStore:
         entries = self.entries[:limit] if limit is not None else self.entries
         return [validate_library_entry(entry) for entry in entries]
 
-    def search_entry_models_by_title(
+    def search_entry_models(
         self,
-        title: str,
+        query: str,
         *,
         metadata_language: str = "en-US",
     ) -> list[LibraryEntryModel]:
         _ = metadata_language
-        self.search_title = title
+        self.search_query = query
         return [validate_library_entry(entry) for entry in self.entries]
 
     def metadata_summary_status(self, *, language: str = "en-US") -> CacheMetadataStatusResult:
