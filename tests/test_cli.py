@@ -471,6 +471,7 @@ def test_config_show_human_output_uses_readable_sections(tmp_path, monkeypatch) 
     assert "  Config file" in result.stdout
     assert "api" not in result.stdout
 
+
 def test_default_posix_app_paths_use_dotdir(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(config.sys, "platform", "darwin")
     monkeypatch.setattr(config.Path, "home", lambda: tmp_path)

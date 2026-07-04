@@ -318,46 +318,136 @@ class LibraryCacheStore:
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
-    def search_entry_models_by_title(
+    def search_entry_models(
         self,
-        title: str,
+        query: str,
         *,
         metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     ) -> list[LibraryEntryModel]:
-        query = title.strip()
-        if not query:
+        normalized_query = query.strip()
+        if not normalized_query:
             return []
 
-        pattern = f"%{query.lower()}%"
+        pattern = f"%{normalized_query.lower()}%"
         with self._connect_initialized() as db:
             rows = db.execute(
                 """
-                SELECT
-                    library_entries.decoded_json
-                FROM library_entries
-                LEFT JOIN tmdb_metadata_summary AS entry_tmdb_metadata_summary
-                    ON entry_tmdb_metadata_summary.metadata_key = CASE
-                        WHEN library_entries.entry_type = 'season' THEN
-                            'season:' || library_entries.parent_series_id || ':' ||
-                            library_entries.season_number || ':' || library_entries.tmdb_id
-                        ELSE
-                            library_entries.entry_type || ':' || library_entries.tmdb_id
-                    END
-                    AND entry_tmdb_metadata_summary.language = ?
-                LEFT JOIN tmdb_metadata_summary AS parent_tmdb_metadata_summary
-                    ON library_entries.entry_type = 'season'
-                    AND parent_tmdb_metadata_summary.metadata_key =
-                        'series:' || library_entries.parent_series_id
-                    AND parent_tmdb_metadata_summary.language = ?
-                WHERE library_entries.kind = 'snapshot'
-                    AND (
-                        LOWER(library_entries.identity) LIKE ?
-                        OR LOWER(COALESCE(entry_tmdb_metadata_summary.name, '')) LIKE ?
-                        OR LOWER(COALESCE(parent_tmdb_metadata_summary.name, '')) LIKE ?
+                WITH entry_search_rows AS (
+                    SELECT
+                        library_entries.identity,
+                        library_entries.date_saved,
+                        library_entries.decoded_json,
+                        entry_tmdb_metadata_summary.name AS entry_name,
+                        entry_tmdb_metadata_summary.name_translations_json AS entry_name_translations,
+                        entry_tmdb_metadata_summary.overview AS entry_overview,
+                        entry_tmdb_metadata_summary.overview_translations_json
+                            AS entry_overview_translations,
+                        entry_tmdb_metadata_summary.on_air_date AS entry_on_air_date,
+                        parent_tmdb_metadata_summary.name AS parent_name,
+                        parent_tmdb_metadata_summary.name_translations_json
+                            AS parent_name_translations,
+                        parent_tmdb_metadata_summary.overview AS parent_overview,
+                        parent_tmdb_metadata_summary.overview_translations_json
+                            AS parent_overview_translations,
+                        library_entries.notes
+                    FROM library_entries
+                    LEFT JOIN tmdb_metadata_summary AS entry_tmdb_metadata_summary
+                        ON entry_tmdb_metadata_summary.metadata_key = CASE
+                            WHEN library_entries.entry_type = 'season' THEN
+                                'season:' || library_entries.parent_series_id || ':' ||
+                                library_entries.season_number || ':' || library_entries.tmdb_id
+                            ELSE
+                                library_entries.entry_type || ':' || library_entries.tmdb_id
+                        END
+                        AND entry_tmdb_metadata_summary.language = ?
+                    LEFT JOIN tmdb_metadata_summary AS parent_tmdb_metadata_summary
+                        ON library_entries.entry_type = 'season'
+                        AND parent_tmdb_metadata_summary.metadata_key =
+                            'series:' || library_entries.parent_series_id
+                        AND parent_tmdb_metadata_summary.language = ?
+                    WHERE library_entries.kind = 'snapshot'
+                ),
+                candidate_matches AS (
+                    SELECT identity, date_saved, decoded_json, 1 AS priority
+                    FROM entry_search_rows
+                    WHERE LOWER(COALESCE(entry_name, identity)) LIKE ?
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 2 AS priority
+                    FROM entry_search_rows
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM json_each(COALESCE(entry_name_translations, '{}'))
+                        WHERE LOWER(json_each.value) LIKE ?
                     )
-                ORDER BY library_entries.date_saved DESC NULLS LAST, library_entries.identity ASC
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 3 AS priority
+                    FROM entry_search_rows
+                    WHERE LOWER(COALESCE(parent_overview, '')) LIKE ?
+                        OR LOWER(COALESCE(parent_name, '')) LIKE ?
+                        OR EXISTS (
+                            SELECT 1
+                            FROM json_each(COALESCE(parent_name_translations, '{}'))
+                            WHERE LOWER(json_each.value) LIKE ?
+                        )
+                        OR EXISTS (
+                            SELECT 1
+                            FROM json_each(COALESCE(parent_overview_translations, '{}'))
+                            WHERE LOWER(json_each.value) LIKE ?
+                        )
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 4 AS priority
+                    FROM entry_search_rows
+                    WHERE LOWER(COALESCE(entry_overview, '')) LIKE ?
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 5 AS priority
+                    FROM entry_search_rows
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM json_each(COALESCE(entry_overview_translations, '{}'))
+                        WHERE LOWER(json_each.value) LIKE ?
+                    )
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 6 AS priority
+                    FROM entry_search_rows
+                    WHERE LOWER(COALESCE(notes, '')) LIKE ?
+
+                    UNION ALL
+                    SELECT identity, date_saved, decoded_json, 7 AS priority
+                    FROM entry_search_rows
+                    WHERE LOWER(COALESCE(entry_on_air_date, '')) LIKE ?
+                ),
+                ranked_matches AS (
+                    SELECT
+                        identity,
+                        decoded_json,
+                        date_saved,
+                        MIN(priority) AS priority
+                    FROM candidate_matches
+                    GROUP BY identity
+                )
+                SELECT decoded_json
+                FROM ranked_matches
+                ORDER BY priority ASC, date_saved DESC NULLS LAST, identity ASC
                 """,
-                (metadata_language, metadata_language, pattern, pattern, pattern),
+                (
+                    metadata_language,
+                    metadata_language,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                    pattern,
+                ),
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
@@ -482,10 +572,7 @@ class LibraryCacheStore:
                 [*metadata_keys, language],
             ).fetchall()
 
-        metadata_by_key = {
-            str(row["metadata_key"]): metadata.metadata_row(row)
-            for row in rows
-        }
+        metadata_by_key = {str(row["metadata_key"]): metadata.metadata_row(row) for row in rows}
         display_titles: dict[str, str] = {}
         for identity, parent_key in parent_keys_by_identity.items():
             parent_title = metadata_by_key.get(parent_key)

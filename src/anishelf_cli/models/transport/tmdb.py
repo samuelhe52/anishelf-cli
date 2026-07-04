@@ -252,9 +252,8 @@ class TMDbTranslationsResponse(TMDbTransportModel):
             if language_code is None or country_code is None or translation.data is None:
                 continue
             key = f"{language_code}-{country_code}"
-            name = (
-                nonempty_string_or_none(translation.data.title)
-                or nonempty_string_or_none(translation.data.name)
+            name = nonempty_string_or_none(translation.data.title) or nonempty_string_or_none(
+                translation.data.name
             )
             overview = nonempty_string_or_none(translation.data.overview)
             if name is not None:

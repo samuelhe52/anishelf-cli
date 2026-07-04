@@ -489,9 +489,7 @@ def test_library_get_live_meta_refreshes_only_requested_entries(
     assert requested == [("movie", 55)]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "Alien"
     assert payload["items"][0]["entry"]["metadata"]["language"] == "en-US"
-    assert payload["items"][0]["entry"]["metadata"]["name_translations"] == {
-        "ja-JP": "Alien JP"
-    }
+    assert payload["items"][0]["entry"]["metadata"]["name_translations"] == {"ja-JP": "Alien JP"}
     other_entry = store.attach_metadata_summary_models(
         list(store.get_entry_models_by_identity(["series:22"]).values())
     )[0]

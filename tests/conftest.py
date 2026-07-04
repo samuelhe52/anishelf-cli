@@ -21,9 +21,7 @@ def isolate_user_state(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
     def reject_real_config(path: Path) -> None:
         if _is_real_user_config_file(path):
-            raise AssertionError(
-                f"Tests must not read or write the real user config file: {path}"
-            )
+            raise AssertionError(f"Tests must not read or write the real user config file: {path}")
 
     def guarded_exists(path: Path) -> bool:
         reject_real_config(path)

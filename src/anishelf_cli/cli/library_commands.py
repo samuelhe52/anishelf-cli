@@ -986,14 +986,11 @@ def _refresh_metadata_targets(
     *,
     emit_progress_updates: bool = False,
 ) -> MetadataHydrationResult:
-    return (
-        _library_command_service()
-        .refresh_metadata_targets(
-            store,
-            tmdb_client,
-            targets,
-            emit_progress_updates=emit_progress_updates,
-        )
+    return _library_command_service().refresh_metadata_targets(
+        store,
+        tmdb_client,
+        targets,
+        emit_progress_updates=emit_progress_updates,
     )
 
 

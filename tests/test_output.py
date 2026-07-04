@@ -87,11 +87,7 @@ def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, mon
     )
 
     assert capsys.readouterr().out == (
-        "Entry\n"
-        "  ID        movie:550\n"
-        "  Overview\n"
-        "    Alpha beta gamma\n"
-        "    delta epsilon\n"
+        "Entry\n  ID        movie:550\n  Overview\n    Alpha beta gamma\n    delta epsilon\n"
     )
 
 

@@ -200,10 +200,7 @@ def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> 
         ).fetchone()[0]
         assert snapshot_sort_sql is not None
         assert (
-            "ON library_entries("
-            "kind, "
-            f"{cache_schema.UPDATED_SORT_EXPRESSION} DESC, "
-            "identity ASC)"
+            f"ON library_entries(kind, {cache_schema.UPDATED_SORT_EXPRESSION} DESC, identity ASC)"
         ) in snapshot_sort_sql
         assert _index_columns(db, "idx_library_entries_tmdb_lookup") == [
             "kind",
@@ -247,8 +244,7 @@ def test_cache_updated_sort_query_uses_snapshot_sort_index(tmp_path, monkeypatch
         ).fetchall()
 
     assert any(
-        "USING INDEX idx_library_entries_snapshot_updated_sort" in str(row[3])
-        for row in plan_rows
+        "USING INDEX idx_library_entries_snapshot_updated_sort" in str(row[3]) for row in plan_rows
     )
 
 
@@ -325,8 +321,7 @@ def test_metadata_summary_cache_is_keyed_by_language(tmp_path, monkeypatch) -> N
 
     raw_entry = store.list_entry_models()[0]
     assert (
-        store.attach_metadata_summary_models([raw_entry], language="en-US")[0].metadata
-        is not None
+        store.attach_metadata_summary_models([raw_entry], language="en-US")[0].metadata is not None
     )
     assert store.attach_metadata_summary_models([raw_entry], language="ja-JP")[0].metadata is None
     assert store.metadata_summary_status(language="en-US").ready is True
@@ -2043,9 +2038,7 @@ def test_library_export_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
     )
 
     assert default_result.exit_code == 0, default_result.output
-    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == [
-        "series:22"
-    ]
+    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == ["series:22"]
     assert show_hidden_result.exit_code == 0, show_hidden_result.output
     assert [entry["id"] for entry in json.loads(show_hidden_result.stdout)["entries"]] == [
         "movie:55",
@@ -2263,9 +2256,7 @@ def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
     )
 
     assert default_result.exit_code == 0, default_result.output
-    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == [
-        "movie:66"
-    ]
+    assert [entry["id"] for entry in json.loads(default_result.stdout)["entries"]] == ["movie:66"]
     assert show_hidden_result.exit_code == 0, show_hidden_result.output
     assert [entry["id"] for entry in json.loads(show_hidden_result.stdout)["entries"]] == [
         "movie:55",
@@ -2377,6 +2368,7 @@ def _fake_search_store() -> object:
             return entries
 
     return FakeStore()
+
 
 def _live_record(
     identity: str,

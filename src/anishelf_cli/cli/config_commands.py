@@ -102,9 +102,7 @@ def config_show(
     if cloudkit.app_auth_version:
         app_auth += f", version {cloudkit.app_auth_version}"
     display_fields = library_defaults.display_fields
-    display_fields_label = (
-        "built-in" if display_fields is None else ", ".join(display_fields)
-    )
+    display_fields_label = "built-in" if display_fields is None else ", ".join(display_fields)
 
     emit_human_blocks(
         [
@@ -311,11 +309,7 @@ def config_set_defaults(
                     ("TMDb language", tmdb_defaults.metadata_language),
                     (
                         "Cache rebuild",
-                        (
-                            "recommended"
-                            if tmdb_language_changed
-                            else "not needed for this change"
-                        ),
+                        ("recommended" if tmdb_language_changed else "not needed for this change"),
                     ),
                     ("Config file", str(path)),
                 ),

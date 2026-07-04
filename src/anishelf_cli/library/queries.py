@@ -50,9 +50,9 @@ class LibraryQueryStore(Protocol):
         limit: int | None = None,
     ) -> list[LibraryEntryModel]: ...
 
-    def search_entry_models_by_title(
+    def search_entry_models(
         self,
-        title: str,
+        query: str,
         *,
         metadata_language: str,
     ) -> list[LibraryEntryModel]: ...
@@ -150,7 +150,7 @@ def build_library_list_result(
 def build_library_search_result(
     store: LibraryQueryStore,
     *,
-    title: str,
+    query: str,
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
@@ -162,7 +162,7 @@ def build_library_search_result(
         hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
         metadata_language=metadata_language,
     )
-    entries = store.search_entry_models_by_title(title, metadata_language=metadata_language)
+    entries = store.search_entry_models(query, metadata_language=metadata_language)
     if not show_hidden:
         entries = _visible_snapshots(entries)
     entries = attach_metadata_for_depth(
@@ -175,7 +175,7 @@ def build_library_search_result(
         entries=tuple(entries),
         cache=cache,
         metadata=metadata_payload(metadata_depth),
-        query=LibrarySearchQueryResult(title=title),
+        query=LibrarySearchQueryResult(query=query),
     )
 
 
@@ -309,7 +309,5 @@ def strip_entry_metadata(entries: list[LibraryEntryModel]) -> list[LibraryEntryM
 
 def _visible_snapshots(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
     return [
-        entry
-        for entry in entries
-        if isinstance(entry, LibraryEntrySnapshot) and entry.on_display
+        entry for entry in entries if isinstance(entry, LibraryEntrySnapshot) and entry.on_display
     ]
