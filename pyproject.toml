@@ -8,8 +8,16 @@ version = "0.1.0"
 description = "Read-only AniShelf and CloudKit inspection CLI."
 readme = "README.md"
 requires-python = ">=3.13"
-authors = [
-  { name = "Samuel He" }
+authors = [{ name = "Samuel He" }]
+keywords = ["anishelf", "cloudkit", "tmdb", "cli"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
+  "Intended Audience :: End Users/Desktop",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.13",
+  "Typing :: Typed",
+  "Topic :: Utilities",
 ]
 dependencies = [
   "filelock>=3.19.1",
@@ -17,19 +25,30 @@ dependencies = [
   "keyring>=25.6.0",
   "pydantic>=2.11.7",
   "rich>=14.1.0",
-  "tmdbsimple>=2.9.1",
   "typer>=0.16.1",
 ]
 
 [project.scripts]
 ani = "anishelf_cli.app:main"
 
+[project.urls]
+Homepage = "https://github.com/samuelhe52/anishelf-cli"
+Repository = "https://github.com/samuelhe52/anishelf-cli"
+Issues = "https://github.com/samuelhe52/anishelf-cli/issues"
+Changelog = "https://github.com/samuelhe52/anishelf-cli/releases"
+
 [dependency-groups]
-dev = [
-  "mypy>=1.17.1",
-  "pytest>=8.4.1",
-  "pytest-cov>=6.2.1",
-  "ruff>=0.12.2",
+dev = ["mypy>=1.17.1", "pytest>=8.4.1", "pytest-cov>=6.2.1", "ruff>=0.12.2"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/AGENTS.md",
+  "/Makefile",
+  "/README.md",
+  "/docs",
+  "/pyproject.toml",
+  "/src",
+  "/tests",
 ]
 
 [tool.hatch.build.targets.wheel]
