@@ -436,6 +436,7 @@ def library_list(
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
     watch_status_value = watch_status.value if watch_status is not None else None
+    resolved_show_hidden = _show_hidden_requested(show_hidden)
     store, refresh_result = _library_read_store(sync=sync)
     try:
         result = build_library_list_result(
@@ -443,7 +444,7 @@ def library_list(
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
             watch_status=watch_status_value,
-            show_hidden=_show_hidden_requested(show_hidden),
+            show_hidden=resolved_show_hidden,
             favorite=favorite,
             sort=sort,
             limit=limit,
@@ -478,7 +479,13 @@ def library_list(
     display_entries = list(result.entries)
     render_library_list(
         display_entries,
-        fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
+        fields=_resolve_display_fields(
+            fields,
+            command_default=_library_table_default_fields(
+                LIBRARY_LIST_DEFAULT_FIELDS,
+                show_hidden=resolved_show_hidden,
+            ),
+        ),
         style=_resolve_output_style(output_style),
         display_titles=_display_titles_for_entries(
             store,
@@ -536,6 +543,7 @@ def library_search(
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
+    resolved_show_hidden = _show_hidden_requested(show_hidden)
     store, refresh_result = _library_read_store(sync=sync)
     try:
         result = build_library_search_result(
@@ -543,7 +551,7 @@ def library_search(
             query=query,
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
-            show_hidden=_show_hidden_requested(show_hidden),
+            show_hidden=resolved_show_hidden,
             limit=limit,
             metadata_language=preferred_language,
             live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,
@@ -577,7 +585,13 @@ def library_search(
     render_library_search(
         query,
         display_entries,
-        fields=_resolve_display_fields(fields, command_default=LIBRARY_SEARCH_DEFAULT_FIELDS),
+        fields=_resolve_display_fields(
+            fields,
+            command_default=_library_table_default_fields(
+                LIBRARY_SEARCH_DEFAULT_FIELDS,
+                show_hidden=resolved_show_hidden,
+            ),
+        ),
         style=_resolve_output_style(output_style),
         display_titles=_display_titles_for_entries(
             store,
@@ -1136,6 +1150,18 @@ def _resolve_display_fields(
     if configured is not None:
         return configured
     return command_default
+
+
+def _library_table_default_fields(
+    command_default: tuple[str, ...],
+    *,
+    show_hidden: bool,
+) -> tuple[str, ...]:
+    if not show_hidden or "display" in command_default:
+        return command_default
+    if not command_default:
+        return ("display",)
+    return (*command_default[:-1], "display", command_default[-1])
 
 
 def _resolve_output_style(value: HumanOutputStyle | None) -> HumanOutputStyle:

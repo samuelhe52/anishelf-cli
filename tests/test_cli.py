@@ -1106,7 +1106,7 @@ def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:
     assert "\nMovies\n" in result.stdout
     assert "TMDb ID" in result.stdout
     assert "Alien" in result.stdout
-    assert "1979-05-25" in result.stdout
+    assert "79/05/25" in result.stdout
 
 
 def test_tmdb_search_discovers_without_title_by_default(monkeypatch) -> None:

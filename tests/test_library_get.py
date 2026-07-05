@@ -729,15 +729,15 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     assert "  Watch status      watched\n" in result.stdout
     assert "  Score             4\n" in result.stdout
     assert "  Favorite          yes\n" in result.stdout
-    assert "  Date saved        2026-05-01\n" in result.stdout
-    assert "  Date started      2026-05-02\n" in result.stdout
-    assert "  Date finished     2026-05-09\n" in result.stdout
+    assert "  Date saved        26/05/01\n" in result.stdout
+    assert "  Date started      26/05/02\n" in result.stdout
+    assert "  Date finished     26/05/09\n" in result.stdout
     assert "  Custom poster" not in result.stdout
     assert "  Kind" not in result.stdout
     assert "  Library updated" not in result.stdout
     assert "  Tracking updated" not in result.stdout
     assert "  Schema" not in result.stdout
-    assert "  Episode progress  S1:E12 (2026-05-08)\n" in result.stdout
+    assert "  Episode progress  S1:E12 (26/05/08)\n" in result.stdout
     assert "  Notes\n" in result.stdout
     assert "    Round trip\n" in result.stdout
 

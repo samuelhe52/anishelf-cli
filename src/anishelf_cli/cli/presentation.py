@@ -37,6 +37,10 @@ from anishelf_cli.models.tmdb import (
 )
 
 _TMDB_SEARCH_ALL = "all"
+_TABLE_TITLE_MAX_WIDTH = 48
+_TABLE_TITLE_MIN_WIDTH = 24
+_TABLE_ID_MAX_WIDTH = 24
+_TABLE_ID_MIN_WIDTH = 12
 
 LIBRARY_LIST_DEFAULT_FIELDS = (
     "title",
@@ -45,7 +49,6 @@ LIBRARY_LIST_DEFAULT_FIELDS = (
     "status",
     "score",
     "favorite",
-    "display",
     "updated",
 )
 LIBRARY_SEARCH_DEFAULT_FIELDS = (
@@ -57,8 +60,20 @@ LIBRARY_SEARCH_DEFAULT_FIELDS = (
     "saved",
 )
 DISPLAY_FIELD_COLUMNS = {
-    "title": HumanTableColumn("title", "Title"),
-    "id": HumanTableColumn("id", "ID"),
+    "title": HumanTableColumn(
+        "title",
+        "Title",
+        flexible=True,
+        max_width=_TABLE_TITLE_MAX_WIDTH,
+        min_width=_TABLE_TITLE_MIN_WIDTH,
+    ),
+    "id": HumanTableColumn(
+        "id",
+        "ID",
+        flexible=True,
+        max_width=_TABLE_ID_MAX_WIDTH,
+        min_width=_TABLE_ID_MIN_WIDTH,
+    ),
     "type": HumanTableColumn("type", "Type"),
     "status": HumanTableColumn("status", "Status"),
     "score": HumanTableColumn("score", "Score", "right"),
@@ -203,7 +218,7 @@ def _human_library_row(
         "title": _display_table_title(entry, display_titles),
         "id": entry.identity,
         "type": entry.entry_type,
-        "status": getattr(entry, "watch_status", None),
+        "status": _human_watch_status(getattr(entry, "watch_status", None)),
         "score": getattr(entry, "score", None),
         "favorite": getattr(entry, "favorite", None),
         "display": getattr(entry, "on_display", None),
@@ -264,7 +279,13 @@ def _compact_date(value: object) -> object:
     if not isinstance(value, str):
         return value
     if len(value) >= 10 and value[4] == "-" and value[7] == "-":
-        return value[:10]
+        return f"{value[2:4]}/{value[5:7]}/{value[8:10]}"
+    return value
+
+
+def _human_watch_status(value: object) -> object:
+    if value == "planToWatch":
+        return "planned"
     return value
 
 
@@ -625,8 +646,21 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
             HumanTable(
                 "Results",
                 (
-                    HumanTableColumn("tmdb_id", "TMDb ID", "right"),
-                    HumanTableColumn("title", "Title"),
+                    HumanTableColumn(
+                        "tmdb_id",
+                        "TMDb ID",
+                        "right",
+                        flexible=True,
+                        max_width=_TABLE_ID_MAX_WIDTH,
+                        min_width=_TABLE_ID_MIN_WIDTH,
+                    ),
+                    HumanTableColumn(
+                        "title",
+                        "Title",
+                        flexible=True,
+                        max_width=_TABLE_TITLE_MAX_WIDTH,
+                        min_width=_TABLE_TITLE_MIN_WIDTH,
+                    ),
                     HumanTableColumn("release_date", "Date"),
                     HumanTableColumn("original_language_code", "Lang"),
                 ),
@@ -645,8 +679,21 @@ def _tmdb_search_table(
     return HumanTable(
         title,
         (
-            HumanTableColumn("tmdb_id", "TMDb ID", "right"),
-            HumanTableColumn("title", "Title"),
+            HumanTableColumn(
+                "tmdb_id",
+                "TMDb ID",
+                "right",
+                flexible=True,
+                max_width=_TABLE_ID_MAX_WIDTH,
+                min_width=_TABLE_ID_MIN_WIDTH,
+            ),
+            HumanTableColumn(
+                "title",
+                "Title",
+                flexible=True,
+                max_width=_TABLE_TITLE_MAX_WIDTH,
+                min_width=_TABLE_TITLE_MIN_WIDTH,
+            ),
             HumanTableColumn("release_date", "Date"),
             HumanTableColumn("original_language_code", "Lang"),
         ),

@@ -42,9 +42,9 @@ def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
         "  Favorite  yes\n"
         "\n"
         "Library\n"
-        "  ID           Type      Score\n"
-        "  movie:550    movie         9\n"
-        "  series:1399  series  not set\n"
+        "  ID           Type    Score\n"
+        "  movie:550    movie       9\n"
+        "  series:1399  series   none\n"
     )
 
 
@@ -79,8 +79,8 @@ def test_emit_human_blocks_truncates_wide_tables_to_console_width(capsys, monkey
             HumanTable(
                 "Library",
                 (
-                    HumanTableColumn("title", "Title"),
-                    HumanTableColumn("id", "ID"),
+                    HumanTableColumn("title", "Title", flexible=True),
+                    HumanTableColumn("id", "ID", flexible=True),
                     HumanTableColumn("status", "Status"),
                 ),
                 (
@@ -99,6 +99,82 @@ def test_emit_human_blocks_truncates_wide_tables_to_console_width(capsys, monkey
     assert all(len(line) <= 42 for line in lines)
     assert "..." in output
     assert "A Very Long" in output
+
+
+def test_emit_human_blocks_respects_column_max_width(capsys, monkeypatch) -> None:
+    from rich.console import Console
+
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.setattr(
+        output_module,
+        "console",
+        lambda stderr=False: Console(width=96, stderr=stderr),
+    )
+
+    emit_human_blocks(
+        [
+            HumanTable(
+                "Library",
+                (
+                    HumanTableColumn("title", "Title", flexible=True, max_width=16),
+                    HumanTableColumn("id", "ID"),
+                    HumanTableColumn("status", "Status"),
+                ),
+                (
+                    {
+                        "title": "A Very Long Localized Movie Title That Would Otherwise Dominate",
+                        "id": "movie:1234567890",
+                        "status": "watching",
+                    },
+                ),
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "movie:1234567890" in output
+    assert "watching" in output
+    assert "Localized" not in output
+    assert "..." in output
+
+
+def test_emit_human_blocks_shrinks_long_titles_before_other_columns(capsys, monkeypatch) -> None:
+    from rich.console import Console
+
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.setattr(
+        output_module,
+        "console",
+        lambda stderr=False: Console(width=50, stderr=stderr),
+    )
+
+    emit_human_blocks(
+        [
+            HumanTable(
+                "Library",
+                (
+                    HumanTableColumn("title", "Title", flexible=True, max_width=40),
+                    HumanTableColumn("id", "ID"),
+                    HumanTableColumn("status", "Status"),
+                ),
+                (
+                    {
+                        "title": "A Very Long Localized Movie Title",
+                        "id": "movie:1234567890",
+                        "status": "watching",
+                    },
+                ),
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "movie:1234567890" in output
+    assert "watching" in output
+    assert "..." in output
+    assert all(len(line) <= 50 for line in output.splitlines())
 
 
 def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, monkeypatch) -> None:

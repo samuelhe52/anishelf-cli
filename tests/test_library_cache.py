@@ -1969,6 +1969,65 @@ def test_library_list_uses_configured_show_hidden_default(tmp_path, monkeypatch)
     assert [entry["id"] for entry in payload["entries"]] == ["movie:55", "series:22"]
 
 
+def test_library_list_omits_display_from_builtin_human_fields_by_default(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "Display" not in result.stdout
+
+
+def test_library_list_includes_display_in_builtin_human_fields_when_showing_hidden(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55, on_display=False),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list", "--show-hidden"])
+
+    assert result.exit_code == 0, result.output
+    assert "Display" in result.stdout
+    assert "no" in result.stdout
+
+
+def test_library_list_compacts_table_values_for_human_output(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    record = _live_record(
+        "movie:55",
+        "movie",
+        55,
+        date_saved="2026-07-05T00:00:00Z",
+        watch_status="planToWatch",
+    )
+    record["fields"]["score"]["value"] = None
+    record["fields"]["libraryUpdatedAt"]["value"] = None
+    record["fields"]["trackingUpdatedAt"]["value"] = None
+    store = create_seeded_cache_store(monkeypatch, tmp_path, record)
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    assert "planned" in result.stdout
+    assert "planToWatch" not in result.stdout
+    assert "none" in result.stdout
+    assert "not set" not in result.stdout
+    assert "26/07/05" in result.stdout
+    assert "2026-07-05" not in result.stdout
+
+
 def test_library_list_uses_configured_display_fields_for_human_output(
     tmp_path,
     monkeypatch,
@@ -2004,7 +2063,7 @@ def test_library_list_uses_updated_in_builtin_table_fields(
 
     assert result.exit_code == 0, result.output
     assert "Updated" in result.stdout
-    assert "2026-05-12" in result.stdout
+    assert "26/05/12" in result.stdout
     assert "Saved" not in result.stdout
 
 

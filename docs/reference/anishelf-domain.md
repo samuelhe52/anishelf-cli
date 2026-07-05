@@ -101,6 +101,11 @@ progress or diagnostics on stderr. `lib get` exits nonzero only when no
 requested item is found; partial failures remain item-level errors in the output
 envelope, so agents should inspect `summary.errors`.
 
+Human collection tables should keep inflexible fields readable, truncate only
+declared flexible fields such as title and id, use compact dates, and omit the
+display column unless hidden entries are included or the user explicitly asks
+for that field.
+
 ## Metadata Hydration
 
 CloudKit records do not contain rich TMDb metadata such as localized titles,

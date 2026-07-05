@@ -75,7 +75,8 @@ one command, or persist that default with:
 uv run ani config set-defaults --show-hidden
 ```
 
-`lib list` and `lib search` use compact table output by default. Pass
+`lib list` and `lib search` use compact table output by default. The default
+table omits the display column unless hidden entries are included. Pass
 `--style list` for a per-entry human layout similar to `lib get`, and use
 `--fields` to choose which base library fields appear in either human style.
 When metadata is requested, list-style human output appends bounded metadata

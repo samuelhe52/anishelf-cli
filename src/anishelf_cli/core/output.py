@@ -32,6 +32,9 @@ class HumanTableColumn:
     key: str
     label: str
     align: Literal["left", "right"] = "left"
+    flexible: bool = False
+    max_width: int | None = None
+    min_width: int = 1
 
 
 @dataclass(frozen=True, slots=True)
@@ -139,13 +142,7 @@ def _print_table(out: Console, table: HumanTable) -> None:
         out.print(f"  {_human_value(table.empty_message)}")
         return
 
-    widths = {
-        column.key: max(
-            cell_len(column.label),
-            *(cell_len(_human_value(row.get(column.key))) for row in table.rows),
-        )
-        for column in table.columns
-    }
+    widths = dict(_column_width(column, table.rows) for column in table.columns)
     widths = _fit_table_widths(widths, table.columns, max_width=out.width)
     header = Text("  ")
     for index, column in enumerate(table.columns):
@@ -177,20 +174,54 @@ def _fit_table_widths(
     def total_width() -> int:
         return sum(fitted_widths[column.key] for column in columns)
 
-    def shrink_to(minimum_width: int) -> None:
+    def shrink_to(minimum_width: int, *, respect_column_min_width: bool) -> None:
         while total_width() > available:
-            shrinkable = [column for column in columns if fitted_widths[column.key] > minimum_width]
+            shrinkable = [
+                column
+                for column in columns
+                if column.flexible
+                if fitted_widths[column.key]
+                > _minimum_column_width(
+                    column,
+                    minimum_width=minimum_width,
+                    respect_column_min_width=respect_column_min_width,
+                )
+            ]
             if not shrinkable:
                 return
             widest = max(
                 shrinkable,
-                key=lambda column: (column.key != "title", fitted_widths[column.key]),
+                key=lambda column: (fitted_widths[column.key], column.key == "title"),
             )
             fitted_widths[widest.key] -= 1
 
-    shrink_to(minimum_width=3)
-    shrink_to(minimum_width=1)
+    shrink_to(minimum_width=3, respect_column_min_width=True)
+    shrink_to(minimum_width=3, respect_column_min_width=False)
+    shrink_to(minimum_width=1, respect_column_min_width=False)
     return fitted_widths
+
+
+def _minimum_column_width(
+    column: HumanTableColumn,
+    *,
+    minimum_width: int,
+    respect_column_min_width: bool,
+) -> int:
+    if not respect_column_min_width:
+        return minimum_width
+    return max(minimum_width, column.min_width)
+
+
+def _column_width(
+    column: HumanTableColumn, rows: Sequence[Mapping[str, object]]
+) -> tuple[str, int]:
+    width = max(
+        cell_len(column.label),
+        *(cell_len(_human_value(row.get(column.key))) for row in rows),
+    )
+    if column.max_width is not None:
+        width = min(width, column.max_width)
+    return column.key, width
 
 
 def _align(value: str, width: int, align: Literal["left", "right"]) -> str:
@@ -211,7 +242,7 @@ def _truncate_cell(value: str, width: int) -> str:
 
 def _human_value(value: object) -> str:
     if value is None:
-        return "not set"
+        return "none"
     if isinstance(value, bool):
         return "yes" if value else "no"
     if isinstance(value, (list, tuple)):
