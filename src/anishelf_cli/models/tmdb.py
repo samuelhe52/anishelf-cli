@@ -4,6 +4,7 @@ from typing import Literal
 
 from pydantic import StrictInt, StrictStr
 
+from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
 from anishelf_cli.models.common import AniShelfBaseModel
 
 
@@ -11,7 +12,7 @@ class TMDbTitleSearchQuery(AniShelfBaseModel):
     title: StrictStr | None = None
     year: StrictInt | None = None
     entry_type: Literal["all", "movie", "series"] = "all"
-    language: StrictStr = "en-US"
+    language: StrictStr = DEFAULT_TMDB_METADATA_LANGUAGE
 
     @property
     def mode(self) -> str:

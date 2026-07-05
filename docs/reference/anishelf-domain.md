@@ -54,8 +54,8 @@ include:
 - `lib status`
 - `lib clear-cache`
 - `lib refresh-meta`
-- `lib get <id...> [--sync] [--live-meta] [--tmdb-language] [--metadata[=none|summary|details|full]]`
-- `lib list [--sync] [--tmdb-language] [--metadata[=none|summary|details|full]] [--style table|list]`
+- `lib get <id...> [--sync] [--live-meta] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full]`
+- `lib list [--sync] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full] [--style table|list]`
 - `lib search <query>` with optional `--sync`, `--tmdb-language`,
   `--metadata`, and `--style table|list`
 - `lib export` with optional `--sync`, `--tmdb-language`, and `--metadata`
@@ -125,12 +125,10 @@ stored by details hydration because cached library search matches translated
 titles and overviews; they are projected only in full output.
 
 The CLI decision is to keep metadata on library commands instead of exposing a
-separate top-level hydration pass. Bare `--metadata` should request the default
-summary level. Explicit `none`, `summary`, `details`, and `full` are
-implemented. Both `--metadata none` and `--metadata=none` should behave the
-same. If a positional id or title is literally `none`, `summary`, `details`, or
-`full`, require `--` before that positional argument so it is not consumed as
-the metadata level. `none` means no TMDb request for output attachment.
+separate top-level hydration pass. Explicit `none`, `summary`, `details`, and
+`full` are implemented as separated option values, such as `--metadata none`.
+Bare `--metadata` and equals-form values such as `--metadata=none` are rejected.
+`none` means no TMDb request for output attachment.
 
 `lib init` should fetch the full library and hydrate TMDb metadata at the
 configured hydration depth for every entry in the configured preferred metadata
@@ -148,9 +146,11 @@ hydration depth, a user-configured `full` default can perform full hydration
 for a targeted `--live-meta` request even when the requested output projection
 is `details`.
 
-`config set-defaults --tmdb-language <tag>` changes the preferred persisted
-metadata language. Changing it should prompt the user to clear and rebuild the
-cache; the cache does not rewrite old metadata rows in place. A one-off
+`config set-defaults --tmdb-language en|ja|zh` changes the preferred persisted
+metadata language. The CLI maps those public codes to TMDb HTTP tags only when
+building requests (`en-US`, `ja-JP`, or `zh-CN`). Changing the preferred
+language should prompt the user to clear and rebuild the cache; the cache does
+not rewrite old metadata rows in place. A one-off
 `--tmdb-language` on a library read command is ad-hoc: if it differs from the
 preferred language, fetch the requested metadata live for that command and do
 not upsert it into `tmdb_metadata_items`. `tmdb search --tmdb-language`

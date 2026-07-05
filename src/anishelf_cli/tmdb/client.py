@@ -8,6 +8,7 @@ from typing import Literal, TypeVar
 import httpx
 from pydantic import ValidationError
 
+from anishelf_cli import config
 from anishelf_cli.core.coercion import nonempty_string_or_none
 from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.redaction import SecretRedactor
@@ -56,7 +57,7 @@ def _validation_error_summary(exc: ValidationError) -> str:
 @dataclass(slots=True)
 class TMDbClient:
     api_key: str
-    language: str = "en-US"
+    language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE
     timeout_seconds: float = 20.0
     max_attempts: int = 3
     client: httpx.Client = field(default_factory=httpx.Client, repr=False)
@@ -98,7 +99,7 @@ class TMDbClient:
                 movie_response = self._get_model(
                     f"movie/{identity.tmdb_id}",
                     TMDbMovieSummaryResponse,
-                    params={"language": self.language},
+                    params={"language": self._http_language()},
                 )
                 return movie_response.to_domain(
                     identity,
@@ -109,7 +110,7 @@ class TMDbClient:
                 series_response = self._get_model(
                     f"tv/{identity.tmdb_id}",
                     TMDbSeriesSummaryResponse,
-                    params={"language": self.language},
+                    params={"language": self._http_language()},
                 )
                 season_summaries: tuple[LibraryEntryMetadataSeason, ...] = ()
                 episode_summaries: tuple[LibraryEntryMetadataEpisode, ...] = ()
@@ -138,12 +139,12 @@ class TMDbClient:
                 parent_series_response = self._get_model(
                     f"tv/{identity.parent_series_id}",
                     TMDbSeriesSummaryResponse,
-                    params={"language": self.language},
+                    params={"language": self._http_language()},
                 )
                 season_response = self._get_model(
                     f"tv/{identity.parent_series_id}/season/{identity.season_number}",
                     TMDbSeasonSummaryResponse,
-                    params={"language": self.language},
+                    params={"language": self._http_language()},
                 )
                 return season_response.to_domain(
                     identity,
@@ -182,7 +183,7 @@ class TMDbClient:
         season_response = self._get_model(
             f"tv/{series_id}/season/{season_number}",
             TMDbSeasonSummaryResponse,
-            params={"language": self.language},
+            params={"language": self._http_language()},
         )
         return tuple(
             episode.to_domain(default_season_number=season_number)
@@ -209,6 +210,9 @@ class TMDbClient:
             raise TMDbRequestError(
                 f"TMDb response had an unexpected shape: {_validation_error_summary(exc)}"
             ) from exc
+
+    def _http_language(self) -> str:
+        return config.tmdb_http_language_tag(self.language)
 
     def _get_with_retries(self, path: str, params: dict[str, str]) -> httpx.Response:
         attempts = max(1, self.max_attempts)
@@ -328,14 +332,14 @@ def _retryable_status(status_code: int) -> bool:
 
 
 def _movie_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"query": query.title or "", "language": query.language}
+    params = {"query": query.title or "", "language": config.tmdb_http_language_tag(query.language)}
     if query.year is not None:
         params["primary_release_year"] = str(query.year)
     return params
 
 
 def _series_search_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
-    params = {"query": query.title or "", "language": query.language}
+    params = {"query": query.title or "", "language": config.tmdb_http_language_tag(query.language)}
     if query.year is not None:
         params["first_air_date_year"] = str(query.year)
     return params
@@ -345,7 +349,7 @@ def _movie_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
     params = {
         "sort_by": "popularity.desc",
         "with_genres": str(TMDB_ANIME_GENRE_ID),
-        "language": query.language,
+        "language": config.tmdb_http_language_tag(query.language),
     }
     if query.year is not None:
         params["primary_release_year"] = str(query.year)
@@ -356,7 +360,7 @@ def _series_discover_params(query: TMDbTitleSearchQuery) -> dict[str, str]:
     params = {
         "sort_by": "popularity.desc",
         "with_genres": str(TMDB_ANIME_GENRE_ID),
-        "language": query.language,
+        "language": config.tmdb_http_language_tag(query.language),
     }
     if query.year is not None:
         params["first_air_date_year"] = str(query.year)

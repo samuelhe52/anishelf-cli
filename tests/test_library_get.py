@@ -588,7 +588,7 @@ def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
     )
 
     class FakeTMDbClient:
-        language = "en-US"
+        language = "en"
 
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
@@ -605,16 +605,16 @@ def test_library_get_ad_hoc_tmdb_language_does_not_update_cache(
 
     result = runner.invoke(
         app,
-        ["--json", "lib", "get", "movie:55", "--tmdb-language", "ja-JP"],
+        ["--json", "lib", "get", "movie:55", "--tmdb-language", "ja"],
     )
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert requested == [("movie", 55, "ja-JP")]
+    assert requested == [("movie", 55, "ja")]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "エイリアン"
     assert "language" not in payload["items"][0]["entry"]["metadata"]
     assert payload["items"][0]["entry"]["metadata"]["name"] == "エイリアン"
-    cached = store.attach_metadata_summary_models(store.list_entry_models(), language="ja-JP")[0]
+    cached = store.attach_metadata_summary_models(store.list_entry_models(), language="ja")[0]
     assert cached.metadata is None
 
 

@@ -112,7 +112,7 @@ def metadata_summary(
             "tmdb_id": tmdb_id,
             "parent_series_id": parent_series_id,
             "season_number": season_number,
-            "language": "en-US",
+            "language": "en",
             "name": name,
             "name_translations": {"ja-JP": f"{name} JP"},
             "overview": f"{name} overview.",

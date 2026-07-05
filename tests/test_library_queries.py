@@ -285,7 +285,7 @@ class FakeQueryStore:
         self,
         query: str,
         *,
-        metadata_language: str = "en-US",
+        metadata_language: str = "en",
     ) -> list[LibraryEntryModel]:
         _ = metadata_language
         self.search_query = query
@@ -294,7 +294,7 @@ class FakeQueryStore:
     def metadata_summary_status(
         self,
         *,
-        language: str = "en-US",
+        language: str = "en",
         depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> CacheMetadataStatusResult:
         _ = language
@@ -313,7 +313,7 @@ class FakeQueryStore:
         self,
         entries: list[LibraryEntryModel],
         *,
-        language: str = "en-US",
+        language: str = "en",
         depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> list[LibraryEntryModel]:
         _ = language

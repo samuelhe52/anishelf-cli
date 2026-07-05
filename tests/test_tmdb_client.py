@@ -118,7 +118,7 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
     summary = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
 
     assert summary.name == "Alien"
-    assert summary.language == "en-US"
+    assert summary.language == "en"
     assert summary.name_translation_map == {}
     assert summary.overview_translation_map == {}
     assert summary.link_to_details == "https://example.com/alien"
@@ -127,6 +127,22 @@ def test_tmdb_client_uses_per_request_api_key_and_summary_endpoint() -> None:
     assert requests[0].url.path == "/3/movie/55"
     assert requests[0].url.params["api_key"] == "tmdb-secret-token"
     assert requests[0].url.params["language"] == "en-US"
+
+
+def test_tmdb_client_maps_public_language_code_at_http_boundary() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={"id": 55, "title": "Alien"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-token", language="ja", client=client)
+
+    summary = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
+
+    assert summary.language == "ja"
+    assert requests[0].url.params["language"] == "ja-JP"
 
 
 def test_tmdb_client_fetches_details_translations_for_search_cache() -> None:
@@ -221,7 +237,7 @@ def test_tmdb_client_fetches_series_and_season_summary_counts() -> None:
         TMDbSummaryIdentity(entry_type="season", tmdb_id=33, parent_series_id=22, season_number=1)
     )
 
-    assert series_summary.language == "en-US"
+    assert series_summary.language == "en"
     assert series_summary.link_to_details == "https://example.com/alien-nation"
     assert season_summary.original_language_code == "en"
     assert season_summary.link_to_details == "https://example.com/alien-nation"
@@ -351,7 +367,7 @@ def test_tmdb_client_searches_movie_and_tv_titles() -> None:
     client = httpx.Client(transport=httpx.MockTransport(handler))
     tmdb = TMDbClient("tmdb-secret-token", client=client)
 
-    result = tmdb.search_titles(TMDbTitleSearchQuery(title="Alien", year=1979))
+    result = tmdb.search_titles(TMDbTitleSearchQuery(title="Alien", year=1979, language="ja"))
 
     assert len(result.movies) == 1
     assert result.movies[0].entry_type == "movie"
@@ -368,6 +384,7 @@ def test_tmdb_client_searches_movie_and_tv_titles() -> None:
     assert [request.url.path for request in requests] == ["/3/search/movie", "/3/search/tv"]
     assert all(request.url.params["api_key"] == "tmdb-secret-token" for request in requests)
     assert all(request.url.params["query"] == "Alien" for request in requests)
+    assert all(request.url.params["language"] == "ja-JP" for request in requests)
     assert requests[0].url.params["primary_release_year"] == "1979"
     assert requests[1].url.params["first_air_date_year"] == "1979"
 

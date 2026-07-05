@@ -52,7 +52,13 @@ from anishelf_cli.library.queries import (
     cache_summary_payload,
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
-from anishelf_cli.models import HumanOutputStyle, LibraryListSort, MetadataDepth
+from anishelf_cli.models import (
+    HumanOutputStyle,
+    LibraryListSort,
+    LibraryWatchStatus,
+    MetadataDepth,
+    TMDbMetadataLanguage,
+)
 from anishelf_cli.models.domain import LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import (
     CacheStatusResult,
@@ -115,11 +121,11 @@ def library_get(
         ),
     ] = False,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
             help=(
-                "Fetch metadata for this request in a different TMDb language without "
+                "Fetch metadata for this request in a different language without "
                 "updating the cache."
             ),
             show_default=False,
@@ -382,7 +388,7 @@ def library_list(
     fields: FieldListOption = None,
     output_style: OutputStyleOption = None,
     watch_status: Annotated[
-        str | None,
+        LibraryWatchStatus | None,
         typer.Option("--watch-status", "-w", help="Filter by watch status."),
     ] = None,
     show_hidden: Annotated[
@@ -390,11 +396,11 @@ def library_list(
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
             help=(
-                "Fetch metadata for this request in a different TMDb language without "
+                "Fetch metadata for this request in a different language without "
                 "updating the cache."
             ),
             show_default=False,
@@ -424,14 +430,14 @@ def library_list(
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
-    _validate_watch_status(watch_status)
+    watch_status_value = watch_status.value if watch_status is not None else None
     store, refresh_result = _library_read_store(sync=sync)
     try:
         result = build_library_list_result(
             store,
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
-            watch_status=watch_status,
+            watch_status=watch_status_value,
             show_hidden=_show_hidden_requested(show_hidden),
             favorite=favorite,
             sort=sort,
@@ -500,11 +506,11 @@ def library_search(
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
             help=(
-                "Fetch metadata for this request in a different TMDb language without "
+                "Fetch metadata for this request in a different language without "
                 "updating the cache."
             ),
             show_default=False,
@@ -592,11 +598,11 @@ def library_export(
         typer.Option("--show-hidden", help="Include entries hidden from display."),
     ] = False,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
             help=(
-                "Fetch metadata for this request in a different TMDb language without "
+                "Fetch metadata for this request in a different language without "
                 "updating the cache."
             ),
             show_default=False,
@@ -893,21 +899,17 @@ def _preferred_metadata_language() -> str:
     return _user_defaults_or_exit().tmdb.metadata_language
 
 
-def _metadata_language(value: str | None, *, preferred_language: str) -> str:
+def _metadata_language(value: TMDbMetadataLanguage | None, *, preferred_language: str) -> str:
     if value is None:
         logger.debug("TMDb metadata language -> preferred=%s", preferred_language)
         return preferred_language
-    try:
-        language = config.resolve_configured_tmdb_language(value)
-        logger.debug(
-            "TMDb metadata language -> override=%s preferred=%s",
-            language,
-            preferred_language,
-        )
-        return language
-    except config.UserConfigError as exc:
-        emit_error(str(exc))
-        raise typer.Exit(code=2) from exc
+    language = value.value
+    logger.debug(
+        "TMDb metadata language -> override=%s preferred=%s",
+        language,
+        preferred_language,
+    )
+    return language
 
 
 def _attach_live_metadata_for_entries(
@@ -1103,13 +1105,9 @@ def _resolve_display_fields(
     return command_default
 
 
-def _resolve_output_style(value: str | None) -> HumanOutputStyle:
-    if value is not None and value.strip().lower() != "default":
-        try:
-            return config.resolve_configured_output_style(value)
-        except config.UserConfigError as exc:
-            emit_error(str(exc))
-            raise typer.Exit(code=2) from exc
+def _resolve_output_style(value: HumanOutputStyle | None) -> HumanOutputStyle:
+    if value is not None:
+        return value
 
     return _user_defaults_or_exit().library_read.output_style
 

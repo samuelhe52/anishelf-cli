@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Protocol
 
+from anishelf_cli import config
 from anishelf_cli.cache.sync import LibraryCacheRefreshResult
 from anishelf_cli.models import LibraryListSort, MetadataDepth
 from anishelf_cli.models.domain import LibraryEntryModel, LibraryEntrySnapshot
@@ -105,7 +106,7 @@ def build_library_list_result(
     favorite: bool,
     sort: LibraryListSort,
     limit: int | None,
-    metadata_language: str = "en-US",
+    metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     if sort is LibraryListSort.TITLE:
@@ -173,7 +174,7 @@ def build_library_search_result(
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
-    metadata_language: str = "en-US",
+    metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     require_metadata_ready(
@@ -217,7 +218,7 @@ def build_library_export_result(
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
-    metadata_language: str = "en-US",
+    metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     entries = store.list_entry_models(include_tombstones=False)
@@ -281,7 +282,7 @@ def attach_metadata_for_depth(
     entries: list[LibraryEntryModel],
     metadata_depth: MetadataDepth,
     *,
-    metadata_language: str = "en-US",
+    metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
 ) -> list[LibraryEntryModel]:
     if metadata_depth is MetadataDepth.NONE:
         return entries
@@ -297,7 +298,7 @@ def require_metadata_ready(
     *,
     action: str,
     hint: str,
-    metadata_language: str = "en-US",
+    metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
 ) -> None:
     status = store.metadata_summary_status(language=metadata_language, depth=metadata_depth)

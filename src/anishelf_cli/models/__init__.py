@@ -29,6 +29,19 @@ class HumanOutputStyle(StrEnum):
     LIST = "list"
 
 
+class LibraryWatchStatus(StrEnum):
+    PLAN_TO_WATCH = "planToWatch"
+    WATCHING = "watching"
+    WATCHED = "watched"
+    DROPPED = "dropped"
+
+
+class TMDbMetadataLanguage(StrEnum):
+    EN = "en"
+    JA = "ja"
+    ZH = "zh"
+
+
 class CallbackStrategy(StrEnum):
     MANUAL_PASTE = "manual-paste"
     LOOPBACK = "loopback"
@@ -47,7 +60,9 @@ __all__ = [
     "LibraryIdentity",
     "LibraryIdentityError",
     "LibraryListSort",
+    "LibraryWatchStatus",
     "MetadataDepth",
+    "TMDbMetadataLanguage",
     "library_identity_from_fields",
     "parse_library_identity",
 ]

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from anishelf_cli.models import HumanOutputStyle, MetadataDepth
+from anishelf_cli.models import HumanOutputStyle, MetadataDepth, TMDbMetadataLanguage
 
 APP_NAME = "anishelf-cli"
 POSIX_APP_DIR = f".{APP_NAME}"
@@ -16,8 +16,13 @@ DEFAULT_CONTAINER = "iCloud.com.samuelhe.MyAnimeList"
 DEFAULT_ENVIRONMENT = "production"
 DEFAULT_DATABASE = "private"
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
-DEFAULT_TMDB_METADATA_LANGUAGE = "en-US"
+DEFAULT_TMDB_METADATA_LANGUAGE = TMDbMetadataLanguage.EN.value
 DEFAULT_TMDB_HYDRATION_DEPTH = MetadataDepth.DETAILS
+TMDB_HTTP_LANGUAGE_TAGS = {
+    TMDbMetadataLanguage.EN.value: "en-US",
+    TMDbMetadataLanguage.JA.value: "ja-JP",
+    TMDbMetadataLanguage.ZH.value: "zh-CN",
+}
 
 KEYCHAIN_ACCOUNT = "anishelf-cli"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
@@ -218,20 +223,18 @@ def resolve_configured_tmdb_language(
     *,
     path: Path | None = None,
 ) -> str:
-    candidate = str(value).strip()
+    candidate = str(value).strip().lower()
     location = f" in {path}" if path is not None else ""
-    if not candidate:
-        raise UserConfigError(f"Invalid TMDb metadata language{location}: value cannot be empty.")
-    if any(character.isspace() for character in candidate):
+    if candidate not in TMDB_HTTP_LANGUAGE_TAGS:
+        valid = ", ".join(TMDB_HTTP_LANGUAGE_TAGS)
         raise UserConfigError(
-            f"Invalid TMDb metadata language {candidate!r}{location}. "
-            "Use a BCP 47-style TMDb language tag such as en-US or ja-JP."
-        )
-    if len(candidate) > 35:
-        raise UserConfigError(
-            f"Invalid TMDb metadata language {candidate!r}{location}. Value is too long."
+            f"Invalid TMDb metadata language {candidate!r}{location}. Expected one of: {valid}."
         )
     return candidate
+
+
+def tmdb_http_language_tag(language: str) -> str:
+    return TMDB_HTTP_LANGUAGE_TAGS[resolve_configured_tmdb_language(language)]
 
 
 def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefaults:

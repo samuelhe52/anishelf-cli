@@ -4,7 +4,7 @@ from typing import Annotated
 
 import typer
 
-from anishelf_cli.models import MetadataDepth
+from anishelf_cli.models import HumanOutputStyle, MetadataDepth
 
 MetadataOption = Annotated[
     MetadataDepth | None,
@@ -12,10 +12,8 @@ MetadataOption = Annotated[
         "--metadata",
         "-m",
         help=(
-            "Include TMDb metadata. Bare --metadata uses summary; explicit values may "
-            "be passed as --metadata none, summary, details, or full. "
-            "Use -- before a positional id or title named none, summary, details, "
-            "or full."
+            "Include TMDb metadata: none, summary, details, or full. "
+            "Use separated form, for example --metadata summary."
         ),
         show_default=False,
     ),
@@ -33,11 +31,11 @@ FieldListOption = Annotated[
     ),
 ]
 OutputStyleOption = Annotated[
-    str | None,
+    HumanOutputStyle | None,
     typer.Option(
         "--style",
         "-s",
-        help="Human output style: table or list. Use default to use the configured style.",
+        help="Human output style.",
         show_default=False,
     ),
 ]

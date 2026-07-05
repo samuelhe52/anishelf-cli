@@ -302,7 +302,7 @@ def test_metadata_summary_is_stored_separately_and_attached_on_read(
 
     raw_entry = store.list_entry_models()[0]
     assert raw_entry.metadata is None
-    attached = store.attach_metadata_summary_models([raw_entry], language="en-US")[0]
+    attached = store.attach_metadata_summary_models([raw_entry], language="en")[0]
     assert attached.metadata is not None
     assert attached.metadata.name == "Alien"
     assert attached.metadata.poster_path is None
@@ -319,12 +319,10 @@ def test_metadata_summary_cache_is_keyed_by_language(tmp_path, monkeypatch) -> N
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
     raw_entry = store.list_entry_models()[0]
-    assert (
-        store.attach_metadata_summary_models([raw_entry], language="en-US")[0].metadata is not None
-    )
-    assert store.attach_metadata_summary_models([raw_entry], language="ja-JP")[0].metadata is None
-    assert store.metadata_summary_status(language="en-US").ready is True
-    assert store.metadata_summary_status(language="ja-JP").ready is False
+    assert store.attach_metadata_summary_models([raw_entry], language="en")[0].metadata is not None
+    assert store.attach_metadata_summary_models([raw_entry], language="ja")[0].metadata is None
+    assert store.metadata_summary_status(language="en").ready is True
+    assert store.metadata_summary_status(language="ja").ready is False
 
 
 def test_metadata_projection_splits_summary_and_details_fields(
@@ -374,7 +372,7 @@ def test_metadata_upsert_does_not_downgrade_details_or_full_rows(
             FROM tmdb_metadata_items
             WHERE metadata_key = ? AND language = ?
             """,
-            ("movie:55", "en-US"),
+            ("movie:55", "en"),
         ).fetchone()
 
     assert row is not None
@@ -404,7 +402,7 @@ def test_metadata_upsert_replaces_shallow_row_with_richer_payload(
             FROM tmdb_metadata_items
             WHERE metadata_key = ? AND language = ?
             """,
-            ("movie:55", "en-US"),
+            ("movie:55", "en"),
         ).fetchone()
 
     assert row is not None
@@ -437,7 +435,7 @@ def test_metadata_upsert_replaces_equal_depth_payload(
             FROM tmdb_metadata_items
             WHERE metadata_key = ? AND language = ?
             """,
-            ("movie:55", "en-US"),
+            ("movie:55", "en"),
         ).fetchone()
 
     assert row is not None
@@ -474,7 +472,7 @@ def test_attach_metadata_summary_preserves_dict_compatibility(
     raw_entry = store.list_entry_models()[0]
     assert getattr(raw_entry, "metadata", None) is None
 
-    attached = store.attach_metadata_summary_models([raw_entry], language="en-US")[0]
+    attached = store.attach_metadata_summary_models([raw_entry], language="en")[0]
 
     assert attached.identity == "movie:55"
     assert attached.metadata is not None
@@ -493,19 +491,19 @@ def test_metadata_readiness_tracks_requested_depth(
     )
 
     assert store.missing_metadata_summary_targets() == []
-    assert store.outdated_metadata_summary_targets(language="en-US") == []
+    assert store.outdated_metadata_summary_targets(language="en") == []
     assert store.outdated_metadata_summary_targets(
-        language="en-US",
+        language="en",
         depth=MetadataDepth.DETAILS,
     ) == [TMDbSummaryIdentity(entry_type="movie", tmdb_id=55)]
-    assert store.metadata_summary_status(language="en-US").model_dump(mode="json") == {
+    assert store.metadata_summary_status(language="en").model_dump(mode="json") == {
         "tracked_entries": 1,
         "hydrated_entries": 1,
         "missing_entries": 0,
         "ready": True,
     }
     assert store.metadata_summary_status(
-        language="en-US",
+        language="en",
         depth=MetadataDepth.DETAILS,
     ).model_dump(mode="json") == {
         "tracked_entries": 1,
@@ -621,7 +619,7 @@ def test_cache_sync_upgrades_shallow_metadata_without_new_entries(
     assert refreshed.source_version is None
     assert (
         store.metadata_summary_status(
-            language="en-US",
+            language="en",
             depth=MetadataDepth.DETAILS,
         ).ready
         is True
@@ -1625,7 +1623,7 @@ def test_library_list_ad_hoc_language_fetches_details_live_without_cache_gate(
     )
 
     class FakeTMDbClient:
-        language = "en-US"
+        language = "en"
 
         def __init__(self, api_key: str) -> None:
             assert api_key == "tmdb-secret-token"
@@ -1649,18 +1647,18 @@ def test_library_list_ad_hoc_language_fetches_details_live_without_cache_gate(
             "--metadata",
             "details",
             "--tmdb-language",
-            "ja-JP",
+            "ja",
         ],
     )
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert requested == [("movie", 55, "details", "ja-JP")]
+    assert requested == [("movie", 55, "details", "ja")]
     assert payload["entries"][0]["metadata"]["name"] == "エイリアン"
     assert payload["entries"][0]["metadata"]["poster_path"] == "/poster.jpg"
     cached = store.attach_metadata_summary_models(
         store.list_entry_models(),
-        language="ja-JP",
+        language="ja",
         depth=MetadataDepth.DETAILS,
     )[0]
     assert cached.metadata is None
@@ -2339,7 +2337,7 @@ def test_cache_title_search_matches_parent_series_titles_for_seasons(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models("Cowboy", metadata_language="en-US")
+    entries = store.search_entry_models("Cowboy", metadata_language="en")
 
     assert [entry.identity for entry in entries] == ["series:22", "season:22:1:33"]
     assert store.display_titles_for_entries(entries) == {
@@ -2360,7 +2358,7 @@ def test_cache_title_search_still_matches_raw_season_titles(
         _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
     )
 
-    entries = store.search_entry_models("Season 1", metadata_language="en-US")
+    entries = store.search_entry_models("Season 1", metadata_language="en")
 
     assert [entry.identity for entry in entries] == ["season:22:1:33"]
 
@@ -2456,7 +2454,7 @@ def test_cache_search_matches_cached_on_air_date(tmp_path, monkeypatch) -> None:
         _metadata_summary("movie", 55, name="Date Match").with_updates(on_air_date="2030-12-25")
     )
 
-    entries = store.search_entry_models("2030", metadata_language="en-US")
+    entries = store.search_entry_models("2030", metadata_language="en")
 
     assert [entry.identity for entry in entries] == ["movie:55"]
 
@@ -2469,7 +2467,7 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         def metadata_summary_status(
             self,
             *,
-            language: str = "en-US",
+            language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
             _ = language
@@ -2484,7 +2482,7 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         def search_entry_models(
             self,
             query: str,
-            metadata_language: str = "en-US",
+            metadata_language: str = "en",
         ) -> list[LibraryEntryModel]:
             assert query == "Alien"
             return [validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))]
@@ -2493,7 +2491,7 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
             self,
             entries: list[LibraryEntryModel],
             *,
-            language: str = "en-US",
+            language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> list[LibraryEntryModel]:
             _ = language
@@ -2620,7 +2618,7 @@ def _fake_search_store() -> object:
         def metadata_summary_status(
             self,
             *,
-            language: str = "en-US",
+            language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
             _ = language
@@ -2635,7 +2633,7 @@ def _fake_search_store() -> object:
         def search_entry_models(
             self,
             query: str,
-            metadata_language: str = "en-US",
+            metadata_language: str = "en",
         ) -> list[LibraryEntryModel]:
             self.search_query_arg = query
             return [
@@ -2656,7 +2654,7 @@ def _fake_search_store() -> object:
             self,
             entries: list[LibraryEntryModel],
             *,
-            language: str = "en-US",
+            language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> list[LibraryEntryModel]:
             _ = language

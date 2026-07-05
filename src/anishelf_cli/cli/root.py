@@ -31,7 +31,7 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.core.output import emit_error, emit_json, set_current_app_state
 from anishelf_cli.core.redaction import SecretRedactor
-from anishelf_cli.models import AppState, CallbackStrategy, MetadataDepth
+from anishelf_cli.models import AppState, CallbackStrategy
 from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.models.output import (
     AuthLoginResult,
@@ -48,42 +48,19 @@ from anishelf_cli.secrets import (
     store_cloudkit_web_auth_token,
 )
 
-_DEFAULT_METADATA_DEPTH = MetadataDepth.SUMMARY.value
-_METADATA_DEPTH_VALUES = {depth.value for depth in MetadataDepth}
-_METADATA_OPTION_NAMES = {"--metadata", "-m"}
-
-
-def _normalize_metadata_args(args: list[str]) -> list[str]:
-    normalized: list[str] = []
-    index = 0
-
-    while index < len(args):
-        arg = args[index]
-        if arg == "--":
-            normalized.extend(args[index:])
-            break
-        if arg not in _METADATA_OPTION_NAMES:
-            normalized.append(arg)
-            index += 1
-            continue
-
-        # Support `--metadata none` alongside `--metadata=none`. Positional
-        # tokens that collide with metadata levels can still be passed after `--`.
-        next_arg = args[index + 1] if index + 1 < len(args) else None
-        if next_arg in _METADATA_DEPTH_VALUES:
-            normalized.append(f"--metadata={next_arg}")
-            index += 2
-            continue
-
-        normalized.append(f"--metadata={_DEFAULT_METADATA_DEPTH}")
-        index += 1
-
-    return normalized
-
 
 class AniTyperGroup(TyperGroup):
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
-        return super().parse_args(ctx, _normalize_metadata_args(list(args)))
+        for arg in args:
+            if arg.startswith("--metadata="):
+                raise typer.BadParameter(
+                    "Unsupported option spelling: use --metadata <level>, not --metadata=<level>."
+                )
+            if arg.startswith("-m="):
+                raise typer.BadParameter(
+                    "Unsupported option spelling: use -m <level>, not -m=<level>."
+                )
+        return super().parse_args(ctx, args)
 
 
 app = typer.Typer(

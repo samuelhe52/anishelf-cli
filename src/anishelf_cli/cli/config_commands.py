@@ -17,7 +17,12 @@ from anishelf_cli.core.output import (
     emit_json,
     emit_progress,
 )
-from anishelf_cli.models import CallbackStrategy
+from anishelf_cli.models import (
+    CallbackStrategy,
+    HumanOutputStyle,
+    MetadataDepth,
+    TMDbMetadataLanguage,
+)
 from anishelf_cli.models.output import (
     ConfigCallbackResult,
     ConfigCloudKitResult,
@@ -155,7 +160,7 @@ def config_show(
 def config_set_defaults(
     ctx: typer.Context,
     metadata: Annotated[
-        str | None,
+        MetadataDepth | None,
         typer.Option(
             "--metadata",
             "-m",
@@ -165,25 +170,19 @@ def config_set_defaults(
     ] = None,
     fields: FieldListOption = None,
     output_style: Annotated[
-        str | None,
+        HumanOutputStyle | None,
         typer.Option(
             "--style",
             "-s",
-            help=(
-                "Default human output style for library list/search: table or list. "
-                "Use default to reset to the built-in table style."
-            ),
+            help="Default human output style for library list/search.",
             show_default=False,
         ),
     ] = None,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
-            help=(
-                "Preferred TMDb metadata language such as en-US, ja-JP, or zh-CN. "
-                "Use default to reset to en-US."
-            ),
+            help="Preferred TMDb metadata language.",
             show_default=False,
         ),
     ] = None,
@@ -191,10 +190,7 @@ def config_set_defaults(
         str | None,
         typer.Option(
             "--hydration-depth",
-            help=(
-                "Default TMDb cache hydration depth: details or full. "
-                "Use default to reset to details."
-            ),
+            help="Default TMDb cache hydration depth: details or full.",
             show_default=False,
         ),
     ] = None,
@@ -249,38 +245,17 @@ def config_set_defaults(
         library_defaults = replace(library_defaults, display_fields=display_fields)
 
     if output_style is not None:
-        if output_style.strip().lower() == "default":
-            resolved_output_style = config.LibraryReadDefaults().output_style
-        else:
-            try:
-                resolved_output_style = config.resolve_configured_output_style(output_style)
-            except config.UserConfigError as exc:
-                emit_error(str(exc))
-                raise typer.Exit(code=2) from exc
-        library_defaults = replace(library_defaults, output_style=resolved_output_style)
+        library_defaults = replace(library_defaults, output_style=output_style)
 
     if tmdb_language is not None:
-        if tmdb_language.strip().lower() == "default":
-            resolved_tmdb_language = config.TMDbDefaults().metadata_language
-        else:
-            try:
-                resolved_tmdb_language = config.resolve_configured_tmdb_language(tmdb_language)
-            except config.UserConfigError as exc:
-                emit_error(str(exc))
-                raise typer.Exit(code=2) from exc
-        tmdb_defaults = replace(tmdb_defaults, metadata_language=resolved_tmdb_language)
+        tmdb_defaults = replace(tmdb_defaults, metadata_language=tmdb_language.value)
 
     if hydration_depth is not None:
-        if hydration_depth.strip().lower() == "default":
-            resolved_hydration_depth = config.TMDbDefaults().hydration_depth
-        else:
-            try:
-                resolved_hydration_depth = config.resolve_configured_hydration_depth(
-                    hydration_depth
-                )
-            except config.UserConfigError as exc:
-                emit_error(str(exc))
-                raise typer.Exit(code=2) from exc
+        try:
+            resolved_hydration_depth = config.resolve_configured_hydration_depth(hydration_depth)
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
         tmdb_defaults = replace(tmdb_defaults, hydration_depth=resolved_hydration_depth)
 
     if show_hidden is not None:

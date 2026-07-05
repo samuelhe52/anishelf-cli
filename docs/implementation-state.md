@@ -20,7 +20,7 @@ spec.
   library cache files.
 - `config show`, `config set-defaults`, and `config set-tmdb-api-key` are
   implemented. Defaults include library output behavior, preferred TMDb
-  metadata language (`en-US`), and TMDb hydration depth (`details`).
+  metadata language (`en`), and TMDb hydration depth (`details`).
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.

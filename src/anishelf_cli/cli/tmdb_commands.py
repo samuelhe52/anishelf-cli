@@ -13,6 +13,7 @@ from anishelf_cli.cli.presentation import (
     tmdb_search_payload,
 )
 from anishelf_cli.core.output import emit_error, emit_json
+from anishelf_cli.models import TMDbMetadataLanguage
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
@@ -68,7 +69,7 @@ def tmdb_search(
         ),
     ] = TMDbSearchType.ALL,
     tmdb_language: Annotated[
-        str | None,
+        TMDbMetadataLanguage | None,
         typer.Option(
             "--tmdb-language",
             help="Use a TMDb language for this search without changing the configured default.",
@@ -110,11 +111,7 @@ def _user_defaults_or_exit() -> config.UserDefaults:
         raise typer.Exit(code=2) from exc
 
 
-def _metadata_language(value: str | None, *, preferred_language: str) -> str:
+def _metadata_language(value: TMDbMetadataLanguage | None, *, preferred_language: str) -> str:
     if value is None:
         return preferred_language
-    try:
-        return config.resolve_configured_tmdb_language(value)
-    except config.UserConfigError as exc:
-        emit_error(str(exc))
-        raise typer.Exit(code=2) from exc
+    return value.value

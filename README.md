@@ -22,11 +22,11 @@ uv run ani lib list
 library into the local SQLite cache and hydrates TMDb metadata when a
 TMDb key is available. Later reads use the local cache by default.
 
-TMDb metadata is fetched in the configured preferred language, `en-US` by
+TMDb metadata is fetched in the configured preferred language, `en` by
 default. Change it with:
 
 ```bash
-uv run ani config set-defaults --tmdb-language ja-JP
+uv run ani config set-defaults --tmdb-language ja
 uv run ani lib clear-cache --yes
 uv run ani lib init
 ```
@@ -101,10 +101,11 @@ depth. Use `--live-meta` on `lib get` to refetch TMDb metadata only for the
 requested entries at the configured hydration depth, or at `full` when full
 output is requested, and write the refreshed rows back to the cache.
 
-Use `--tmdb-language <tag>` on `lib get`, `lib list`, `lib search`, `lib export`,
+Use `--tmdb-language <code>` on `lib get`, `lib list`, `lib search`, `lib export`,
 or `tmdb search` for a one-off language override. For library commands, a
 language that differs from the configured default is fetched live for that
-request and is not written back to the metadata cache.
+request and is not written back to the metadata cache. Supported public codes
+are `en`, `ja`, and `zh`.
 
 Use `ani lib clear-cache` to remove all local library cache files after an
 interactive confirmation. Pass `--yes` or `-y` to skip the prompt.
@@ -113,7 +114,9 @@ interactive confirmation. Pass `--yes` or `-y` to skip the prompt.
 
 Library read commands include cached TMDb summary metadata by default. Pass
 `--metadata none` to omit metadata from the output without making TMDb requests.
-Bare `--metadata` selects the default `summary` level.
+Pass `--metadata summary`, `--metadata details`, or `--metadata full` to choose
+another projection. `--metadata` requires a separated value; `--metadata=...`
+is not supported.
 
 Summary output includes compact fields only: `name`, `overview`, type-specific
 counts or runtime, `on_air_date`, and derived `parent_series_title` for seasons
