@@ -35,8 +35,8 @@ These original concerns are resolved or materially changed:
   `lib init`, and local-cache behavior.
 - `lib list` now has `--limit`, `--sort`, `--style table|list`, `--fields`, and
   `--show-hidden`.
-- Human collection output has a compact table path plus a list-style fallback,
-  although the default table is still not terminal-width-aware.
+- Human collection output has a compact width-aware table path plus a
+  list-style fallback.
 - `lib status` now reports total entries, visible entries, hidden entries, sync
   token state, and metadata readiness.
 - `tmdb search` is intentionally anime-only and supports discover mode when
@@ -51,6 +51,9 @@ These original concerns are resolved or materially changed:
 - Search surfaces now support human-sized result caps: `lib search <query>
   --limit <n>` and `tmdb search [title|--title <title>] --limit <n>`. `tmdb
   search Alien` is accepted as an alias for `tmdb search --title Alien`.
+- Default human tables now budget against terminal width and truncate overlong
+  cells with `...`, so normal collection output no longer wraps long titles or
+  identifiers.
 
 ## What Works Well
 
@@ -71,25 +74,7 @@ These original concerns are resolved or materially changed:
 
 ## Current Human-Facing Issues
 
-### 1. Default tables are still width-unaware
-
-The original table-overflow issue is mitigated but not fixed. At `COLUMNS=80`,
-the current default `lib list --limit 3` table can still wrap headers and long
-titles because `core.output._print_table` computes full content widths and emits
-plain aligned text without truncation or terminal-width budgeting.
-
-Current escape hatches work:
-
-```bash
-ani lib list --fields title,id,status --limit 3
-ani lib list --style list --limit 3
-ani config set-defaults --style list
-```
-
-Recommendation: either truncate the title column in table mode, use Rich's table
-layout with `overflow="ellipsis"`, or drop low-priority columns adaptively below
-a width threshold. This remains the highest-impact human UX issue because it
-affects normal list/search inspection.
+No open human-facing issues remain from this review pass.
 
 ## Current Agent-Facing Issues
 
@@ -132,6 +117,5 @@ could make any item error nonzero, but that is optional rather than urgent.
 
 ## Suggested Priority
 
-1. Make human tables width-aware or truncate low-value columns.
-2. Switch emitted JSON to `ensure_ascii=False`.
-3. Document the `entries` / `items` JSON collection-key split.
+1. Switch emitted JSON to `ensure_ascii=False`.
+2. Document the `entries` / `items` JSON collection-key split.

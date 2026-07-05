@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 import typer
+from rich.cells import cell_len, set_cell_size
 from rich.console import Console
 from rich.text import Text
 
@@ -140,11 +141,12 @@ def _print_table(out: Console, table: HumanTable) -> None:
 
     widths = {
         column.key: max(
-            len(column.label),
-            *(len(_human_value(row.get(column.key))) for row in table.rows),
+            cell_len(column.label),
+            *(cell_len(_human_value(row.get(column.key))) for row in table.rows),
         )
         for column in table.columns
     }
+    widths = _fit_table_widths(widths, table.columns, max_width=out.width)
     header = Text("  ")
     for index, column in enumerate(table.columns):
         if index:
@@ -161,8 +163,50 @@ def _print_table(out: Console, table: HumanTable) -> None:
         out.print(line)
 
 
+def _fit_table_widths(
+    widths: dict[str, int],
+    columns: Sequence[HumanTableColumn],
+    *,
+    max_width: int,
+) -> dict[str, int]:
+    fitted_widths = dict(widths)
+    table_indent = 2
+    column_spacing = 2 * max(len(columns) - 1, 0)
+    available = max(max_width - table_indent - column_spacing, len(columns))
+
+    def total_width() -> int:
+        return sum(fitted_widths[column.key] for column in columns)
+
+    def shrink_to(minimum_width: int) -> None:
+        while total_width() > available:
+            shrinkable = [column for column in columns if fitted_widths[column.key] > minimum_width]
+            if not shrinkable:
+                return
+            widest = max(
+                shrinkable,
+                key=lambda column: (column.key != "title", fitted_widths[column.key]),
+            )
+            fitted_widths[widest.key] -= 1
+
+    shrink_to(minimum_width=3)
+    shrink_to(minimum_width=1)
+    return fitted_widths
+
+
 def _align(value: str, width: int, align: Literal["left", "right"]) -> str:
-    return value.rjust(width) if align == "right" else value.ljust(width)
+    fitted = _truncate_cell(value, width)
+    padding = max(width - cell_len(fitted), 0)
+    if align == "right":
+        return f"{' ' * padding}{fitted}"
+    return f"{fitted}{' ' * padding}"
+
+
+def _truncate_cell(value: str, width: int) -> str:
+    if cell_len(value) <= width:
+        return value
+    if width <= 3:
+        return set_cell_size(value, width)
+    return f"{set_cell_size(value, width - 3).rstrip()}..."
 
 
 def _human_value(value: object) -> str:

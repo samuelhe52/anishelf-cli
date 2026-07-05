@@ -63,6 +63,44 @@ def test_emit_human_blocks_formats_empty_table(capsys) -> None:
     assert capsys.readouterr().out == "Library\n  No library entries.\n"
 
 
+def test_emit_human_blocks_truncates_wide_tables_to_console_width(capsys, monkeypatch) -> None:
+    from rich.console import Console
+
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.setattr(
+        output_module,
+        "console",
+        lambda stderr=False: Console(width=42, stderr=stderr),
+    )
+
+    emit_human_blocks(
+        [
+            HumanTable(
+                "Library",
+                (
+                    HumanTableColumn("title", "Title"),
+                    HumanTableColumn("id", "ID"),
+                    HumanTableColumn("status", "Status"),
+                ),
+                (
+                    {
+                        "title": "A Very Long Localized Movie Title That Would Wrap",
+                        "id": "movie:12345678901234567890",
+                        "status": "watching",
+                    },
+                ),
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    lines = output.splitlines()
+    assert all(len(line) <= 42 for line in lines)
+    assert "..." in output
+    assert "A Very Long" in output
+
+
 def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, monkeypatch) -> None:
     from rich.console import Console
 
