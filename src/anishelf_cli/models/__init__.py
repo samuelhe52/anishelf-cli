@@ -22,6 +22,12 @@ class LibraryListSort(StrEnum):
     SAVED = "saved"
     UPDATED = "updated"
     TITLE = "title"
+    SCORE = "score"
+    STARTED = "started"
+    FINISHED = "finished"
+    TYPE = "type"
+    WATCH_STATUS = "watch-status"
+    AIR_DATE = "air-date"
 
 
 class HumanOutputStyle(StrEnum):

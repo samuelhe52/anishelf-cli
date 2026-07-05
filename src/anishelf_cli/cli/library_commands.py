@@ -417,7 +417,13 @@ def library_list(
     ] = False,
     sort: Annotated[
         LibraryListSort,
-        typer.Option("--sort", help="Sort by saved, updated, or title."),
+        typer.Option(
+            "--sort",
+            help=(
+                "Sort by saved, updated, title, score, started, finished, type, "
+                "watch-status, or air-date."
+            ),
+        ),
     ] = LibraryListSort.UPDATED,
     limit: Annotated[
         int | None,

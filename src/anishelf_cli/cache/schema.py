@@ -18,6 +18,23 @@ UPDATED_SORT_EXPRESSION = (
     "ELSE library_updated_at "
     "END"
 )
+ENTRY_TYPE_SORT_EXPRESSION = (
+    "CASE "
+    "WHEN entry_type = 'movie' THEN 0 "
+    "WHEN entry_type = 'series' THEN 1 "
+    "WHEN entry_type = 'season' THEN 2 "
+    "ELSE 3 "
+    "END"
+)
+WATCH_STATUS_SORT_EXPRESSION = (
+    "CASE "
+    "WHEN watch_status = 'planToWatch' THEN 0 "
+    "WHEN watch_status = 'watching' THEN 1 "
+    "WHEN watch_status = 'watched' THEN 2 "
+    "WHEN watch_status = 'dropped' THEN 3 "
+    "ELSE 4 "
+    "END"
+)
 
 
 class LibraryCacheError(RuntimeError):
@@ -165,6 +182,33 @@ def list_order_by(sort: str) -> str:
     if sort == "updated":
         return f"ORDER BY {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
     if sort == "title":
+        return "ORDER BY identity ASC"
+    if sort == "score":
+        return (
+            f"ORDER BY score DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
+            "identity ASC"
+        )
+    if sort == "started":
+        return (
+            f"ORDER BY date_started DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
+            "identity ASC"
+        )
+    if sort == "finished":
+        return (
+            f"ORDER BY date_finished DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
+            "identity ASC"
+        )
+    if sort == "type":
+        return (
+            f"ORDER BY {ENTRY_TYPE_SORT_EXPRESSION} ASC, "
+            f"{UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
+        )
+    if sort == "watch-status":
+        return (
+            f"ORDER BY {WATCH_STATUS_SORT_EXPRESSION} ASC, "
+            f"{UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
+        )
+    if sort == "air-date":
         return "ORDER BY identity ASC"
     raise LibraryCacheError(f"Unsupported library list sort: {sort}.")
 

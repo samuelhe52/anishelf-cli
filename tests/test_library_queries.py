@@ -54,6 +54,43 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
     }
 
 
+def test_air_date_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -> None:
+    store = FakeQueryStore(
+        [
+            _entry("movie:55", "movie", 55),
+            _entry("series:66", "series", 66),
+            _entry("movie:77", "movie", 77),
+        ],
+        metadata={
+            "movie:55": {"name": "Alien", "on_air_date": "1979-05-25"},
+            "series:66": {"name": "Cowboy Bebop", "on_air_date": "1998-04-03"},
+            "movie:77": {"name": "Untitled"},
+        },
+    )
+
+    result = build_library_list_result(
+        store,
+        metadata_depth=MetadataDepth.NONE,
+        cache=cache_summary_payload(store, None),
+        watch_status=None,
+        show_hidden=False,
+        favorite=False,
+        sort=LibraryListSort.AIR_DATE,
+        limit=2,
+    )
+
+    assert [entry.identity for entry in result.entries] == ["series:66", "movie:55"]
+    assert all(entry.metadata is None for entry in result.entries)
+    assert store.list_filter_kwargs["limit"] is None
+    assert store.list_filter_kwargs["sort"] == "air-date"
+    assert store.status_requests == [MetadataDepth.SUMMARY]
+    assert result.model_dump(mode="json")["metadata"] == {
+        "requested": "none",
+        "attached": False,
+        "source": None,
+    }
+
+
 def test_list_show_hidden_controls_default_display_filter() -> None:
     store = FakeQueryStore(
         [

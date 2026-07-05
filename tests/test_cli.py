@@ -288,7 +288,7 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
                 "[none|summary|details|full]",
                 "[table|list]",
                 "[planToWatch|watching|watched|dropped]",
-                "[saved|updated|title]",
+                "[saved|updated|title|score|started|finished|type|watch-status|air-date]",
                 "[en|ja|zh]",
             ),
             ("--refresh-meta",),

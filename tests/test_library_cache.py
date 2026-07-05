@@ -1950,6 +1950,93 @@ def test_library_list_updated_sort_uses_newest_update_clock(tmp_path, monkeypatc
     ]
 
 
+def test_library_list_supports_additional_snapshot_sorts(tmp_path, monkeypatch) -> None:
+    movie = _live_record("movie:55", "movie", 55)
+    series = _live_record("series:22", "series", 22, watch_status="watching")
+    season = _live_record("season:22:1:33", "season", 33, watch_status="dropped")
+
+    movie["fields"]["score"]["value"] = 7
+    movie["fields"]["dateStarted"]["value"] = "2026-05-03T00:00:00Z"
+    movie["fields"]["dateFinished"]["value"] = "2026-05-09T00:00:00Z"
+    movie["fields"]["libraryUpdatedAt"]["value"] = "2026-05-08T00:00:00Z"
+    movie["fields"]["trackingUpdatedAt"]["value"] = "2026-05-10T00:00:00Z"
+
+    series["fields"]["score"]["value"] = 9
+    series["fields"]["dateStarted"]["value"] = "2026-05-05T00:00:00Z"
+    series["fields"]["dateFinished"]["value"] = "2026-05-07T00:00:00Z"
+    series["fields"]["libraryUpdatedAt"]["value"] = "2026-05-07T00:00:00Z"
+    series["fields"]["trackingUpdatedAt"]["value"] = "2026-05-11T00:00:00Z"
+
+    season["fields"]["score"]["value"] = 5
+    season["fields"]["dateStarted"]["value"] = "2026-05-04T00:00:00Z"
+    season["fields"]["dateFinished"]["value"] = "2026-05-08T00:00:00Z"
+    season["fields"]["libraryUpdatedAt"]["value"] = "2026-05-06T00:00:00Z"
+    season["fields"]["trackingUpdatedAt"]["value"] = "2026-05-09T00:00:00Z"
+
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        movie,
+        series,
+        season,
+    )
+
+    expected_orders = {
+        "score": ["series:22", "movie:55", "season:22:1:33"],
+        "started": ["series:22", "season:22:1:33", "movie:55"],
+        "finished": ["movie:55", "season:22:1:33", "series:22"],
+        "type": ["movie:55", "series:22", "season:22:1:33"],
+        "watch-status": ["series:22", "movie:55", "season:22:1:33"],
+    }
+
+    for sort, expected_ids in expected_orders.items():
+        result = runner.invoke(app, ["--json", "lib", "list", "--sort", sort])
+        assert result.exit_code == 0, result.output
+        payload = json.loads(result.stdout)
+        assert payload["filters"]["sort"] == sort
+        assert [entry["id"] for entry in payload["entries"]] == expected_ids
+
+
+def test_library_list_air_date_sort_uses_cached_metadata_when_output_metadata_is_disabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    (tmp_path / "config").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "config" / "config.toml").write_text('[library]\nmetadata = "none"\n')
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("series:22", "series", 22),
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("movie", 55, name="Alien").with_updates(on_air_date="1979-05-25")
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("series", 22, name="Cowboy Bebop").with_updates(on_air_date="1998-04-03")
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary(
+            "season", 33, name="Season 1", parent_series_id=22, season_number=1
+        ).with_updates(on_air_date="1998-04-10")
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list", "--sort", "air-date", "--limit", "2"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["metadata"] == {
+        "requested": "none",
+        "attached": False,
+        "source": None,
+    }
+    assert payload["filters"]["sort"] == "air-date"
+    assert [entry["id"] for entry in payload["entries"]] == ["season:22:1:33", "series:22"]
+    assert all("metadata" not in entry for entry in payload["entries"])
+
+
 def test_library_list_uses_configured_show_hidden_default(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
     (tmp_path / "config").mkdir(parents=True, exist_ok=True)

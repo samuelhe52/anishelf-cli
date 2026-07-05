@@ -59,11 +59,12 @@ spec.
   differs from the preferred language: metadata is fetched live for output
   and is not written to the cache.
 - `lib list` has first-pass ergonomic filters and ordering for common
-  questions: watch status, favorites, saved/updated/title sort, and result
-  limits. Human output supports `--style table|list` and configurable display
-  fields. Table output keeps inflexible fields readable, truncates flexible
-  title/id fields when needed, uses compact dates and missing-value labels,
-  and omits the display column unless hidden entries are included. List-style
+  questions: watch status, favorites, recent/activity/date ordering, metadata-
+  backed title/date ordering, and result limits. Human output supports `--style
+  table|list` and configurable display fields. Table output keeps inflexible
+  fields readable, truncates flexible title/id fields when needed, uses compact
+  dates and missing-value labels, and omits the display column unless hidden
+  entries are included. List-style
   human output appends bounded metadata rows according to
   `--metadata`, while `--metadata none` suppresses metadata rows but may still
   use cached TMDb display titles. Hidden entries are excluded from collection

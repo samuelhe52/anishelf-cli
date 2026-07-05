@@ -5,7 +5,7 @@ from typing import Protocol
 from anishelf_cli import config
 from anishelf_cli.cache.sync import LibraryCacheRefreshResult
 from anishelf_cli.models import LibraryListSort, MetadataDepth
-from anishelf_cli.models.domain import LibraryEntryModel, LibraryEntrySnapshot
+from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel, LibraryEntrySnapshot
 from anishelf_cli.models.output import (
     CacheMetadataStatusResult,
     LibraryEntriesCacheResult,
@@ -109,10 +109,10 @@ def build_library_list_result(
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
-    if sort is LibraryListSort.TITLE:
+    if _sort_requires_summary_metadata(sort):
         require_metadata_ready(
             store,
-            action="sort library entries by title",
+            action=f"sort library entries by {_sort_label(sort)}",
             hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
             metadata_language=metadata_language,
             metadata_depth=MetadataDepth.SUMMARY,
@@ -135,7 +135,7 @@ def build_library_list_result(
         favorite=True if favorite else None,
         on_display=None if show_hidden else True,
         sort=sort.value,
-        limit=None if sort is LibraryListSort.TITLE else limit,
+        limit=None if _sort_requires_postfetch_sort(sort) else limit,
     )
     sort_entries = attach_metadata_for_depth(
         store,
@@ -143,15 +143,15 @@ def build_library_list_result(
         metadata_depth,
         metadata_language=metadata_language,
     )
-    if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
+    if _sort_requires_summary_metadata(sort) and metadata_depth is MetadataDepth.NONE:
         sort_entries = store.attach_metadata_summary_models(
             entries,
             language=metadata_language,
         )
-    entries = sort_entries_by_title(sort_entries, sort)
-    if sort is LibraryListSort.TITLE and metadata_depth is MetadataDepth.NONE:
+    entries = sort_entries_for_list(sort_entries, sort)
+    if _sort_requires_summary_metadata(sort) and metadata_depth is MetadataDepth.NONE:
         entries = strip_entry_metadata(entries)
-    if sort is LibraryListSort.TITLE and limit is not None:
+    if _sort_requires_postfetch_sort(sort) and limit is not None:
         entries = entries[:limit]
     return LibraryEntriesResult(
         entries=tuple(entries),
@@ -341,19 +341,49 @@ def library_list_filters_payload(
     )
 
 
-def sort_entries_by_title(
+def sort_entries_for_list(
     entries: list[LibraryEntryModel],
     sort: LibraryListSort,
 ) -> list[LibraryEntryModel]:
-    if sort is not LibraryListSort.TITLE:
-        return entries
-    return sorted(
-        entries,
-        key=lambda entry: (
-            entry.title.lower(),
-            entry.identity,
-        ),
-    )
+    if sort is LibraryListSort.TITLE:
+        return sorted(
+            entries,
+            key=lambda entry: (
+                entry.title.lower(),
+                entry.identity,
+            ),
+        )
+    if sort is LibraryListSort.AIR_DATE:
+        entries_by_identity = sorted(entries, key=lambda entry: entry.identity)
+        return sorted(
+            entries_by_identity,
+            key=lambda entry: _air_date_sort_value(entry) or "",
+            reverse=True,
+        )
+    return entries
+
+
+def _sort_requires_summary_metadata(sort: LibraryListSort) -> bool:
+    return sort in {LibraryListSort.TITLE, LibraryListSort.AIR_DATE}
+
+
+def _sort_requires_postfetch_sort(sort: LibraryListSort) -> bool:
+    return sort in {LibraryListSort.TITLE, LibraryListSort.AIR_DATE}
+
+
+def _sort_label(sort: LibraryListSort) -> str:
+    if sort is LibraryListSort.AIR_DATE:
+        return "air date"
+    return sort.value.replace("-", " ")
+
+
+def _air_date_sort_value(entry: LibraryEntryModel) -> str | None:
+    metadata = getattr(entry, "metadata", None)
+    if not isinstance(metadata, LibraryEntryMetadata):
+        return None
+    if metadata.on_air_date is not None:
+        return metadata.on_air_date
+    return metadata.release_date or metadata.first_air_date
 
 
 def strip_entry_metadata(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
