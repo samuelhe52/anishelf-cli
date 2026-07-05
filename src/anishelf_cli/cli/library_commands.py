@@ -180,11 +180,12 @@ def library_get(
         if store is not None:
             _add_parent_series_titles_to_get_payload(
                 payload,
-                _display_titles_for_entries(
+                _parent_series_titles_for_entries(
                     store,
                     list(cached_entries.values()),
                     language=request_language,
                     preferred_language=preferred_language,
+                    metadata_depth=metadata_depth,
                 ),
             )
         _sanitize_library_get_payload(payload)
@@ -196,11 +197,12 @@ def library_get(
                 list(cached_entries.values()),
                 language=request_language,
                 preferred_language=preferred_language,
+                metadata_depth=metadata_depth,
             )
             if store is not None
             else {}
         )
-        render_library_get(envelope, display_titles=display_titles)
+        render_library_get(envelope, display_titles=display_titles, metadata_depth=metadata_depth)
 
     if not has_any_found_item(envelope):
         raise typer.Exit(code=1)
@@ -460,20 +462,17 @@ def library_list(
     if machine_output:
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(
+            _parent_series_titles_for_entries(
                 store,
                 list(result.entries),
                 language=request_language,
                 preferred_language=preferred_language,
+                metadata_depth=metadata_depth,
             ),
         )
         emit_json(payload)
         return
-    display_entries = (
-        list(result.entries)
-        if ad_hoc_language
-        else store.attach_metadata_summary_models(list(result.entries), language=preferred_language)
-    )
+    display_entries = list(result.entries)
     render_library_list(
         display_entries,
         fields=_resolve_display_fields(fields, command_default=LIBRARY_LIST_DEFAULT_FIELDS),
@@ -483,7 +482,9 @@ def library_list(
             display_entries,
             language=request_language,
             preferred_language=preferred_language,
+            metadata_depth=metadata_depth,
         ),
+        metadata_depth=metadata_depth,
     )
 
 
@@ -554,20 +555,17 @@ def library_search(
     if machine_output:
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(
+            _parent_series_titles_for_entries(
                 store,
                 list(result.entries),
                 language=request_language,
                 preferred_language=preferred_language,
+                metadata_depth=metadata_depth,
             ),
         )
         emit_json(payload)
         return
-    display_entries = (
-        list(result.entries)
-        if ad_hoc_language
-        else store.attach_metadata_summary_models(list(result.entries), language=preferred_language)
-    )
+    display_entries = list(result.entries)
     render_library_search(
         query,
         display_entries,
@@ -578,7 +576,9 @@ def library_search(
             display_entries,
             language=request_language,
             preferred_language=preferred_language,
+            metadata_depth=metadata_depth,
         ),
+        metadata_depth=metadata_depth,
     )
 
 
@@ -642,11 +642,12 @@ def library_export(
     if json_output_requested(ctx, json_output):
         _add_parent_series_titles_to_entries_payload(
             payload,
-            _display_titles_for_entries(
+            _parent_series_titles_for_entries(
                 store,
                 list(result.entries),
                 language=request_language,
                 preferred_language=preferred_language,
+                metadata_depth=metadata_depth,
             ),
         )
         emit_json(payload)
@@ -837,15 +838,15 @@ def _add_parent_series_title_to_entry_payload(
     entry: dict[str, object],
     parent_series_titles: dict[str, str],
 ) -> None:
-    identity = entry.get("id")
-    if not isinstance(identity, str):
-        return
-    parent_series_title = parent_series_titles.get(identity)
-    if parent_series_title is None:
-        return
     metadata = entry.get("metadata")
-    if isinstance(metadata, dict):
-        cast(dict[str, object], metadata)["parent_series_title"] = parent_series_title
+    if not isinstance(metadata, dict):
+        return
+    if entry.get("entry_type") != "season":
+        cast(dict[str, object], metadata)["parent_series_title"] = None
+        return
+    identity = entry.get("id")
+    parent_series_title = parent_series_titles.get(identity) if isinstance(identity, str) else None
+    cast(dict[str, object], metadata)["parent_series_title"] = parent_series_title
 
 
 def _display_titles_for_entries(
@@ -854,7 +855,10 @@ def _display_titles_for_entries(
     *,
     language: str,
     preferred_language: str,
+    metadata_depth: MetadataDepth,
 ) -> dict[str, str]:
+    if metadata_depth is MetadataDepth.NONE:
+        language = preferred_language
     if language != preferred_language:
         return _live_parent_series_titles_for_entries(entries, language=language)
     display_titles = getattr(store, "display_titles_for_entries", None)
@@ -863,6 +867,27 @@ def _display_titles_for_entries(
     return cast(
         Callable[..., dict[str, str]],
         display_titles,
+    )(entries, language=preferred_language)
+
+
+def _parent_series_titles_for_entries(
+    store: object,
+    entries: list[LibraryEntryModel],
+    *,
+    language: str,
+    preferred_language: str,
+    metadata_depth: MetadataDepth,
+) -> dict[str, str]:
+    if metadata_depth is MetadataDepth.NONE:
+        return {}
+    if language != preferred_language:
+        return _live_parent_series_titles_for_entries(entries, language=language)
+    parent_titles = getattr(store, "parent_series_titles_for_entries", None)
+    if not callable(parent_titles):
+        return {}
+    return cast(
+        Callable[..., dict[str, str]],
+        parent_titles,
     )(entries, language=preferred_language)
 
 

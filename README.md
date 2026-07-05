@@ -77,7 +77,9 @@ uv run ani config set-defaults --show-hidden
 
 `lib list` and `lib search` use compact table output by default. Pass
 `--style list` for a per-entry human layout similar to `lib get`, and use
-`--fields` to choose which fields appear in either human style:
+`--fields` to choose which base library fields appear in either human style.
+When metadata is requested, list-style human output appends bounded metadata
+rows after those base fields; table output stays compact:
 
 ```bash
 uv run ani lib list --style list --fields title,id,status
@@ -117,6 +119,11 @@ Library read commands include cached TMDb summary metadata by default. Pass
 Pass `--metadata summary`, `--metadata details`, or `--metadata full` to choose
 another projection. `--metadata` requires a separated value; `--metadata=...`
 is not supported.
+
+For human output, `lib get` and `lib list --style list` / `lib search --style
+list` render metadata rows according to the requested depth. `--metadata none`
+suppresses those rows, although cached TMDb titles may still be used as display
+titles for readability. Human table output remains a compact base-field table.
 
 Summary output includes compact fields only: `name`, `overview`, type-specific
 counts or runtime, `on_air_date`, and derived `parent_series_title` for seasons

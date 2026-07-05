@@ -41,6 +41,41 @@ from tests.support import (
 )
 
 
+def _rich_metadata(
+    entry_type: str,
+    tmdb_id: int,
+    *,
+    name: str,
+) -> LibraryEntryMetadata:
+    return _metadata_summary(entry_type, tmdb_id, name=name).with_updates(
+        runtime_minutes=117 if entry_type == "movie" else None,
+        link_to_details=f"https://example.com/{entry_type}/{tmdb_id}",
+        genres=({"id": 878, "name": "Science Fiction"}, {"id": 27, "name": "Horror"}),
+        vote_average=8.5,
+        vote_count=1200,
+        popularity=35.5,
+        status="Released",
+        release_date="1979-05-25",
+        tagline="In space no one can hear you scream.",
+        subtitle="Director's cut",
+        logo_path="/logo.svg",
+        season_summaries=(
+            {
+                "season_number": 1,
+                "name": "Season 1",
+                "episode_count": 10,
+            },
+        ),
+        episode_summaries=(
+            {
+                "season_number": 1,
+                "episode_number": 1,
+                "name": "Pilot",
+            },
+        ),
+    )
+
+
 def test_library_get_requires_init_before_lookup(tmp_path, monkeypatch) -> None:
     _isolate_paths(monkeypatch, tmp_path)
     result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
@@ -553,6 +588,21 @@ def test_library_get_json_details_includes_detail_metadata_fields(
     assert "name_translations" not in metadata
 
 
+def test_library_get_json_sets_parent_series_title_null_for_non_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
+
+    assert result.exit_code == 0, result.output
+    metadata = json.loads(result.stdout)["items"][0]["entry"]["metadata"]
+    assert metadata["name"] == "Alien"
+    assert metadata["parent_series_title"] is None
+
+
 def test_library_get_json_details_does_not_attach_summary_cache_row(
     tmp_path,
     monkeypatch,
@@ -733,6 +783,100 @@ def test_library_get_human_output_accepts_live_envelope_model() -> None:
     assert "  ID                movie:55\n" in output
     assert "  Overview\n" in output
     assert "decode-error" not in output
+
+
+def test_library_get_human_metadata_none_preserves_cached_display_title_without_rows(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_rich_metadata("movie", 55, name="Alien")],
+        depth=MetadataDepth.FULL,
+    )
+
+    result = runner.invoke(app, ["lib", "get", "movie:55", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    assert "\nAlien\n" in result.stdout
+    assert "  Title             Alien\n" in result.stdout
+    assert "  Overview" not in result.stdout
+    assert "  Link" not in result.stdout
+    assert "  Genres" not in result.stdout
+    assert "  Name translations" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("metadata_depth", "expected", "unexpected"),
+    [
+        (
+            "summary",
+            ("Overview", "On air", "Runtime"),
+            (
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Name translations",
+                "Season summaries",
+            ),
+        ),
+        (
+            "details",
+            (
+                "Overview",
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Original language",
+                "Release date",
+            ),
+            ("Name translations", "Season summaries", "Episode summaries"),
+        ),
+        (
+            "full",
+            (
+                "Overview",
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Name translations",
+                "Season summaries",
+                "Episode summaries",
+            ),
+            (),
+        ),
+    ],
+)
+def test_library_get_human_output_respects_metadata_depth(
+    tmp_path,
+    monkeypatch,
+    metadata_depth: str,
+    expected: tuple[str, ...],
+    unexpected: tuple[str, ...],
+) -> None:
+    store = _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_rich_metadata("movie", 55, name="Alien")],
+        depth=MetadataDepth.FULL,
+    )
+
+    result = runner.invoke(app, ["lib", "get", "movie:55", "--metadata", metadata_depth])
+
+    assert result.exit_code == 0, result.output
+    assert "\nAlien\n" in result.stdout
+    for text in expected:
+        assert f"  {text}" in result.stdout
+    for text in unexpected:
+        assert f"  {text}" not in result.stdout
 
 
 def test_library_get_not_found_is_item_error_and_all_failures_exit_nonzero(

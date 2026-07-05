@@ -59,6 +59,45 @@ from tests.support import (
 )
 
 
+def _rich_metadata(
+    entry_type: str,
+    tmdb_id: int,
+    *,
+    name: str,
+) -> LibraryEntryMetadata:
+    return _metadata_summary(entry_type, tmdb_id, name=name).with_updates(
+        number_of_seasons=1,
+        number_of_episodes=26,
+        runtime_minutes=117 if entry_type == "movie" else None,
+        link_to_details=f"https://example.com/{entry_type}/{tmdb_id}",
+        genres=({"id": 16, "name": "Animation"}, {"id": 10759, "name": "Action"}),
+        vote_average=8.7,
+        vote_count=1000,
+        popularity=42.5,
+        status="Ended",
+        first_air_date="1998-04-03",
+        last_air_date="1999-04-24",
+        release_date="1979-05-25" if entry_type == "movie" else None,
+        tagline="See you space cowboy.",
+        subtitle="The real folk blues.",
+        logo_path="/logo.svg",
+        season_summaries=(
+            {
+                "season_number": 1,
+                "name": "Season 1",
+                "episode_count": 26,
+            },
+        ),
+        episode_summaries=(
+            {
+                "season_number": 1,
+                "episode_number": 1,
+                "name": "Asteroid Blues",
+            },
+        ),
+    )
+
+
 def test_cloudkit_record_types_nested_cloudkit_metadata() -> None:
     payload = {
         "recordID": {
@@ -844,6 +883,7 @@ def test_display_titles_for_entries_uses_parent_series_metadata_for_seasons(
     assert season.metadata_title == "Season 1"
     assert season.title == "Season 1"
     assert store.display_titles_for_entries(entries) == {
+        "series:22": "Cowboy Bebop",
         "season:22:1:33": "Cowboy Bebop",
     }
 
@@ -1999,9 +2039,11 @@ def test_library_list_style_flag_renders_human_entries_as_sections(
 
     assert result.exit_code == 0, result.output
     assert "Library entries\n" in result.stdout
-    assert "  Entries  1\n" in result.stdout
+    assert "Entries" in result.stdout
+    assert "1\n" in result.stdout
     assert "\nAlien\n" in result.stdout
-    assert "  ID       movie:55\n" in result.stdout
+    assert "ID" in result.stdout
+    assert "movie:55" in result.stdout
 
 
 def test_library_list_style_uses_configured_default_for_human_output(
@@ -2019,7 +2061,8 @@ def test_library_list_style_uses_configured_default_for_human_output(
     assert result.exit_code == 0, result.output
     assert "Library entries\n" in result.stdout
     assert "\nAlien\n" in result.stdout
-    assert "  ID       movie:55\n" in result.stdout
+    assert "ID" in result.stdout
+    assert "movie:55" in result.stdout
 
 
 def test_library_list_style_list_respects_fields_selection(
@@ -2029,7 +2072,10 @@ def test_library_list_style_list_respects_fields_selection(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["lib", "list", "--style", "list", "--fields", "id,status"])
+    result = runner.invoke(
+        app,
+        ["lib", "list", "--style", "list", "--fields", "id,status", "--metadata", "none"],
+    )
 
     assert result.exit_code == 0, result.output
     assert "\nmovie:55\n" in result.stdout
@@ -2046,7 +2092,7 @@ def test_library_list_accepts_short_style_and_fields_options(
     store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
     store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
 
-    result = runner.invoke(app, ["lib", "list", "-s", "list", "-f", "id,status"])
+    result = runner.invoke(app, ["lib", "list", "-s", "list", "-f", "id,status", "-m", "none"])
 
     assert result.exit_code == 0, result.output
     assert "\nmovie:55\n" in result.stdout
@@ -2054,6 +2100,114 @@ def test_library_list_accepts_short_style_and_fields_options(
     assert "  Status   watched\n" in result.stdout
     assert "Title" not in result.stdout
     assert "Alien" not in result.stdout
+
+
+def test_library_list_style_list_metadata_none_preserves_cached_display_title_without_rows(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summaries(
+        [_rich_metadata("movie", 55, name="Alien")],
+        depth=MetadataDepth.FULL,
+    )
+
+    result = runner.invoke(app, ["lib", "list", "--style", "list", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    assert "\nAlien\n" in result.stdout
+    assert "  Overview" not in result.stdout
+    assert "  Link" not in result.stdout
+    assert "  Genres" not in result.stdout
+    assert "  Name translations" not in result.stdout
+
+
+@pytest.mark.parametrize(
+    ("metadata_depth", "expected", "unexpected"),
+    [
+        (
+            "summary",
+            ("Overview", "On air", "Seasons", "Episodes"),
+            (
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Name translations",
+                "Season summaries",
+            ),
+        ),
+        (
+            "details",
+            (
+                "Overview",
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Original language",
+            ),
+            ("Name translations", "Season summaries", "Episode summaries"),
+        ),
+        (
+            "full",
+            (
+                "Overview",
+                "Link",
+                "Poster path",
+                "Backdrop path",
+                "Logo path",
+                "Genres",
+                "Rating",
+                "Name translations",
+                "Season summaries",
+                "Episode summaries",
+            ),
+            (),
+        ),
+    ],
+)
+@pytest.mark.parametrize(
+    ("command_prefix", "query_text"),
+    [
+        (("lib", "list"), None),
+        (("lib", "search", "Cowboy"), "Cowboy"),
+    ],
+)
+def test_library_list_and_search_style_list_respect_metadata_depth(
+    tmp_path,
+    monkeypatch,
+    metadata_depth: str,
+    expected: tuple[str, ...],
+    unexpected: tuple[str, ...],
+    command_prefix: tuple[str, ...],
+    query_text: str | None,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("series:22", "series", 22),
+    )
+    store.upsert_metadata_summaries(
+        [_rich_metadata("series", 22, name="Cowboy Bebop")],
+        depth=MetadataDepth.FULL,
+    )
+    command = [*command_prefix, "--style", "list", "--metadata", metadata_depth]
+
+    result = runner.invoke(app, command)
+
+    assert result.exit_code == 0, result.output
+    assert "\nCowboy Bebop\n" in result.stdout
+    if query_text is not None:
+        assert f"Library search: {query_text}" in result.stdout
+    for text in expected:
+        assert f"  {text}" in result.stdout
+    for text in unexpected:
+        assert f"  {text}" not in result.stdout
 
 
 def test_library_list_fields_rejected_for_json_output(tmp_path, monkeypatch) -> None:
@@ -2177,6 +2331,46 @@ def test_library_list_json_adds_parent_series_title_for_seasons(
     payload = json.loads(result.stdout)
     assert payload["entries"][0]["metadata"]["name"] == "Season 1"
     assert payload["entries"][0]["metadata"]["parent_series_title"] == "Cowboy Bebop"
+
+
+def test_library_list_json_sets_parent_series_title_null_for_non_seasons(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["entries"][0]["metadata"]["name"] == "Alien"
+    assert payload["entries"][0]["metadata"]["parent_series_title"] is None
+
+
+def test_library_list_json_sets_parent_series_title_null_when_parent_metadata_missing(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("season:22:1:33", "season", 33),
+    )
+    store.upsert_metadata_summary(
+        _metadata_summary("season", 33, name="Season 1", parent_series_id=22, season_number=1)
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["entries"][0]["metadata"]["name"] == "Season 1"
+    assert payload["entries"][0]["metadata"]["parent_series_title"] is None
 
 
 def test_library_list_human_output_labels_season_rows_with_series_and_season_number(
@@ -2341,6 +2535,7 @@ def test_cache_title_search_matches_parent_series_titles_for_seasons(
 
     assert [entry.identity for entry in entries] == ["series:22", "season:22:1:33"]
     assert store.display_titles_for_entries(entries) == {
+        "series:22": "Cowboy Bebop",
         "season:22:1:33": "Cowboy Bebop",
     }
 
@@ -2601,9 +2796,11 @@ def test_library_search_style_flag_renders_human_entries_as_sections(
 
     assert result.exit_code == 0, result.output
     assert "Library search: Alien\n" in result.stdout
-    assert "  Entries  1\n" in result.stdout
+    assert "Entries" in result.stdout
+    assert "1\n" in result.stdout
     assert "\nAlien\n" in result.stdout
-    assert "  ID       movie:55\n" in result.stdout
+    assert "ID" in result.stdout
+    assert "movie:55" in result.stdout
 
 
 def _index_columns(db: sqlite3.Connection, index_name: str) -> list[str]:

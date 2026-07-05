@@ -583,6 +583,49 @@ class LibraryCacheStore:
         *,
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     ) -> dict[str, str]:
+        entry_keys_by_identity = {
+            entry.identity: metadata.metadata_key_from_entry(entry) for entry in entries
+        }
+        parent_keys_by_identity = {
+            entry.identity: parent_key
+            for entry in entries
+            if (parent_key := self._parent_series_metadata_key(entry)) is not None
+        }
+        if not entry_keys_by_identity and not parent_keys_by_identity:
+            return {}
+
+        metadata_keys = sorted(
+            set(entry_keys_by_identity.values()) | set(parent_keys_by_identity.values())
+        )
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT metadata_key, metadata_json
+                FROM tmdb_metadata_items
+                WHERE metadata_key IN ({metadata.placeholders(metadata_keys)})
+                AND language = ?
+                """,
+                [*metadata_keys, language],
+            ).fetchall()
+
+        metadata_by_key = {str(row["metadata_key"]): metadata.metadata_row(row) for row in rows}
+        display_titles: dict[str, str] = {}
+        for identity, entry_key in entry_keys_by_identity.items():
+            entry_title = metadata_by_key.get(entry_key)
+            if entry_title is not None and entry_title.title is not None:
+                display_titles[identity] = entry_title.title
+        for identity, parent_key in parent_keys_by_identity.items():
+            parent_title = metadata_by_key.get(parent_key)
+            if parent_title is not None and parent_title.title is not None:
+                display_titles[identity] = parent_title.title
+        return display_titles
+
+    def parent_series_titles_for_entries(
+        self,
+        entries: list[LibraryEntryModel],
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> dict[str, str]:
         parent_keys_by_identity = {
             entry.identity: parent_key
             for entry in entries
@@ -604,12 +647,12 @@ class LibraryCacheStore:
             ).fetchall()
 
         metadata_by_key = {str(row["metadata_key"]): metadata.metadata_row(row) for row in rows}
-        display_titles: dict[str, str] = {}
+        parent_titles: dict[str, str] = {}
         for identity, parent_key in parent_keys_by_identity.items():
             parent_title = metadata_by_key.get(parent_key)
             if parent_title is not None and parent_title.title is not None:
-                display_titles[identity] = parent_title.title
-        return display_titles
+                parent_titles[identity] = parent_title.title
+        return parent_titles
 
     def _metadata_summary_targets_by_state(
         self,

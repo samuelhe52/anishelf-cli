@@ -23,7 +23,8 @@ design note for inspection before updating the canonical domain reference.
 Do not attach TMDb metadata to entries.
 
 Commands may still use cached metadata internally when the requested behavior
-requires it, such as title sorting or cached library search.
+requires it, such as title sorting, cached library search, or readable display
+titles in human output.
 
 ### summary
 

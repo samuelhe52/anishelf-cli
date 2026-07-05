@@ -9,9 +9,13 @@ from anishelf_cli.core.output import (
     HumanTableColumn,
     emit_human_blocks,
 )
-from anishelf_cli.models import HumanOutputStyle
+from anishelf_cli.models import HumanOutputStyle, MetadataDepth
 from anishelf_cli.models.domain import (
     EpisodeProgress,
+    LibraryEntryMetadata,
+    LibraryEntryMetadataEpisode,
+    LibraryEntryMetadataGenre,
+    LibraryEntryMetadataSeason,
     LibraryEntryModel,
     LibraryEntryTombstone,
 )
@@ -69,6 +73,7 @@ def render_library_get(
     envelope: LibraryGetEnvelope,
     *,
     display_titles: Mapping[str, str] | None = None,
+    metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
 ) -> None:
     blocks: list[HumanSection] = []
 
@@ -84,7 +89,13 @@ def render_library_get(
     )
 
     for item in envelope.items:
-        blocks.append(_library_get_item_section(item, display_titles=display_titles or {}))
+        blocks.append(
+            _library_get_item_section(
+                item,
+                display_titles=display_titles or {},
+                metadata_depth=metadata_depth,
+            )
+        )
 
     emit_human_blocks(blocks)
 
@@ -93,6 +104,7 @@ def _library_get_item_section(
     item: LibraryGetItemFound | LibraryGetItemErrorResult,
     *,
     display_titles: Mapping[str, str],
+    metadata_depth: MetadataDepth,
 ) -> HumanSection:
     identity = item.identity
     if isinstance(item, LibraryGetItemErrorResult):
@@ -122,23 +134,12 @@ def _library_get_item_section(
             ),
         )
 
-    metadata = entry_model.metadata
     return HumanSection(
         title or identity,
         (
             ("Status", item.status),
             ("ID", identity),
             ("Title", title),
-            ("Season title", _season_metadata_title(entry_model, display_title=title)),
-            (
-                "Overview",
-                _human_block_text(
-                    _truncate_text(
-                        metadata.overview if metadata is not None else None,
-                        limit=220,
-                    )
-                ),
-            ),
             ("Type", entry_model.entry_type),
             ("TMDb ID", entry_model.tmdb_id),
             ("Parent series", entry_model.parent_series_id),
@@ -157,6 +158,12 @@ def _library_get_item_section(
                 _human_block_text(
                     _truncate_text(_optional_human_text(entry_model.notes), limit=160)
                 ),
+            ),
+            *_metadata_rows_for_entry(
+                entry_model,
+                metadata_depth=metadata_depth,
+                display_title=title,
+                overview_limit=220,
             ),
         ),
     )
@@ -273,16 +280,20 @@ def render_library_list(
     fields: tuple[str, ...],
     style: HumanOutputStyle = HumanOutputStyle.TABLE,
     display_titles: Mapping[str, str] | None = None,
+    metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
 ) -> None:
-    rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
+    resolved_display_titles = display_titles or {}
+    rows = [_human_library_row(entry, display_titles=resolved_display_titles) for entry in entries]
     title = "Library entries"
     empty_message = "No cached library entries."
     if style is HumanOutputStyle.LIST:
         emit_human_blocks(
-            _library_rows_as_sections(
+            _library_entries_as_sections(
                 title,
                 fields,
-                rows,
+                entries,
+                display_titles=resolved_display_titles,
+                metadata_depth=metadata_depth,
                 empty_message=empty_message,
             )
         )
@@ -307,16 +318,20 @@ def render_library_search(
     fields: tuple[str, ...],
     style: HumanOutputStyle = HumanOutputStyle.TABLE,
     display_titles: Mapping[str, str] | None = None,
+    metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
 ) -> None:
-    rows = [_human_library_row(entry, display_titles=display_titles or {}) for entry in entries]
+    resolved_display_titles = display_titles or {}
+    rows = [_human_library_row(entry, display_titles=resolved_display_titles) for entry in entries]
     block_title = f"Library search: {query}"
     empty_message = "No cached library entries matched the search query."
     if style is HumanOutputStyle.LIST:
         emit_human_blocks(
-            _library_rows_as_sections(
+            _library_entries_as_sections(
                 block_title,
                 fields,
-                rows,
+                entries,
+                display_titles=resolved_display_titles,
+                metadata_depth=metadata_depth,
                 empty_message=empty_message,
             )
         )
@@ -338,26 +353,37 @@ def _columns_for_display_fields(fields: tuple[str, ...]) -> tuple[HumanTableColu
     return tuple(DISPLAY_FIELD_COLUMNS[field] for field in fields)
 
 
-def _library_rows_as_sections(
+def _library_entries_as_sections(
     title: str,
     fields: tuple[str, ...],
-    rows: list[dict[str, object]],
+    entries: list[LibraryEntryModel],
     *,
+    display_titles: Mapping[str, str],
+    metadata_depth: MetadataDepth,
     empty_message: str,
 ) -> list[HumanSection]:
-    if not rows:
+    if not entries:
         return [HumanSection(title, (("Entries", 0), ("Result", empty_message)))]
 
-    sections = [HumanSection(title, (("Entries", len(rows)),))]
-    for row in rows:
+    sections = [HumanSection(title, (("Entries", len(entries)),))]
+    for entry in entries:
+        row = _human_library_row(entry, display_titles=display_titles)
         section_title = _library_list_item_title(row, fields)
         sections.append(
             HumanSection(
                 section_title,
-                tuple(
-                    (DISPLAY_FIELD_COLUMNS[field].label, row.get(field))
-                    for field in fields
-                    if field != "title"
+                (
+                    *(
+                        (DISPLAY_FIELD_COLUMNS[field].label, row.get(field))
+                        for field in fields
+                        if field != "title"
+                    ),
+                    *_metadata_rows_for_entry(
+                        entry,
+                        metadata_depth=metadata_depth,
+                        display_title=_display_title(entry, display_titles),
+                        overview_limit=180,
+                    ),
                 ),
             )
         )
@@ -371,6 +397,151 @@ def _library_list_item_title(row: Mapping[str, object], fields: tuple[str, ...])
             return str(title)
     identity = row.get("id")
     return str(identity) if identity is not None else "Library entry"
+
+
+def _metadata_rows_for_entry(
+    entry: LibraryEntryModel,
+    *,
+    metadata_depth: MetadataDepth,
+    display_title: str,
+    overview_limit: int,
+) -> tuple[tuple[str, object], ...]:
+    if metadata_depth is MetadataDepth.NONE or isinstance(entry, LibraryEntryTombstone):
+        return ()
+    metadata = entry.metadata
+    if metadata is None:
+        return ()
+
+    rows: list[tuple[str, object]] = []
+    if season_title := _season_metadata_title(entry, display_title=display_title):
+        rows.append(("Season title", season_title))
+    rows.extend(_summary_metadata_rows(metadata, overview_limit=overview_limit))
+    if metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
+        rows.extend(_details_metadata_rows(metadata))
+    if metadata_depth is MetadataDepth.FULL:
+        rows.extend(_full_metadata_rows(metadata))
+    return tuple(rows)
+
+
+def _summary_metadata_rows(
+    metadata: LibraryEntryMetadata,
+    *,
+    overview_limit: int,
+) -> list[tuple[str, object]]:
+    rows: list[tuple[str, object]] = []
+    if metadata.overview is not None:
+        rows.append(
+            (
+                "Overview",
+                _human_block_text(_truncate_text(metadata.overview, limit=overview_limit)),
+            )
+        )
+    rows.extend(
+        _present_rows(
+            (
+                ("On air", _compact_date(metadata.on_air_date)),
+                ("Runtime", _format_minutes(metadata.runtime_minutes)),
+                ("Seasons", metadata.number_of_seasons),
+                ("Episodes", metadata.number_of_episodes),
+            )
+        )
+    )
+    return rows
+
+
+def _details_metadata_rows(metadata: LibraryEntryMetadata) -> list[tuple[str, object]]:
+    return _present_rows(
+        (
+            ("Link", metadata.link_to_details),
+            ("TMDb status", metadata.status),
+            ("Poster path", metadata.poster_path),
+            ("Backdrop path", metadata.backdrop_path),
+            ("Logo path", metadata.logo_path),
+            ("Genres", _format_genres(metadata.genres)),
+            ("Rating", _format_rating(metadata.vote_average, metadata.vote_count)),
+            ("Popularity", metadata.popularity),
+            ("Original language", metadata.original_language_code),
+            ("First air date", _compact_date(metadata.first_air_date)),
+            ("Last air date", _compact_date(metadata.last_air_date)),
+            ("Release date", _compact_date(metadata.release_date)),
+            ("Episode runtime", _format_minutes_list(metadata.episode_run_time_minutes)),
+            ("Tagline", metadata.tagline),
+            ("Subtitle", metadata.subtitle),
+        )
+    )
+
+
+def _full_metadata_rows(metadata: LibraryEntryMetadata) -> list[tuple[str, object]]:
+    return _present_rows(
+        (
+            ("Name translations", _format_translations(metadata.name_translations)),
+            ("Overview translations", _format_translations(metadata.overview_translations)),
+            ("Season summaries", _format_season_summaries(metadata.season_summaries)),
+            ("Episode summaries", _format_episode_summaries(metadata.episode_summaries)),
+        )
+    )
+
+
+def _present_rows(rows: tuple[tuple[str, object | None], ...]) -> list[tuple[str, object]]:
+    return [(label, value) for label, value in rows if _has_human_value(value)]
+
+
+def _has_human_value(value: object) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return value != ""
+    if isinstance(value, tuple | list):
+        return bool(value)
+    return True
+
+
+def _format_minutes(value: int | None) -> str | None:
+    if value is None:
+        return None
+    return f"{value} min"
+
+
+def _format_minutes_list(values: tuple[int, ...]) -> str | None:
+    if not values:
+        return None
+    return ", ".join(f"{value} min" for value in values)
+
+
+def _format_genres(genres: tuple[LibraryEntryMetadataGenre, ...]) -> str | None:
+    names = [genre.name for genre in genres if genre.name]
+    return ", ".join(names) if names else None
+
+
+def _format_rating(vote_average: float | None, vote_count: int | None) -> str | None:
+    if vote_average is None and vote_count is None:
+        return None
+    if vote_average is None:
+        return f"{vote_count} votes"
+    if vote_count is None:
+        return f"{vote_average:g}"
+    return f"{vote_average:g} ({vote_count} votes)"
+
+
+def _format_translations(translations: tuple[tuple[str, str], ...]) -> str | None:
+    if not translations:
+        return None
+    return ", ".join(language for language, _ in translations)
+
+
+def _format_season_summaries(summaries: tuple[LibraryEntryMetadataSeason, ...]) -> str | None:
+    if not summaries:
+        return None
+    total_episodes = sum(summary.episode_count or 0 for summary in summaries)
+    if total_episodes:
+        return f"{len(summaries)} seasons, {total_episodes} episodes"
+    return f"{len(summaries)} seasons"
+
+
+def _format_episode_summaries(summaries: tuple[LibraryEntryMetadataEpisode, ...]) -> str | None:
+    if not summaries:
+        return None
+    return f"{len(summaries)} episodes"
 
 
 def render_library_export_result(
