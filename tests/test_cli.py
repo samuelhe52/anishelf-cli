@@ -1453,6 +1453,7 @@ def test_whoami_auth_failure_clears_login_and_redacts_tokens(monkeypatch) -> Non
 
     assert result.exit_code == 2
     assert result.stdout == ""
+    assert "saved CloudKit login expired and was removed" in result.stderr
     assert "run `ani auth login`" in result.stderr
     assert deleted == [(descriptor.service, descriptor.account)]
     assert store.get_password(descriptor.service, descriptor.account) is None

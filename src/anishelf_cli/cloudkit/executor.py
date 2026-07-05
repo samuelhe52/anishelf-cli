@@ -176,7 +176,7 @@ class CloudKitExecutor:
             if _is_authentication_failure(response, payload):
                 self._clear_web_auth_token_after_auth_failure(redactor)
                 raise CloudKitAuthenticationFailedError(
-                    "CloudKit authentication failed. Cleared stored login; run `ani auth login`.",
+                    "Your saved CloudKit login expired and was removed; run `ani auth login`.",
                     redactor=redactor,
                 )
 
@@ -325,8 +325,8 @@ class CloudKitExecutor:
             delete_cloudkit_web_auth_token(self.secret_store)
         except SecretStorageUnavailableError as exc:
             raise CloudKitRequestFailedError(
-                "CloudKit authentication failed, but secure storage could not clear the "
-                "stored login. Run `ani auth login` after resolving secure storage.",
+                "Your saved CloudKit login expired, but secure storage could not remove it. "
+                "Run `ani auth login` after resolving secure storage.",
                 redactor=redactor,
             ) from exc
 
