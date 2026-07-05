@@ -57,9 +57,9 @@ include:
 - `lib get <id...> [--sync] [--live-meta] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full]`
 - `lib list [--sync] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full] [--style table|list]`
 - `lib search <query>` with optional `--sync`, `--tmdb-language`,
-  `--metadata`, and `--style table|list`
+  `--metadata`, `--style table|list`, and `--limit`
 - `lib export` with optional `--sync`, `--tmdb-language`, and `--metadata`
-- `tmdb search [--title] [--tmdb-language]`
+- `tmdb search [title] [--title] [--tmdb-language] [--limit]`
 
 `lib init` is the explicit bootstrap entry point for the local cache.
 `lib sync` is the explicit refresh entry point after bootstrap. Other
@@ -80,8 +80,11 @@ counts or library list/export output.
 AniShelf's smart library search across titles, translations, parent-series
 metadata, overviews, notes, and on-air dates. If metadata is incomplete or
 unavailable, the command should fail explicitly and tell the user how to hydrate
-metadata first. Use `tmdb search --title` for global TMDb anime title search, or
-omit `--title` for popular anime discovery.
+metadata first. Use `tmdb search <title>` or `tmdb search --title <title>` for
+global TMDb anime title search, or omit a title for popular anime discovery.
+`tmdb search <title>` is equivalent to `tmdb search --title <title>`. `--limit`
+on `lib search` caps visible local matches after filtering; `--limit` on
+`tmdb search` caps total grouped rows returned to the user.
 
 Low-level CloudKit zone, record, change, and schema-check commands are
 diagnostics. Keep them out of the normal user command tree unless a future

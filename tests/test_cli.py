@@ -296,11 +296,23 @@ def test_library_get_accepts_matching_identity_after_separator(monkeypatch) -> N
         (["lib"], ("refresh-meta",), ("changes",)),
         (["lib"], ("AniShelf library commands.", "get", "refresh-meta"), ()),
         (["lib", "refresh-meta"], ("--json", "-j"), ("--metadata",)),
-        (["lib", "search"], ("QUERY", "--sync"), ("--title",)),
+        (["lib", "search"], ("QUERY", "--sync", "--limit", "-l"), ("--title",)),
         (["lib", "export"], ("--sync",), ()),
         (
             ["tmdb", "search"],
-            ("--title", "-t", "--type", "--year", "-y", "--json", "-j", "[en|ja|zh]"),
+            (
+                "TITLE",
+                "--title",
+                "-t",
+                "--limit",
+                "-l",
+                "--type",
+                "--year",
+                "-y",
+                "--json",
+                "-j",
+                "[en|ja|zh]",
+            ),
             (),
         ),
         (["lib", "init"], ("--json", "-j"), ()),
@@ -982,6 +994,90 @@ def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
         },
         "summary": {"movies": 1, "series": 0, "total": 1},
     }
+
+
+def test_tmdb_search_accepts_positional_title(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+        ),
+    )
+
+    result = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"language": "en", "mode": "search", "title": "Alien", "type": "all"}
+    assert payload["summary"] == {"movies": 1, "series": 0, "total": 1}
+
+
+def test_tmdb_search_rejects_positional_and_option_title_together(monkeypatch) -> None:
+    monkeypatch.setattr(tmdb_commands, "_tmdb_summary_client_or_exit", lambda: None)
+
+    result = runner.invoke(app, ["tmdb", "search", "Alien", "--title", "Cowboy"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Use either positional TITLE or --title, not both." in result.stderr
+
+
+def test_tmdb_search_limit_caps_total_json_results(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie",
+                55,
+                "Alien",
+                release_date="1979-05-25",
+                overview="A space horror film.",
+                poster_path="/poster.jpg",
+            ),
+            _tmdb_match(
+                "movie",
+                56,
+                "Aliens",
+                release_date="1986-07-18",
+                overview="A space action film.",
+                poster_path="/aliens.jpg",
+            ),
+        ),
+        series=(
+            _tmdb_match(
+                "series",
+                95,
+                "Alien Nation",
+                release_date="1989-09-18",
+                overview="A sci-fi police series.",
+                poster_path="/series.jpg",
+            ),
+        ),
+    )
+
+    result = runner.invoke(app, ["tmdb", "search", "--title", "Alien", "--limit", "1", "--json"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {
+        "language": "en",
+        "limit": 1,
+        "mode": "search",
+        "title": "Alien",
+        "type": "all",
+    }
+    assert payload["summary"] == {"movies": 1, "series": 0, "total": 1}
+    assert [match["tmdb_id"] for match in payload["results"]["movies"]] == [55]
+    assert payload["results"]["series"] == []
 
 
 def test_tmdb_search_human_output_is_concise(monkeypatch) -> None:

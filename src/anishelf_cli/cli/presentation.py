@@ -565,6 +565,8 @@ def render_library_export_result(
 def tmdb_search_payload(
     query: TMDbTitleSearchQuery,
     result: TMDbTitleSearchResult,
+    *,
+    limit: int | None = None,
 ) -> TMDbSearchOutputResult:
     movies = tuple(TMDbSearchMatchResult.from_match(match) for match in result.movies)
     series = tuple(TMDbSearchMatchResult.from_match(match) for match in result.series)
@@ -575,6 +577,7 @@ def tmdb_search_payload(
             language=query.language,
             title=query.title,
             year=query.year,
+            limit=limit,
         ),
         summary=TMDbSearchSummaryResult(
             movies=len(movies),

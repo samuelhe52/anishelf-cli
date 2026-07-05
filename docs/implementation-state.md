@@ -41,7 +41,8 @@ spec.
   refresh before serving results.
 - `lib search <query>` requires complete cached TMDb metadata and
   searches titles, translations, parent-series metadata, overviews, notes, and
-  on-air dates in the same priority order as AniShelf's library search.
+  on-air dates in the same priority order as AniShelf's library search. It
+  accepts `--limit` to cap visible matches.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_items`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `--metadata
@@ -67,9 +68,10 @@ spec.
   `--show-hidden` or a library config default.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
-- `tmdb search` performs global TMDb anime title search, and discover-style
-  popular anime lookup when no title is provided. It sends the preferred TMDb
-  metadata language unless `--tmdb-language` is supplied for that request.
+- `tmdb search` performs global TMDb anime title search from either positional
+  title or `--title`, and discover-style popular anime lookup when no title is
+  provided. It accepts `--limit` to cap returned rows and sends the preferred
+  TMDb metadata language unless `--tmdb-language` is supplied for that request.
 
 ## Near-Term Direction
 

@@ -520,6 +520,10 @@ def library_search(
             show_default=False,
         ),
     ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", "-l", min=1, help="Limit the number of entries returned."),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
@@ -540,6 +544,7 @@ def library_search(
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
             show_hidden=_show_hidden_requested(show_hidden),
+            limit=limit,
             metadata_language=preferred_language,
             live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,
         )

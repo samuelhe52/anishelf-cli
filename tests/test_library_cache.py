@@ -2480,6 +2480,19 @@ def test_library_search_accepts_raw_query(monkeypatch) -> None:
     assert fake_store.search_query_arg == "Alien"  # type: ignore[attr-defined]
 
 
+def test_library_search_limit_caps_json_results(monkeypatch) -> None:
+    fake_store = _fake_search_store()
+    monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien", "--limit", "1"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["query"] == {"text": "Alien", "limit": 1}
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
+    assert fake_store.search_query_arg == "Alien"  # type: ignore[attr-defined]
+
+
 def test_library_search_rejects_title_option(monkeypatch) -> None:
     fake_store = _fake_search_store()
     monkeypatch.setattr(library_commands, "_library_store_for_read", lambda: fake_store)

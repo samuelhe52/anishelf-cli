@@ -48,6 +48,9 @@ These original concerns are resolved or materially changed:
 - CLI-native first-run guidance is now visible in root help, and `lib status`
   labels the active cache user explicitly. Uninitialized status also points to
   `ani lib init`.
+- Search surfaces now support human-sized result caps: `lib search <query>
+  --limit <n>` and `tmdb search [title|--title <title>] --limit <n>`. `tmdb
+  search Alien` is accepted as an alias for `tmdb search --title Alien`.
 
 ## What Works Well
 
@@ -87,22 +90,6 @@ Recommendation: either truncate the title column in table mode, use Rich's table
 layout with `overflow="ellipsis"`, or drop low-priority columns adaptively below
 a width threshold. This remains the highest-impact human UX issue because it
 affects normal list/search inspection.
-
-### 2. Search result limiting is incomplete, and `tmdb search` still rejects a bare title
-
-`lib search` fixed the original positional-query problem, but two related
-ergonomics gaps remain:
-
-- `ani tmdb search Alien` still fails with `Got unexpected extra argument(s)`.
-- `ani lib search foo --limit 5` fails with `No such option: --limit`.
-- `ani tmdb search --title Alien --limit 5` fails with `No such option:
-  --limit`.
-
-A bare title is still the likely first attempt for global TMDb search, and both
-search surfaces can return more rows than a human or agent wants to inspect.
-
-Recommendation: accept an optional positional title for `tmdb search` as an
-alias for `--title`, and add `--limit` to both `lib search` and `tmdb search`.
 
 ## Current Agent-Facing Issues
 
@@ -146,7 +133,5 @@ could make any item error nonzero, but that is optional rather than urgent.
 ## Suggested Priority
 
 1. Make human tables width-aware or truncate low-value columns.
-2. Add `--limit` to search surfaces and accept a positional title for
-   `tmdb search`.
-3. Switch emitted JSON to `ensure_ascii=False`.
-4. Document the `entries` / `items` JSON collection-key split.
+2. Switch emitted JSON to `ensure_ascii=False`.
+3. Document the `entries` / `items` JSON collection-key split.

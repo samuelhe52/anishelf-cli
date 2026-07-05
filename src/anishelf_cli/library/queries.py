@@ -174,6 +174,7 @@ def build_library_search_result(
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
+    limit: int | None = None,
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
@@ -198,6 +199,8 @@ def build_library_search_result(
     entries = store.search_entry_models(query, metadata_language=metadata_language)
     if not show_hidden:
         entries = _visible_snapshots(entries)
+    if limit is not None:
+        entries = entries[:limit]
     entries = attach_metadata_for_depth(
         store,
         entries,
@@ -208,7 +211,7 @@ def build_library_search_result(
         entries=tuple(entries),
         cache=cache,
         metadata=metadata_payload(metadata_depth),
-        query=LibrarySearchQueryResult(text=query),
+        query=LibrarySearchQueryResult(text=query, limit=limit),
     )
 
 

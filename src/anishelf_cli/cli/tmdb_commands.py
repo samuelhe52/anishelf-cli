@@ -14,7 +14,7 @@ from anishelf_cli.cli.presentation import (
 )
 from anishelf_cli.core.output import emit_error, emit_json
 from anishelf_cli.models import TMDbMetadataLanguage
-from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
+from anishelf_cli.models.tmdb import TMDbTitleSearchQuery, TMDbTitleSearchResult
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
@@ -47,13 +47,23 @@ def _tmdb_summary_client_or_exit() -> TMDbClient:
 )
 def tmdb_search(
     ctx: typer.Context,
-    title: Annotated[
+    title_argument: Annotated[
+        str | None,
+        typer.Argument(
+            help="Optional title query. When omitted, discover popular anime titles instead.",
+        ),
+    ] = None,
+    title_option: Annotated[
         str | None,
         typer.Option(
             "--title",
             "-t",
             help="Optional title query. When omitted, discover popular anime titles instead.",
         ),
+    ] = None,
+    limit: Annotated[
+        int | None,
+        typer.Option("--limit", "-l", min=1, help="Limit the total number of results returned."),
     ] = None,
     year: Annotated[
         int | None,
@@ -83,6 +93,7 @@ def tmdb_search(
 ) -> None:
     defaults = _user_defaults_or_exit()
     language = _metadata_language(tmdb_language, preferred_language=defaults.tmdb.metadata_language)
+    title = _resolved_title_or_exit(title_argument, title_option)
     query = TMDbTitleSearchQuery(
         title=normalized_tmdb_title(title),
         year=year,
@@ -94,8 +105,9 @@ def tmdb_search(
     except TMDbRequestError as exc:
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
+    result = _limited_tmdb_search_result(result, limit=limit)
 
-    payload = tmdb_search_payload(query, result)
+    payload = tmdb_search_payload(query, result, limit=limit)
     if json_output_requested(ctx, json_output):
         emit_json(payload.model_dump(mode="json", exclude_none=True))
         return
@@ -115,3 +127,25 @@ def _metadata_language(value: TMDbMetadataLanguage | None, *, preferred_language
     if value is None:
         return preferred_language
     return value.value
+
+
+def _resolved_title_or_exit(title_argument: str | None, title_option: str | None) -> str | None:
+    normalized_argument = normalized_tmdb_title(title_argument)
+    normalized_option = normalized_tmdb_title(title_option)
+    if normalized_argument is not None and normalized_option is not None:
+        emit_error("Use either positional TITLE or --title, not both.")
+        raise typer.Exit(code=2)
+    return normalized_argument if normalized_argument is not None else normalized_option
+
+
+def _limited_tmdb_search_result(
+    result: TMDbTitleSearchResult,
+    *,
+    limit: int | None,
+) -> TMDbTitleSearchResult:
+    if limit is None:
+        return result
+    movies = result.movies[:limit]
+    remaining = max(limit - len(movies), 0)
+    series = result.series[:remaining]
+    return result.model_copy(update={"movies": movies, "series": series})

@@ -115,6 +115,14 @@ class LibraryListFiltersResult(AniShelfBaseModel):
 
 class LibrarySearchQueryResult(AniShelfBaseModel):
     text: str
+    limit: int | None = None
+
+    @model_serializer(mode="wrap", when_used="json")
+    def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
+        payload = cast(dict[str, object], handler(self))
+        if payload.get("limit") is None:
+            payload.pop("limit", None)
+        return payload
 
 
 class LibraryEntriesResult(AniShelfBaseModel):
@@ -238,6 +246,7 @@ class TMDbSearchQueryResult(AniShelfBaseModel):
     language: str
     title: str | None = None
     year: int | None = None
+    limit: int | None = None
 
 
 class TMDbSearchSummaryResult(AniShelfBaseModel):
