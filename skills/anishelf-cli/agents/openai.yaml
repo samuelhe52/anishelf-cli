@@ -1,0 +1,4 @@
+interface:
+  display_name: "AniShelf CLI"
+  short_description: "Install and operate the AniShelf CLI"
+  default_prompt: "Use $anishelf-cli to inspect my AniShelf library from the command line."

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "anishelf-cli"
-version = "0.1.0"
+version = "0.1.1"
 description = "Read-only AniShelf and CloudKit inspection CLI."
 readme = "README.md"
 requires-python = ">=3.13"
@@ -47,6 +47,7 @@ include = [
   "/README.md",
   "/docs",
   "/pyproject.toml",
+  "/skills",
   "/src",
   "/tests",
 ]
