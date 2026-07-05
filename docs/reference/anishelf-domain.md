@@ -100,6 +100,9 @@ Batch output should preserve caller order, keep item-level errors, and keep
 progress or diagnostics on stderr. `lib get` exits nonzero only when no
 requested item is found; partial failures remain item-level errors in the output
 envelope, so agents should inspect `summary.errors`.
+`lib get` uses an ordered `items` collection because each requested id can
+resolve to either an entry or an item-level error. Homogeneous library
+collection commands (`lib list`, `lib search`, and `lib export`) use `entries`.
 
 Human collection tables should keep inflexible fields readable, truncate only
 declared flexible fields such as title and id, use compact dates, and omit the

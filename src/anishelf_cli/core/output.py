@@ -67,7 +67,7 @@ def verbose_output_enabled() -> bool:
 
 
 def emit_json(payload: dict[str, Any]) -> None:
-    typer.echo(json.dumps(payload, indent=2, sort_keys=True))
+    typer.echo(json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True))
 
 
 def emit_human_blocks(blocks: Sequence[HumanBlock]) -> None:

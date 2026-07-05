@@ -153,6 +153,17 @@ uv run ani lib get movie:55 --json
 `lib get` emits an ordered envelope designed for `jq`: `.summary` contains
 counts, and `.items[]` contains either `.entry` or `.error`.
 
+Collection commands use `.entries[]` for homogeneous library entry results,
+while `lib get` uses `.items[]` because each requested id can independently
+resolve to an entry or an item-level error:
+
+| Command | Collection key |
+| --- | --- |
+| `lib get <id...>` | `items` |
+| `lib list` | `entries` |
+| `lib search <query>` | `entries` |
+| `lib export` | `entries` |
+
 For mixed `lib get` batches, the command can exit `0` while individual
 items contain errors. Check `.summary.errors` or `.items[] | select(.status ==
 "error")` when automating batch lookups.

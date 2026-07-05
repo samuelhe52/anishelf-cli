@@ -1,9 +1,12 @@
+import json
+
 from anishelf_cli.core.output import (
     HumanParagraph,
     HumanSection,
     HumanTable,
     HumanTableColumn,
     emit_human_blocks,
+    emit_json,
     emit_verbose,
     set_current_app_state,
     verbose_output_enabled,
@@ -46,6 +49,16 @@ def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
         "  movie:550    movie       9\n"
         "  series:1399  series   none\n"
     )
+
+
+def test_emit_json_preserves_non_ascii_text(capsys) -> None:
+    emit_json({"title": "エイリアン", "overview": "中文简介"})
+
+    output = capsys.readouterr().out
+    assert '"title": "エイリアン"' in output
+    assert '"overview": "中文简介"' in output
+    assert "\\u30a8" not in output
+    assert json.loads(output) == {"overview": "中文简介", "title": "エイリアン"}
 
 
 def test_emit_human_blocks_formats_empty_table(capsys) -> None:
