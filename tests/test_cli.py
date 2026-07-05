@@ -132,6 +132,11 @@ def test_root_help_mentions_global_options() -> None:
     result = runner.invoke(app, ["--help"])
 
     assert result.exit_code == 0
+    normalized_help = " ".join(result.stdout.split())
+    assert "First run:" in result.stdout
+    assert "ani auth login" in normalized_help
+    assert "ani config set-tmdb-api-key" in normalized_help
+    assert "ani lib init" in normalized_help
     assert "--profile" not in result.stdout
     assert "--json" in result.stdout
     assert "-j" in result.stdout

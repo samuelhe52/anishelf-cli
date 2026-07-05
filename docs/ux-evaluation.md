@@ -45,6 +45,9 @@ These original concerns are resolved or materially changed:
   reference: agents must inspect `.summary.errors` or item statuses.
 - `auth status` now describes expired CloudKit credentials as a normal re-login
   condition instead of an alarming authentication failure/data-loss event.
+- CLI-native first-run guidance is now visible in root help, and `lib status`
+  labels the active cache user explicitly. Uninitialized status also points to
+  `ani lib init`.
 
 ## What Works Well
 
@@ -101,21 +104,6 @@ search surfaces can return more rows than a human or agent wants to inspect.
 Recommendation: accept an optional positional title for `tmdb search` as an
 alias for `--title`, and add `--limit` to both `lib search` and `tmdb search`.
 
-### 3. First-run orientation is good in README but thin in CLI output
-
-README now explains the first-run flow, and uninitialized read commands correctly
-say `Run ani lib init first`. The CLI itself still has two bootstrap rough
-edges:
-
-- `ani --help` does not mention the minimal first-run path.
-- Empty-cache `ani lib status` says `Active user not set`, which reads like an
-  auth problem even though it is really an active cache-scope fact.
-
-Recommendation: add a short root or `lib` help epilog with the first-run path,
-and rename the status label to something like `Active cache user` or `Cache
-scope user`. For an uninitialized cache, status could also include `Next step:
-ani lib init`.
-
 ## Current Agent-Facing Issues
 
 ### 5. JSON still escapes non-ASCII text
@@ -160,7 +148,5 @@ could make any item error nonzero, but that is optional rather than urgent.
 1. Make human tables width-aware or truncate low-value columns.
 2. Add `--limit` to search surfaces and accept a positional title for
    `tmdb search`.
-3. Improve CLI-native first-run guidance and rename the `Active user` cache
-   status label.
-4. Switch emitted JSON to `ensure_ascii=False`.
-5. Document the `entries` / `items` JSON collection-key split.
+3. Switch emitted JSON to `ensure_ascii=False`.
+4. Document the `entries` / `items` JSON collection-key split.

@@ -89,6 +89,7 @@ def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> No
     _isolate_paths(monkeypatch, tmp_path)
 
     result = runner.invoke(app, ["--json", "lib", "status"])
+    human_result = runner.invoke(app, ["lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -105,6 +106,11 @@ def test_library_status_reports_uninitialized_cache(tmp_path, monkeypatch) -> No
         "missing_entries": 0,
         "ready": False,
     }
+    assert human_result.exit_code == 0, human_result.output
+    assert "Active cache user" in human_result.stdout
+    assert "Active user" not in human_result.stdout
+    assert "Next step" in human_result.stdout
+    assert "ani lib init" in human_result.stdout
 
 
 def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None:
@@ -123,6 +129,7 @@ def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None
     )
 
     result = runner.invoke(app, ["--json", "lib", "status"])
+    human_result = runner.invoke(app, ["lib", "status"])
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
@@ -139,6 +146,11 @@ def test_library_status_reports_initialized_cache(tmp_path, monkeypatch) -> None
         "missing_entries": 2,
         "ready": False,
     }
+    assert human_result.exit_code == 0, human_result.output
+    assert "Active cache user" in human_result.stdout
+    assert "_user" in human_result.stdout
+    assert "Active user" not in human_result.stdout
+    assert "Next step" not in human_result.stdout
 
 
 def test_library_status_reports_metadata_ready_when_summary_is_cached(

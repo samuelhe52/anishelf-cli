@@ -66,7 +66,10 @@ class AniTyperGroup(TyperGroup):
 app = typer.Typer(
     add_completion=False,
     cls=AniTyperGroup,
-    help="Read-only AniShelf and CloudKit inspection CLI.",
+    help=(
+        "Read-only AniShelf and CloudKit inspection CLI.\n\n"
+        "First run: ani auth login, then ani config set-tmdb-api-key, then ani lib init."
+    ),
     no_args_is_help=True,
     rich_markup_mode=None,
 )

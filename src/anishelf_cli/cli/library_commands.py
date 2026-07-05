@@ -300,27 +300,30 @@ def library_status(
             metadata_state = "complete"
         elif metadata_hydrated:
             metadata_state = "partial"
+    rows: list[tuple[str, object]] = [
+        ("Initialized", "yes" if status.initialized else "no"),
+        ("Entries", status.active.entries),
+        ("Visible entries", status.active.visible_entries),
+        ("Hidden entries", status.active.hidden_entries),
+        ("Sync token", "present" if status.active.has_sync_token else "missing"),
+        ("Metadata", metadata_state),
+        ("Metadata hydrated", metadata_hydrated),
+        ("Metadata missing", metadata_missing),
+        ("Active cache user", active_user),
+        ("Scope count", len(status.scopes)),
+        ("Cache files", status.cache_files),
+        ("Lock files", status.lock_files),
+        ("Cache path", status.cache_path),
+        ("Lock path", status.lock_path),
+    ]
+    if not status.initialized:
+        rows.append(("Next step", "ani lib init"))
 
     emit_human_blocks(
         [
             HumanSection(
                 "Library cache",
-                (
-                    ("Initialized", "yes" if status.initialized else "no"),
-                    ("Entries", status.active.entries),
-                    ("Visible entries", status.active.visible_entries),
-                    ("Hidden entries", status.active.hidden_entries),
-                    ("Sync token", "present" if status.active.has_sync_token else "missing"),
-                    ("Metadata", metadata_state),
-                    ("Metadata hydrated", metadata_hydrated),
-                    ("Metadata missing", metadata_missing),
-                    ("Active user", active_user),
-                    ("Scope count", len(status.scopes)),
-                    ("Cache files", status.cache_files),
-                    ("Lock files", status.lock_files),
-                    ("Cache path", status.cache_path),
-                    ("Lock path", status.lock_path),
-                ),
+                rows,
             )
         ]
     )
