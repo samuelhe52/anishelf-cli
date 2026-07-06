@@ -42,3 +42,13 @@ the authority. Do not infer schema shape from this CLI alone.
   explicitly demanded otherwise.
 - Commit messages should use concise `type: Subject` style, for example
   `feat: Add CloudKit login flow` or `fix: Tighten credential source handling`.
+
+## GitHub Releases
+
+- Keep GitHub release notes compact.
+- Use the tag name as the release title, for example `v0.1.1`.
+- Use a simple `## Changes` section in the release body with short bullets that
+  reflect user-visible scope.
+- Attach both build artifacts to each release: the wheel
+  `anishelf_cli-<version>-py3-none-any.whl` and the source distribution
+  `anishelf_cli-<version>.tar.gz`.
