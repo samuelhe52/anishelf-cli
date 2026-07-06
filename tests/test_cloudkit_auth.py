@@ -7,6 +7,7 @@ from io import StringIO
 import httpx
 import pytest
 
+from anishelf_cli import config
 from anishelf_cli.cli import root
 from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
@@ -21,7 +22,7 @@ from anishelf_cli.cloudkit.auth import (
     successor_web_auth_token,
 )
 from anishelf_cli.secrets import cloudkit_web_auth_token_secret
-from tests.support import MemorySecretStore, runner
+from tests.support import MemorySecretStore, isolate_paths, runner
 
 
 def test_login_initiation_calls_private_current_user_with_api_token_only() -> None:
@@ -75,7 +76,7 @@ def test_manual_paste_login_stores_token_without_printing_secrets(monkeypatch) -
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
     descriptor = cloudkit_web_auth_token_secret()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -111,7 +112,7 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
     descriptor = cloudkit_web_auth_token_secret()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
 
@@ -140,10 +141,70 @@ def test_manual_paste_login_does_not_auto_open_browser(monkeypatch) -> None:
     assert opened == []
 
 
+def test_manual_paste_login_fails_with_config_guidance_when_system_locked(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+
+    class LockedSystemStore:
+        def get_password(self, service: str, account: str) -> str | None:
+            _ = service, account
+            raise root.SecretStorageUnavailableError("locked keyring")
+
+        def set_password(self, service: str, account: str, password: str) -> None:
+            _ = service, account, password
+            raise root.SecretStorageUnavailableError("locked keyring")
+
+        def delete_password(self, service: str, account: str) -> None:
+            _ = service, account
+            raise root.SecretStorageUnavailableError("locked keyring")
+
+    original_store_for_backend = root.secret_store_for_backend
+
+    def store_for_backend(backend: root.SecretBackend):
+        if backend is root.SecretBackend.SYSTEM:
+            return LockedSystemStore()
+        return original_store_for_backend(backend)
+
+    monkeypatch.setattr(root, "secret_store_for_backend", store_for_backend)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        _ = request
+        return httpx.Response(
+            401,
+            json={
+                "serverErrorCode": "AUTHENTICATION_REQUIRED",
+                "redirectURL": "https://apple.example/sign-in",
+            },
+        )
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(root, "_make_http_client", lambda: client)
+
+    callback_url = "https://callback.example/done?ckWebAuthToken=web-secret-token"
+    result = runner.invoke(
+        app,
+        ["--json", "auth", "login"],
+        input=f"{callback_url}\n",
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "web-secret-token" not in result.stdout + result.stderr
+    normalized_stderr = " ".join(result.stderr.split())
+    assert "locked keyring" in normalized_stderr
+    assert 'secrets.backend = "system"' in normalized_stderr
+    assert "ani config set-secrets-backend plaintext-file" in result.stderr
+    assert not config.user_config_file().exists()
+    assert not config.plaintext_keyring_file().exists()
+
+
 def test_manual_paste_login_verbose_non_json_error_redacts_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(
@@ -173,7 +234,7 @@ def test_manual_paste_login_verbose_non_json_error_redacts_secrets(monkeypatch) 
 def test_manual_paste_login_verbose_transport_error_redacts_secrets(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError(
@@ -214,7 +275,7 @@ def test_manual_paste_login_rejects_malformed_callback_without_storing(
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
 
     def handler(request: httpx.Request) -> httpx.Response:
         _ = request
@@ -288,7 +349,7 @@ def test_loopback_capture_reports_listener_setup_failure_cleanly() -> None:
 def test_loopback_login_timeout_does_not_store_partial_token(monkeypatch) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
     monkeypatch.setattr(root.webbrowser, "open", lambda url: True)
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -334,7 +395,7 @@ def test_loopback_login_rejects_non_loopback_host_without_side_effects(
 ) -> None:
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     store = MemorySecretStore()
-    monkeypatch.setattr(root, "default_secret_store", lambda: store)
+    monkeypatch.setattr(root, "secret_store_for_backend", lambda backend: store)
     opened: list[str] = []
     monkeypatch.setattr(root.webbrowser, "open", lambda url: opened.append(url) == [])
 

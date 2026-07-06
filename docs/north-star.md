@@ -43,8 +43,12 @@ library concepts instead of raw CloudKit records.
 - The default database scope is `private`.
 - The AniShelf CloudKit custom zone is `AniShelfLibrary`.
 - The CLI syncs `LibraryEntry` records only.
-- User-scoped CloudKit web auth tokens belong in secure local storage.
-- TMDb API keys belong in secure local storage or environment variables.
+- User-scoped CloudKit web auth tokens belong in secure local storage by
+  default. Plaintext file storage is only an explicit headless fallback with a
+  clear security warning.
+- TMDb API keys belong in secure local storage or environment variables by
+  default. Plaintext file storage is only an explicit headless fallback with a
+  clear security warning.
 - CloudKit app auth may be embedded as public app material, with environment
   overrides for development and diagnostics.
 - `LibrarySettings` is not a supported or planned CLI surface.

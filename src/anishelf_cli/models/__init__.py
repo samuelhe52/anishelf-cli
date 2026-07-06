@@ -53,6 +53,11 @@ class CallbackStrategy(StrEnum):
     LOOPBACK = "loopback"
 
 
+class SecretBackend(StrEnum):
+    SYSTEM = "system"
+    PLAINTEXT_FILE = "plaintext-file"
+
+
 class AppState(AniShelfBaseModel):
     json_output: bool = False
     verbose: bool = False
@@ -68,6 +73,7 @@ __all__ = [
     "LibraryListSort",
     "LibraryWatchStatus",
     "MetadataDepth",
+    "SecretBackend",
     "TMDbMetadataLanguage",
     "library_identity_from_fields",
     "parse_library_identity",

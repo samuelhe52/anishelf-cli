@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from anishelf_cli.models import HumanOutputStyle, MetadataDepth, TMDbMetadataLanguage
+from anishelf_cli.models import HumanOutputStyle, MetadataDepth, SecretBackend, TMDbMetadataLanguage
 
 APP_NAME = "anishelf-cli"
 POSIX_APP_DIR = f".{APP_NAME}"
@@ -18,6 +19,7 @@ DEFAULT_DATABASE = "private"
 DEFAULT_TMDB_API_KEY_ENVS = ("ANI_TMDB_API_KEY", "TMDB_API_KEY")
 DEFAULT_TMDB_METADATA_LANGUAGE = TMDbMetadataLanguage.EN.value
 DEFAULT_TMDB_HYDRATION_DEPTH = MetadataDepth.DETAILS
+DEFAULT_SECRET_BACKEND = SecretBackend.SYSTEM
 TMDB_HTTP_LANGUAGE_TAGS = {
     TMDbMetadataLanguage.EN.value: "en-US",
     TMDbMetadataLanguage.JA.value: "ja-JP",
@@ -28,6 +30,10 @@ KEYCHAIN_ACCOUNT = "anishelf-cli"
 KEYCHAIN_SERVICE_CLOUDKIT_WEB_AUTH_TOKEN = "anishelf-cli.cloudkit-web-auth-token"
 KEYCHAIN_SERVICE_TMDB_API_KEY = "anishelf-cli.tmdb-api-key"
 USER_CONFIG_FILE = "config.toml"
+PLAINTEXT_KEYRING_FILE = "plaintext-keyring.cfg"
+_TABLE_HEADER_RE = re.compile(r"^\s*\[(?!\[)\s*([A-Za-z0-9_-]+)\s*\]\s*(?:#.*)?$")
+_ANY_TABLE_HEADER_RE = re.compile(r"^\s*\[")
+_SECRETS_BACKEND_RE = re.compile(r"^\s*backend\s*=")
 LIBRARY_DISPLAY_FIELDS = (
     "title",
     "id",
@@ -60,9 +66,15 @@ class TMDbDefaults:
 
 
 @dataclass(frozen=True, slots=True)
+class SecretDefaults:
+    backend: SecretBackend = DEFAULT_SECRET_BACKEND
+
+
+@dataclass(frozen=True, slots=True)
 class UserDefaults:
     library_read: LibraryReadDefaults = LibraryReadDefaults()
     tmdb: TMDbDefaults = TMDbDefaults()
+    secrets: SecretDefaults = SecretDefaults()
 
 
 def app_dir() -> Path:
@@ -94,23 +106,16 @@ def user_config_file() -> Path:
     return config_dir() / USER_CONFIG_FILE
 
 
+def plaintext_keyring_file() -> Path:
+    return data_dir() / PLAINTEXT_KEYRING_FILE
+
+
 def load_user_defaults() -> UserDefaults:
     path = user_config_file()
-    if not path.exists():
-        return UserDefaults()
-
-    try:
-        payload = tomllib.loads(path.read_text(encoding="utf-8"))
-    except OSError as exc:
-        raise UserConfigError(f"Failed to read user defaults from {path}.") from exc
-    except tomllib.TOMLDecodeError as exc:
-        raise UserConfigError(f"User config file {path} is not valid TOML.") from exc
-
-    if not isinstance(payload, dict):
-        raise UserConfigError(f"User config file {path} must contain a TOML table.")
+    payload = _load_user_config_payload(path)
     _reject_unknown_keys(
         payload,
-        allowed_keys={"library", "tmdb"},
+        allowed_keys={"library", "secrets", "tmdb"},
         path=path,
         scope="top-level config",
     )
@@ -118,11 +123,26 @@ def load_user_defaults() -> UserDefaults:
     return UserDefaults(
         library_read=_load_library_read_defaults(payload.get("library"), path),
         tmdb=_load_tmdb_defaults(payload.get("tmdb"), path),
+        secrets=_load_secret_defaults(payload.get("secrets"), path),
     )
+
+
+def load_secret_defaults() -> SecretDefaults:
+    path = user_config_file()
+    payload = _load_user_config_payload(path)
+    _reject_unknown_keys(
+        payload,
+        allowed_keys={"library", "secrets", "tmdb"},
+        path=path,
+        scope="top-level config",
+    )
+    return _load_secret_defaults(payload.get("secrets"), path)
 
 
 def save_user_defaults(defaults: UserDefaults) -> Path:
     path = user_config_file()
+    if path.exists():
+        load_user_defaults()
     body = _serialize_user_defaults(defaults)
     if not body:
         try:
@@ -133,6 +153,52 @@ def save_user_defaults(defaults: UserDefaults) -> Path:
 
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(body, encoding="utf-8")
+    except OSError as exc:
+        raise UserConfigError(f"Failed to write user defaults file {path}.") from exc
+    return path
+
+
+def save_secret_defaults(defaults: SecretDefaults) -> Path:
+    path = user_config_file()
+    if not path.exists():
+        body = _serialize_secret_defaults(defaults)
+        if not body:
+            return path
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(body, encoding="utf-8")
+        except OSError as exc:
+            raise UserConfigError(f"Failed to write user defaults file {path}.") from exc
+        return path
+
+    try:
+        raw_body = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UserConfigError(f"Failed to read user defaults from {path}.") from exc
+
+    payload = _parse_user_config_payload(raw_body, path)
+    _reject_unknown_keys(
+        payload,
+        allowed_keys={"library", "secrets", "tmdb"},
+        path=path,
+        scope="top-level config",
+    )
+    _load_secret_defaults(payload.get("secrets"), path)
+    body = _patch_secret_defaults(
+        raw_body,
+        defaults,
+        path=path,
+        has_existing_secret_defaults=payload.get("secrets") is not None,
+    )
+    if not body:
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as exc:
+            raise UserConfigError(f"Failed to remove user defaults file {path}.") from exc
+        return path
+
+    try:
         path.write_text(body, encoding="utf-8")
     except OSError as exc:
         raise UserConfigError(f"Failed to write user defaults file {path}.") from exc
@@ -237,6 +303,22 @@ def tmdb_http_language_tag(language: str) -> str:
     return TMDB_HTTP_LANGUAGE_TAGS[resolve_configured_tmdb_language(language)]
 
 
+def resolve_configured_secret_backend(
+    value: object,
+    *,
+    path: Path | None = None,
+) -> SecretBackend:
+    candidate = str(value).strip().lower()
+    location = f" in {path}" if path is not None else ""
+    try:
+        return SecretBackend(candidate)
+    except ValueError as exc:
+        valid = ", ".join(backend.value for backend in SecretBackend)
+        raise UserConfigError(
+            f"Invalid secrets backend {candidate!r}{location}. Expected one of: {valid}."
+        ) from exc
+
+
 def _load_library_read_defaults(value: object, path: Path) -> LibraryReadDefaults:
     if value is None:
         return LibraryReadDefaults()
@@ -299,6 +381,46 @@ def _load_tmdb_defaults(value: object, path: Path) -> TMDbDefaults:
     )
 
 
+def _load_secret_defaults(value: object, path: Path) -> SecretDefaults:
+    if value is None:
+        return SecretDefaults()
+    if not isinstance(value, dict):
+        raise UserConfigError(f"Secret defaults in {path} must be a TOML table.")
+    _reject_unknown_keys(
+        value,
+        allowed_keys={"backend"},
+        path=path,
+        scope="secret defaults",
+    )
+
+    backend_value = value.get("backend", DEFAULT_SECRET_BACKEND.value)
+    return SecretDefaults(
+        backend=resolve_configured_secret_backend(backend_value, path=path),
+    )
+
+
+def _load_user_config_payload(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+
+    try:
+        body = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise UserConfigError(f"Failed to read user defaults from {path}.") from exc
+    return _parse_user_config_payload(body, path)
+
+
+def _parse_user_config_payload(body: str, path: Path) -> dict[str, Any]:
+    try:
+        payload = tomllib.loads(body)
+    except tomllib.TOMLDecodeError as exc:
+        raise UserConfigError(f"User config file {path} is not valid TOML.") from exc
+
+    if not isinstance(payload, dict):
+        raise UserConfigError(f"User config file {path} must contain a TOML table.")
+    return payload
+
+
 def _serialize_user_defaults(defaults: UserDefaults) -> str:
     lines: list[str] = []
     library_lines: list[str] = []
@@ -328,6 +450,84 @@ def _serialize_user_defaults(defaults: UserDefaults) -> str:
         lines.append("[tmdb]")
         lines.extend(tmdb_lines)
 
+    secret_body = _serialize_secret_defaults(defaults.secrets)
+    if secret_body:
+        if lines:
+            lines.append("")
+        lines.extend(secret_body.rstrip("\n").split("\n"))
+
+    if not lines:
+        return ""
+    return "\n".join(lines) + "\n"
+
+
+def _serialize_secret_defaults(defaults: SecretDefaults) -> str:
+    secret_lines: list[str] = []
+    if defaults.backend is not DEFAULT_SECRET_BACKEND:
+        secret_lines.append(f'backend = "{defaults.backend.value}"')
+
+    if not secret_lines:
+        return ""
+    return "\n".join(("[secrets]", *secret_lines)) + "\n"
+
+
+def _patch_secret_defaults(
+    body: str,
+    defaults: SecretDefaults,
+    *,
+    path: Path,
+    has_existing_secret_defaults: bool,
+) -> str:
+    lines = body.splitlines()
+    section_start, section_end = _find_toml_table(lines, "secrets")
+    backend_line = f'backend = "{defaults.backend.value}"'
+    if has_existing_secret_defaults and section_start is None:
+        raise UserConfigError(
+            f"Secret defaults in {path} must use a secrets TOML table before ani can modify them."
+        )
+
+    if defaults.backend is not DEFAULT_SECRET_BACKEND:
+        if section_start is None or section_end is None:
+            if lines and lines[-1] != "":
+                lines.append("")
+            lines.extend(("[secrets]", backend_line))
+            return _format_toml_lines(lines)
+
+        for index in range(section_start + 1, section_end):
+            if _SECRETS_BACKEND_RE.match(lines[index]):
+                lines[index] = backend_line
+                return _format_toml_lines(lines)
+        lines.insert(section_start + 1, backend_line)
+        return _format_toml_lines(lines)
+
+    if section_start is None or section_end is None:
+        return _format_toml_lines(lines)
+
+    lines = lines[:section_start] + lines[section_end:]
+    return _format_toml_lines(lines)
+
+
+def _find_toml_table(lines: list[str], name: str) -> tuple[int | None, int | None]:
+    section_start: int | None = None
+    for index, line in enumerate(lines):
+        match = _TABLE_HEADER_RE.match(line)
+        if match is not None and match.group(1) == name:
+            section_start = index
+            break
+    if section_start is None:
+        return None, None
+
+    section_end = len(lines)
+    for index in range(section_start + 1, len(lines)):
+        if _ANY_TABLE_HEADER_RE.match(lines[index]):
+            section_end = index
+            break
+    return section_start, section_end
+
+
+def _format_toml_lines(lines: list[str]) -> str:
+    while lines and lines[-1] == "":
+        lines.pop()
     if not lines:
         return ""
     return "\n".join(lines) + "\n"

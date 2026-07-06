@@ -301,7 +301,7 @@ class CurrentUserProfileResult(AniShelfBaseModel):
 
 class AuthLoginResult(AniShelfBaseModel):
     status: Literal["logged-in"] = "logged-in"
-    storage: Literal["keychain"] = "keychain"
+    storage: Literal["system", "plaintext-file"] = "system"
     callback_strategy: CallbackStrategy
     cloudkit_api_token_source: str
     cloudkit_api_token_version: str | None = None
@@ -356,6 +356,11 @@ class ConfigLibraryResult(AniShelfBaseModel):
     defaults: LibraryDefaultsResult
 
 
+class ConfigSecretsResult(AniShelfBaseModel):
+    backend: Literal["system", "plaintext-file"]
+    plaintext_file: str | None = None
+
+
 class ConfigPathsResult(AniShelfBaseModel):
     config_dir: str
     config_file: str
@@ -368,6 +373,7 @@ class ConfigShowResult(AniShelfBaseModel):
     callback: ConfigCallbackResult
     tmdb: ConfigTMDbResult
     library: ConfigLibraryResult
+    secrets: ConfigSecretsResult
     paths: ConfigPathsResult
 
 
@@ -379,4 +385,11 @@ class ConfigSetDefaultsPayloadResult(AniShelfBaseModel):
 class ConfigSetDefaultsResult(AniShelfBaseModel):
     status: Literal["stored"] = "stored"
     defaults: ConfigSetDefaultsPayloadResult
+    path: str
+
+
+class ConfigSetSecretsBackendResult(AniShelfBaseModel):
+    status: Literal["stored"] = "stored"
+    backend: Literal["system", "plaintext-file"]
+    plaintext_file: str | None = None
     path: str

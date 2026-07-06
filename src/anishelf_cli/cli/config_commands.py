@@ -9,6 +9,12 @@ import typer
 from anishelf_cli import config
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.options import FieldListOption
+from anishelf_cli.cli.secret_backend import (
+    confirm_plaintext_backend,
+    enable_plaintext_backend,
+    plaintext_backend_warning,
+    system_backend_unavailable_guidance,
+)
 from anishelf_cli.cloudkit.api_token import resolve_cloudkit_api_token
 from anishelf_cli.core.output import (
     HumanSection,
@@ -21,6 +27,7 @@ from anishelf_cli.models import (
     CallbackStrategy,
     HumanOutputStyle,
     MetadataDepth,
+    SecretBackend,
     TMDbMetadataLanguage,
 )
 from anishelf_cli.models.output import (
@@ -28,8 +35,10 @@ from anishelf_cli.models.output import (
     ConfigCloudKitResult,
     ConfigLibraryResult,
     ConfigPathsResult,
+    ConfigSecretsResult,
     ConfigSetDefaultsPayloadResult,
     ConfigSetDefaultsResult,
+    ConfigSetSecretsBackendResult,
     ConfigShowResult,
     ConfigTMDbResult,
     LibraryDefaultsResult,
@@ -37,7 +46,9 @@ from anishelf_cli.models.output import (
 )
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
-    default_secret_store,
+    configured_secret_backend,
+    secret_backend_storage_label,
+    secret_store_for_backend,
     set_secret,
     tmdb_api_key_secret,
 )
@@ -54,6 +65,7 @@ def _config_payload() -> ConfigShowResult:
     defaults = _user_defaults_or_exit()
     library_defaults = defaults.library_read
     tmdb_defaults = defaults.tmdb
+    secret_defaults = defaults.secrets
     return ConfigShowResult(
         cloudkit=ConfigCloudKitResult(
             container=config.DEFAULT_CONTAINER,
@@ -81,6 +93,14 @@ def _config_payload() -> ConfigShowResult:
                 output_style=library_defaults.output_style.value,
                 show_hidden=library_defaults.show_hidden,
             )
+        ),
+        secrets=ConfigSecretsResult(
+            backend=secret_backend_storage_label(secret_defaults.backend),
+            plaintext_file=(
+                str(config.plaintext_keyring_file())
+                if secret_defaults.backend is SecretBackend.PLAINTEXT_FILE
+                else None
+            ),
         ),
         paths=ConfigPathsResult(
             config_dir=str(config.config_dir()),
@@ -111,6 +131,7 @@ def config_show(
         app_auth += f", version {cloudkit.app_auth_version}"
     display_fields = library_defaults.display_fields
     display_fields_label = "built-in" if display_fields is None else ", ".join(display_fields)
+    secrets = payload.secrets
 
     emit_human_blocks(
         [
@@ -144,6 +165,20 @@ def config_show(
                 ),
             ),
             HumanSection(
+                "Secrets",
+                (
+                    ("Backend", secrets.backend),
+                    (
+                        "Plaintext file",
+                        (
+                            secrets.plaintext_file
+                            if secrets.plaintext_file is not None
+                            else "not used"
+                        ),
+                    ),
+                ),
+            ),
+            HumanSection(
                 "Paths",
                 (
                     ("Config", payload.paths.config_dir),
@@ -154,6 +189,87 @@ def config_show(
             ),
         ]
     )
+
+
+@config_app.command(
+    "set-secrets-backend",
+    help="Select where CloudKit and TMDb secrets are stored.",
+)
+def config_set_secrets_backend(
+    ctx: typer.Context,
+    backend: Annotated[
+        SecretBackend,
+        typer.Argument(help="Secret storage backend: system or plaintext-file."),
+    ],
+    yes: Annotated[
+        bool,
+        typer.Option(
+            "--yes",
+            "-y",
+            help="Confirm the plaintext-file security warning without prompting.",
+        ),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    plaintext_file_reminder: str | None = None
+    if backend is SecretBackend.PLAINTEXT_FILE:
+        typer.echo(plaintext_backend_warning(), err=True)
+        if not yes:
+            confirmed = confirm_plaintext_backend("Enable plaintext-file secret storage?")
+            if not confirmed:
+                raise typer.Exit(code=2)
+        try:
+            previous_secret_defaults = config.load_secret_defaults()
+            secret_defaults = enable_plaintext_backend()
+            path = config.user_config_file()
+            if (
+                previous_secret_defaults.backend is SecretBackend.SYSTEM
+                and config.plaintext_keyring_file().exists()
+            ):
+                plaintext_file_reminder = (
+                    "Plaintext secret storage is now enabled, and an existing plaintext "
+                    f"keyring file is present at {config.plaintext_keyring_file()}. "
+                    "Delete that file first if you do not want ani to reuse old "
+                    "plaintext CloudKit or TMDb secrets."
+                )
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+    else:
+        try:
+            secret_defaults = config.SecretDefaults(backend=SecretBackend.SYSTEM)
+            path = config.save_secret_defaults(secret_defaults)
+        except config.UserConfigError as exc:
+            emit_error(str(exc))
+            raise typer.Exit(code=2) from exc
+
+    payload = ConfigSetSecretsBackendResult(
+        backend=secret_backend_storage_label(secret_defaults.backend),
+        plaintext_file=(
+            str(config.plaintext_keyring_file())
+            if secret_defaults.backend is SecretBackend.PLAINTEXT_FILE
+            else None
+        ),
+        path=str(path),
+    )
+    if json_output_requested(ctx, json_output):
+        emit_json(payload.model_dump(mode="json"))
+        if plaintext_file_reminder is not None:
+            typer.echo(plaintext_file_reminder, err=True)
+        return
+
+    rows: list[tuple[str, str]] = [
+        ("Backend", payload.backend),
+        ("Config file", payload.path),
+    ]
+    if payload.plaintext_file is not None:
+        rows.append(("Plaintext file", payload.plaintext_file))
+    emit_human_blocks([HumanSection("Secrets", tuple(rows))])
+    if plaintext_file_reminder is not None:
+        typer.echo(plaintext_file_reminder, err=True)
 
 
 @config_app.command("set-defaults", help="Store minimal user defaults for library read commands.")
@@ -206,23 +322,14 @@ def config_set_defaults(
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    has_replacements = (
-        metadata is not None
-        or fields is not None
-        or output_style is not None
-        or tmdb_language is not None
-        or hydration_depth is not None
-        or show_hidden is not None
-    )
     try:
         defaults = config.load_user_defaults()
     except config.UserConfigError as exc:
-        if not has_replacements:
-            emit_error(str(exc))
-            raise typer.Exit(code=2) from exc
-        defaults = config.UserDefaults()
+        emit_error(str(exc))
+        raise typer.Exit(code=2) from exc
     library_defaults = defaults.library_read
     tmdb_defaults = defaults.tmdb
+    secret_defaults = defaults.secrets
     original_tmdb_language = tmdb_defaults.metadata_language
 
     if metadata is not None:
@@ -261,7 +368,11 @@ def config_set_defaults(
     if show_hidden is not None:
         library_defaults = replace(library_defaults, show_hidden=show_hidden)
 
-    defaults = config.UserDefaults(library_read=library_defaults, tmdb=tmdb_defaults)
+    defaults = config.UserDefaults(
+        library_read=library_defaults,
+        tmdb=tmdb_defaults,
+        secrets=secret_defaults,
+    )
     try:
         path = config.save_user_defaults(defaults)
     except config.UserConfigError as exc:
@@ -337,6 +448,25 @@ def config_set_tmdb_api_key(
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    try:
+        secret_backend = configured_secret_backend()
+        secret_store = secret_store_for_backend(secret_backend)
+    except SecretStorageUnavailableError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2) from exc
+
+    secret_descriptor = tmdb_api_key_secret()
+    try:
+        secret_store.get_password(secret_descriptor.service, secret_descriptor.account)
+    except SecretStorageUnavailableError as exc:
+        message = (
+            system_backend_unavailable_guidance(exc, action="TMDb API key storage")
+            if secret_backend is SecretBackend.SYSTEM
+            else str(exc)
+        )
+        typer.echo(message, err=True)
+        raise typer.Exit(code=2) from exc
+
     token = (
         sys.stdin.read().strip()
         if from_stdin
@@ -346,23 +476,35 @@ def config_set_tmdb_api_key(
         )
     )
     try:
-        set_secret(tmdb_api_key_secret(), token, default_secret_store())
-    except (SecretStorageUnavailableError, ValueError) as exc:
+        set_secret(secret_descriptor, token, secret_store)
+    except SecretStorageUnavailableError as exc:
+        message = (
+            system_backend_unavailable_guidance(exc, action="TMDb API key storage")
+            if secret_backend is SecretBackend.SYSTEM
+            else str(exc)
+        )
+        typer.echo(message, err=True)
+        raise typer.Exit(code=2) from exc
+    except ValueError as exc:
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=2) from exc
-    _emit_secret_saved(json_output_requested(ctx, json_output), "tmdb-api-key")
+    _emit_secret_saved(
+        json_output_requested(ctx, json_output),
+        "tmdb-api-key",
+        secret_backend_storage_label(secret_backend),
+    )
 
 
-def _emit_secret_saved(json_output: bool, secret_type: str) -> None:
+def _emit_secret_saved(json_output: bool, secret_type: str, storage: str) -> None:
     payload = {
         "secret_type": secret_type,
         "status": "stored",
-        "storage": "keychain",
+        "storage": storage,
     }
     if json_output:
         emit_json(payload)
         return
-    typer.echo(f"Stored {secret_type} in Keychain.")
+    typer.echo(f"Stored {secret_type} in {storage} secret storage.")
 
 
 def _user_defaults_or_exit() -> config.UserDefaults:

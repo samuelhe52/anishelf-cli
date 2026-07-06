@@ -23,7 +23,12 @@ commands must not reuse the same rolling web auth token concurrently.
 
 The production-safe login path is browser sign-in followed by manual paste of
 the final HTTPS callback URL. The CLI extracts `ckWebAuthToken` from that URL and
-stores only the token in the OS secure credential store.
+stores only the token in the configured secret backend.
+
+The default backend is the OS secure credential store. Headless users can
+explicitly opt into `plaintext-file` when the OS backend cannot unlock, but this
+stores CloudKit auth tokens unencrypted on disk and must be presented as a
+security downgrade in user-facing output.
 
 Only one local CloudKit login is supported at a time. If a user is already
 logged in, `auth login` should fail until `auth logout` clears the stored token.

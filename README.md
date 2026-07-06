@@ -77,6 +77,22 @@ During the CloudKit web login, prefer signing in manually with your account and
 password instead of using passkeys when possible, and check `Keep me signed in`
 so the returned auth token expires less quickly.
 
+On headless Linux, the OS credential store may exist but be locked because
+there is no desktop session to unlock GNOME Keyring or Secret Service. If that
+happens during `ani auth login` or `ani config set-tmdb-api-key`, `ani` fails
+closed and prints the config command for switching to plaintext file storage.
+This is a deliberate security downgrade, not secure storage: CloudKit auth
+tokens and TMDb API keys are stored unencrypted in the AniShelf CLI data
+directory, and any process or user that can read that file can use those
+secrets.
+
+You can also select the backend explicitly:
+
+```bash
+ani config set-secrets-backend plaintext-file
+ani config set-secrets-backend system
+```
+
 `ani lib init` is the required first library step. It downloads your AniShelf
 library into the local SQLite cache and hydrates TMDb metadata when a TMDb key is
 available. After that, read commands use the local cache by default.
@@ -227,6 +243,10 @@ ani config set-defaults --hydration-depth details
 ```
 
 Use `ani config set-tmdb-api-key` to update the stored TMDb API key.
+
+Use `ani config set-secrets-backend plaintext-file` only on machines where you
+accept unencrypted local secret storage. `ani config show` reports the active
+secret backend and the plaintext file path when plaintext storage is enabled.
 
 ## Development
 

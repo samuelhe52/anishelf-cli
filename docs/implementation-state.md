@@ -12,15 +12,18 @@ spec.
   surfaces.
 - `auth login` starts CloudKit web auth, supports manual callback paste and an
   optional loopback callback strategy, and stores the user web auth token in
-  Keychain via `keyring`.
+  the configured secret backend. The default backend is OS secure storage via
+  `keyring`; users may explicitly opt into `plaintext-file` for headless
+  environments that cannot unlock Secret Service.
 - `auth status` and `auth refresh` call CloudKit `users/current` through
   `CloudKitExecutor`, including local locking around rolling web auth token
   use.
 - `auth logout` removes the stored CloudKit web auth token and clears all local
   library cache files.
-- `config show`, `config set-defaults`, and `config set-tmdb-api-key` are
-  implemented. Defaults include library output behavior, preferred TMDb
-  metadata language (`en`), and TMDb hydration depth (`details`).
+- `config show`, `config set-defaults`, `config set-secrets-backend`, and
+  `config set-tmdb-api-key` are implemented. Defaults include library output
+  behavior, preferred TMDb metadata language (`en`), TMDb hydration depth
+  (`details`), and the secret backend (`system`).
 - CloudKit app auth resolves from environment first, then embedded public app
   material.
 - Secret redaction exists for known token values and sensitive URL query keys.

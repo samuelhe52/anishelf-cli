@@ -4,6 +4,7 @@ import os
 import sys
 import termios
 import webbrowser
+from importlib import metadata
 from typing import Annotated, Any, TextIO
 
 import httpx
@@ -13,6 +14,7 @@ from typer.core import TyperGroup
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cli import groups
 from anishelf_cli.cli.common import json_output_requested
+from anishelf_cli.cli.secret_backend import system_backend_unavailable_guidance
 from anishelf_cli.cloudkit.api_token import (
     MissingCloudKitAPITokenError,
     resolve_cloudkit_api_token,
@@ -31,7 +33,7 @@ from anishelf_cli.cloudkit.executor import (
 )
 from anishelf_cli.core.output import emit_error, emit_json, set_current_app_state
 from anishelf_cli.core.redaction import SecretRedactor
-from anishelf_cli.models import AppState, CallbackStrategy
+from anishelf_cli.models import AppState, CallbackStrategy, SecretBackend
 from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.models.output import (
     AuthLoginResult,
@@ -42,9 +44,12 @@ from anishelf_cli.models.output import (
 )
 from anishelf_cli.secrets import (
     SecretStorageUnavailableError,
+    configured_secret_backend,
     default_secret_store,
     delete_cloudkit_web_auth_token,
     load_cloudkit_web_auth_token,
+    secret_backend_storage_label,
+    secret_store_for_backend,
     store_cloudkit_web_auth_token,
 )
 
@@ -82,6 +87,22 @@ auth_app = typer.Typer(
 whoami_lock_factory = None
 
 
+def _package_version() -> str:
+    try:
+        return metadata.version("anishelf-cli")
+    except metadata.PackageNotFoundError:
+        from anishelf_cli import __version__
+
+        return __version__
+
+
+def _version_callback(value: bool) -> None:
+    if not value:
+        return
+    typer.echo(f"ani {_package_version()}")
+    raise typer.Exit()
+
+
 @app.callback()
 def root_callback(
     ctx: typer.Context,
@@ -97,7 +118,17 @@ def root_callback(
             help="Emit redacted network diagnostics to stderr.",
         ),
     ] = False,
+    version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            callback=_version_callback,
+            is_eager=True,
+            help="Show the installed ani version and exit.",
+        ),
+    ] = False,
 ) -> None:
+    _ = version
     state = AppState(
         json_output=json_output,
         verbose=verbose,
@@ -188,10 +219,19 @@ def login(
 ) -> None:
     strategy = callback_strategy or CallbackStrategy.MANUAL_PASTE
     redactor = SecretRedactor()
-    secret_store = default_secret_store()
 
     try:
-        if load_cloudkit_web_auth_token(secret_store) is not None:
+        secret_backend = configured_secret_backend()
+        secret_store = secret_store_for_backend(secret_backend)
+        try:
+            existing_web_auth_token = load_cloudkit_web_auth_token(secret_store)
+        except SecretStorageUnavailableError as exc:
+            if secret_backend is SecretBackend.SYSTEM:
+                raise SecretStorageUnavailableError(
+                    system_backend_unavailable_guidance(exc, action="CloudKit login")
+                ) from exc
+            raise
+        if existing_web_auth_token is not None:
             emit_error(
                 "CloudKit auth is already configured. "
                 "Run `ani auth logout` before logging in as another user."
@@ -219,7 +259,14 @@ def login(
             web_auth_token = extract_web_auth_token(callback_url_value)
 
         redactor.register(web_auth_token, "cloudkit-web-auth-token")
-        store_cloudkit_web_auth_token(web_auth_token, secret_store)
+        try:
+            store_cloudkit_web_auth_token(web_auth_token, secret_store)
+        except SecretStorageUnavailableError as exc:
+            if secret_backend is SecretBackend.SYSTEM:
+                raise SecretStorageUnavailableError(
+                    system_backend_unavailable_guidance(exc, action="CloudKit login")
+                ) from exc
+            raise
     except (
         CloudKitAuthError,
         MissingCloudKitAPITokenError,
@@ -231,6 +278,7 @@ def login(
 
     if json_output_requested(ctx, json_output):
         payload = AuthLoginResult(
+            storage=secret_backend_storage_label(secret_backend),
             callback_strategy=strategy,
             cloudkit_api_token_source=api_token.source,
             cloudkit_api_token_version=api_token.version,
@@ -252,13 +300,13 @@ def logout(
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
-    secret_store = default_secret_store()
     try:
+        secret_store = default_secret_store()
         with cloudkit_web_auth_token_lock(lock_factory=whoami_lock_factory):
             delete_cloudkit_web_auth_token(secret_store)
         removed = LibraryCacheStore.remove_all_local_caches()
     except SecretStorageUnavailableError as exc:
-        typer.echo(str(exc), err=True)
+        emit_error(str(exc))
         raise typer.Exit(code=2) from exc
 
     if json_output_requested(ctx, json_output):
@@ -328,6 +376,7 @@ def _get_current_user_or_exit() -> CurrentUser:
     except (
         CloudKitWhoamiError,
         MissingCloudKitAPITokenError,
+        SecretStorageUnavailableError,
     ) as exc:
         emit_error(str(exc), redactor=getattr(exc, "redactor", None))
         raise typer.Exit(code=2) from exc

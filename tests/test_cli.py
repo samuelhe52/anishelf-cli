@@ -142,8 +142,32 @@ def test_root_help_mentions_global_options() -> None:
     assert "-j" in result.stdout
     assert "--verbose" in result.stdout
     assert "-v" in result.stdout
+    assert "--version" in result.stdout
     assert "--metadata-depth" not in result.stdout
     assert "--anishelf-source" not in result.stdout
+
+
+def test_root_version_uses_installed_package_metadata(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(root.metadata, "version", lambda package: "9.8.7")
+
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "ani 9.8.7\n"
+    assert result.stderr == ""
+
+
+def test_root_version_falls_back_to_source_version(monkeypatch: pytest.MonkeyPatch) -> None:
+    def missing_package(package: str) -> str:
+        raise root.metadata.PackageNotFoundError(package)
+
+    monkeypatch.setattr(root.metadata, "version", missing_package)
+
+    result = runner.invoke(app, ["--version"])
+
+    assert result.exit_code == 0
+    assert result.stdout == "ani 0.1.1\n"
+    assert result.stderr == ""
 
 
 def test_help_uses_plain_agent_friendly_formatting() -> None:
@@ -382,6 +406,10 @@ def test_config_show_json_shows_effective_config_without_secrets(tmp_path, monke
         "output_style": "table",
         "show_hidden": False,
     }
+    assert payload["secrets"] == {
+        "backend": "system",
+        "plaintext_file": None,
+    }
     assert "config_dir" in payload["paths"]
     assert "config_file" in payload["paths"]
     assert "cache_dir" in payload["paths"]
@@ -507,6 +535,11 @@ def test_config_show_human_output_uses_readable_sections(tmp_path, monkeypatch) 
     assert "built-in" in result.stdout
     assert "  Show hidden" in result.stdout
     assert "no" in result.stdout
+    assert "\nSecrets\n" in result.stdout
+    assert "  Backend" in result.stdout
+    assert "system" in result.stdout
+    assert "  Plaintext file" in result.stdout
+    assert "not used" in result.stdout
     assert "\nPaths\n" in result.stdout
     assert "  Config" in result.stdout
     assert "  Config file" in result.stdout
@@ -631,6 +664,174 @@ def test_config_set_defaults_stores_minimal_toml(tmp_path, monkeypatch) -> None:
     )
 
 
+def test_config_set_secrets_backend_plaintext_requires_confirmation(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["config", "set-secrets-backend", "plaintext-file"], input="n\n")
+
+    assert result.exit_code == 2
+    assert "Security warning: plaintext-file stores CloudKit auth tokens" in result.stderr
+    assert str(config.plaintext_keyring_file()) in result.stderr
+    assert not config.user_config_file().exists()
+
+
+def test_config_set_secrets_backend_plaintext_stores_warning_and_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-secrets-backend", "plaintext-file", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "status": "stored",
+        "backend": "plaintext-file",
+        "plaintext_file": str(config.plaintext_keyring_file()),
+        "path": str(config.user_config_file()),
+    }
+    assert "Security warning: plaintext-file stores CloudKit auth tokens" in result.stderr
+    assert "reuse old plaintext" not in result.stderr
+    assert config.user_config_file().read_text() == '[secrets]\nbackend = "plaintext-file"\n'
+
+
+def test_config_set_secrets_backend_plaintext_preserves_parseable_unrelated_config_drift(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    existing_config = '[library]\nmetadata = "details"\n\n[tmdb]\nhydration_depth = "summary"\n'
+    config.user_config_file().write_text(existing_config)
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-secrets-backend", "plaintext-file", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["backend"] == "plaintext-file"
+    assert config.user_config_file().read_text() == (
+        existing_config + '\n[secrets]\nbackend = "plaintext-file"\n'
+    )
+
+
+def test_config_set_secrets_backend_plaintext_warns_about_existing_plaintext_file(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.plaintext_keyring_file().parent.mkdir(parents=True, exist_ok=True)
+    config.plaintext_keyring_file().write_text("old-plaintext-secret\n")
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-secrets-backend", "plaintext-file", "--yes"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert "existing plaintext keyring file is present" in result.stderr
+    assert "Delete that file first" in result.stderr
+    assert str(config.plaintext_keyring_file()) in result.stderr
+    assert "old-plaintext-secret" not in result.stdout + result.stderr
+
+
+def test_config_set_secrets_backend_system_removes_minimal_plaintext_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('[secrets]\nbackend = "plaintext-file"\n')
+
+    result = runner.invoke(app, ["--json", "config", "set-secrets-backend", "system"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "status": "stored",
+        "backend": "system",
+        "plaintext_file": None,
+        "path": str(config.user_config_file()),
+    }
+    assert not config.user_config_file().exists()
+
+
+def test_config_set_secrets_backend_system_preserves_parseable_unrelated_config_drift(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text(
+        '[library]\nfuture_key = true\n\n[secrets]\nbackend = "plaintext-file"\n'
+    )
+
+    result = runner.invoke(app, ["--json", "config", "set-secrets-backend", "system"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["backend"] == "system"
+    assert config.user_config_file().read_text() == "[library]\nfuture_key = true\n"
+
+
+def test_config_set_secrets_backend_system_rejects_misspelled_top_level_secrets_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config_text = '[secret]\nbackend = "plaintext-file"\n'
+    config.user_config_file().write_text(config_text)
+
+    result = runner.invoke(app, ["--json", "config", "set-secrets-backend", "system"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Unsupported top-level config key(s)" in result.stderr
+    assert "'secret'" in result.stderr
+    assert config.user_config_file().read_text() == config_text
+
+
+@pytest.mark.parametrize(
+    ("config_text", "args"),
+    [
+        (
+            'secrets.backend = "system"\n',
+            ["config", "set-secrets-backend", "plaintext-file", "--yes"],
+        ),
+        (
+            'secrets = { backend = "plaintext-file" }\n',
+            ["config", "set-secrets-backend", "system"],
+        ),
+    ],
+)
+def test_config_set_secrets_backend_rejects_unpatchable_existing_secret_shapes(
+    tmp_path,
+    monkeypatch,
+    config_text: str,
+    args: list[str],
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text(config_text)
+
+    result = runner.invoke(app, args)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "must use a secrets TOML table" in " ".join(result.stderr.split())
+    assert config.user_config_file().read_text() == config_text
+
+
 def test_config_set_defaults_accepts_short_metadata_fields_style_and_json_options(
     tmp_path,
     monkeypatch,
@@ -722,6 +923,7 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     (tmp_path / "config" / "config.toml").write_text(
         '[library]\nmetadata = "none"\ndisplay_fields = ["title", "saved"]\n'
         'output_style = "list"\nshow_hidden = true\n\n[tmdb]\nmetadata_language = "zh"\n'
+        '\n[secrets]\nbackend = "plaintext-file"\n'
     )
 
     result = runner.invoke(
@@ -741,6 +943,10 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
     assert payload["tmdb"]["defaults"] == {
         "metadata_language": "zh",
         "hydration_depth": "details",
+    }
+    assert payload["secrets"] == {
+        "backend": "plaintext-file",
+        "plaintext_file": str(config.plaintext_keyring_file()),
     }
 
 
@@ -807,6 +1013,24 @@ def test_config_show_reads_library_defaults_from_toml(tmp_path, monkeypatch) -> 
             "must be a TOML table",
             None,
         ),
+        (
+            ["config", "show"],
+            '[secrets]\nbackend = "encrypted-file"\n',
+            "Invalid secrets backend 'encrypted-file'",
+            None,
+        ),
+        (
+            ["config", "show"],
+            '[secrets]\npath = "custom"\n',
+            "Unsupported secret defaults key(s)",
+            "'path'",
+        ),
+        (
+            ["config", "show"],
+            'secrets = "bad"\n',
+            "Secret defaults",
+            "must be a TOML table",
+        ),
     ],
 )
 def test_config_validation_errors(
@@ -831,7 +1055,7 @@ def test_config_validation_errors(
         assert extra in result.stderr
 
 
-def test_config_set_defaults_can_recover_from_malformed_config_with_replacements(
+def test_config_set_defaults_fails_on_broken_config_with_replacements(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -845,19 +1069,10 @@ def test_config_set_defaults_can_recover_from_malformed_config_with_replacements
         ["--json", "config", "set-defaults", "--metadata", "none"],
     )
 
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["defaults"]["library"] == {
-        "metadata": "none",
-        "display_fields": None,
-        "output_style": "table",
-        "show_hidden": False,
-    }
-    assert payload["defaults"]["tmdb"] == {
-        "metadata_language": "en",
-        "hydration_depth": "details",
-    }
-    assert config_file.read_text() == ('[library]\nmetadata = "none"\n')
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "must be a TOML table" in result.stderr
+    assert config_file.read_text() == 'library = "bad"\n'
 
 
 def test_config_set_defaults_still_fails_on_broken_config_without_replacements(
@@ -875,9 +1090,23 @@ def test_config_set_defaults_still_fails_on_broken_config_without_replacements(
     assert "must be a TOML table" in result.stderr
 
 
+def test_save_user_defaults_does_not_overwrite_broken_existing_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('library = "bad"\n')
+
+    with pytest.raises(config.UserConfigError, match="must be a TOML table"):
+        config.save_user_defaults(config.UserDefaults())
+
+    assert config.user_config_file().read_text() == 'library = "bad"\n'
+
+
 def test_config_set_tmdb_api_key_stores_without_echoing_secret(monkeypatch) -> None:
     store = MemorySecretStore()
-    monkeypatch.setattr(config_commands, "default_secret_store", lambda: store)
+    monkeypatch.setattr(config_commands, "secret_store_for_backend", lambda backend: store)
 
     tmdb = runner.invoke(
         app,
@@ -888,6 +1117,188 @@ def test_config_set_tmdb_api_key_stores_without_echoing_secret(monkeypatch) -> N
     assert tmdb.exit_code == 0
     assert "tmdb-secret-token" not in tmdb.stdout + tmdb.stderr
     assert ("anishelf-cli.tmdb-api-key", KEYCHAIN_ACCOUNT) in store.values
+
+
+def test_config_set_tmdb_api_key_fails_with_config_guidance_when_system_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+
+    class FailingStore:
+        def get_password(self, service: str, account: str) -> str | None:
+            _ = service, account
+            raise config_commands.SecretStorageUnavailableError("locked keyring")
+
+        def set_password(self, service: str, account: str, password: str) -> None:
+            _ = service, account, password
+            raise config_commands.SecretStorageUnavailableError("locked keyring")
+
+    original_store_for_backend = config_commands.secret_store_for_backend
+
+    def store_for_backend(backend: config_commands.SecretBackend):
+        if backend is config_commands.SecretBackend.SYSTEM:
+            return FailingStore()
+        return original_store_for_backend(backend)
+
+    monkeypatch.setattr(config_commands, "secret_store_for_backend", store_for_backend)
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="tmdb-secret-token\n",
+    )
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "tmdb-secret-token" not in result.stdout + result.stderr
+    assert "locked keyring" in result.stderr
+    assert 'secrets.backend = "system"' in result.stderr
+    assert "ani config set-secrets-backend plaintext-file" in result.stderr
+    assert not config.user_config_file().exists()
+
+
+def test_config_set_tmdb_api_key_uses_explicit_plaintext_backend(tmp_path, monkeypatch) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('[secrets]\nbackend = "plaintext-file"\n')
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="tmdb-secret-token\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload == {
+        "secret_type": "tmdb-api-key",
+        "status": "stored",
+        "storage": "plaintext-file",
+    }
+    assert "tmdb-secret-token" not in result.stdout + result.stderr
+    assert config.user_config_file().read_text() == '[secrets]\nbackend = "plaintext-file"\n'
+    assert config.plaintext_keyring_file().exists()
+
+
+def test_config_set_tmdb_api_key_uses_secrets_backend_with_unrelated_config_drift(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text(
+        '[library]\nfuture_key = true\n\n[secrets]\nbackend = "plaintext-file"\n'
+    )
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="tmdb-secret-token\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["storage"] == "plaintext-file"
+    assert "tmdb-secret-token" not in result.stdout + result.stderr
+    assert config.user_config_file().read_text() == (
+        '[library]\nfuture_key = true\n\n[secrets]\nbackend = "plaintext-file"\n'
+    )
+    assert config.plaintext_keyring_file().exists()
+
+
+def test_config_set_tmdb_api_key_plaintext_invalid_file_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('[secrets]\nbackend = "plaintext-file"\n')
+    config.plaintext_keyring_file().parent.mkdir(parents=True, exist_ok=True)
+    config.plaintext_keyring_file().write_text("tmdb-secret-token\n")
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="new-tmdb-secret\n",
+    )
+
+    combined_output = result.stdout + result.stderr
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Plaintext secret storage is unavailable" in result.stderr
+    assert "Traceback" not in combined_output
+    assert "tmdb-secret-token" not in combined_output
+    assert "new-tmdb-secret" not in combined_output
+
+
+def test_config_set_tmdb_api_key_plaintext_unusable_data_dir_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('[secrets]\nbackend = "plaintext-file"\n')
+    (tmp_path / "data").write_text("not-a-directory\n")
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="new-tmdb-secret\n",
+    )
+
+    combined_output = result.stdout + result.stderr
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Plaintext secret storage is unavailable" in result.stderr
+    assert "Traceback" not in combined_output
+    assert "new-tmdb-secret" not in combined_output
+
+
+def test_config_set_tmdb_api_key_malformed_secrets_config_exits_cleanly(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('secrets = "bad"\n')
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="new-tmdb-secret\n",
+    )
+
+    combined_output = result.stdout + result.stderr
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Secret defaults" in result.stderr
+    assert "must be a TOML table" in result.stderr
+    assert "Traceback" not in combined_output
+    assert "new-tmdb-secret" not in combined_output
+
+
+def test_config_set_tmdb_api_key_rejects_misspelled_top_level_secrets_config(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('[secret]\nbackend = "plaintext-file"\n')
+
+    result = runner.invoke(
+        app,
+        ["--json", "config", "set-tmdb-api-key", "--stdin"],
+        input="new-tmdb-secret\n",
+    )
+
+    combined_output = result.stdout + result.stderr
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Unsupported top-level config key(s)" in result.stderr
+    assert "'secret'" in result.stderr
+    assert "Traceback" not in combined_output
+    assert "new-tmdb-secret" not in combined_output
 
 
 def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
@@ -1265,6 +1676,28 @@ def test_auth_group_lists_auth_commands() -> None:
     assert "logout" in result.stdout
     assert "status" in result.stdout
     assert "refresh" in result.stdout
+
+
+@pytest.mark.parametrize("command", (["auth", "logout"], ["auth", "status"], ["auth", "refresh"]))
+def test_auth_commands_malformed_secrets_config_exit_cleanly(
+    tmp_path,
+    monkeypatch,
+    command: list[str],
+) -> None:
+    isolate_paths(monkeypatch, tmp_path)
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    config.user_config_file().parent.mkdir(parents=True, exist_ok=True)
+    config.user_config_file().write_text('secrets = "bad"\n')
+
+    result = runner.invoke(app, command)
+
+    combined_output = result.stdout + result.stderr
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "Secret defaults" in result.stderr
+    assert "must be a TOML table" in result.stderr
+    assert "Traceback" not in combined_output
+    assert "api-secret-token" not in combined_output
 
 
 def test_auth_status_accepts_command_level_json(monkeypatch) -> None:

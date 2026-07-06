@@ -30,7 +30,7 @@ def resolve_tmdb_api_token(store: SecretStore | None = None) -> TMDbAPIToken:
 
     token = get_secret(tmdb_api_key_secret(), store)
     if token:
-        return TMDbAPIToken(value=token, source_label="keychain")
+        return TMDbAPIToken(value=token, source_label="secret-storage")
 
     raise MissingTMDbAPITokenError(
         "TMDb API key is not configured. Set ANI_TMDB_API_KEY, TMDB_API_KEY, "
