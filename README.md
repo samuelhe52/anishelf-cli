@@ -166,6 +166,107 @@ Hidden AniShelf entries are excluded from collection output by default. Use
 ani config set-defaults --show-hidden
 ```
 
+## Scheduled Automation
+
+`ani` is a one-shot CLI, not a daemon. To keep auth state warm or refresh the
+local library cache automatically, schedule the existing commands with your
+operating system's user scheduler.
+
+Use these commands as the scheduled targets:
+
+- `ani auth refresh --json` to refresh the stored CloudKit auth token (usually
+  expires in 30 minutes or 2 weeks after login, depending on whether 'Keep me
+  signed in' was checked).
+- `ani lib sync --json` to refresh the cached library from CloudKit. Note that
+  this also refreshes the auth token, so if you schedule library sync regularly,
+  you usually do not need a separate auth refresh schedule.
+
+**macOS** — use `launchd`. Save a plist to
+`~/Library/LaunchAgents/com.anishelf.sync.plist` and load it with
+`launchctl load`:
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.anishelf.sync</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>/path/to/ani</string>
+        <string>lib</string>
+        <string>sync</string>
+        <string>--json</string>
+    </array>
+    <key>StartInterval</key>
+    <integer>1800</integer>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>/tmp/anishelf-sync.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/anishelf-sync.log</string>
+</dict>
+</plist>
+```
+
+Replace the `ani` path with the output of `which ani` after installing. The
+example above runs every 30 minutes (1800 seconds). Load with:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.anishelf.sync.plist
+```
+
+**Linux** — use a systemd user timer. Create
+`~/.config/systemd/user/anishelf-sync.service`:
+
+```ini
+[Unit]
+Description=Sync AniShelf library cache
+
+[Service]
+Type=oneshot
+ExecStart=/path/to/ani lib sync --json
+```
+
+Then create `~/.config/systemd/user/anishelf-sync.timer`:
+
+```ini
+[Unit]
+Description=Sync AniShelf library cache every 30 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=30min
+
+[Install]
+WantedBy=timers.target
+```
+
+Enable and start the timer:
+
+```bash
+systemctl --user enable --now anishelf-sync.timer
+```
+
+### Troubleshooting Scheduled Tasks
+
+Scheduled tasks run outside your desktop session. The OS credential store
+(GNOME Keyring, D-Bus Secret Service, macOS Keychain) may not be unlocked in
+that context, causing `ani` commands to fail with an authentication storage
+error. If that happens, consider switching to plaintext file storage for
+scheduled environments:
+
+```bash
+ani config set-secrets-backend plaintext-file
+```
+
+This stores CloudKit auth tokens and TMDb API keys unencrypted in the AniShelf
+CLI data directory. Only use this on machines where you accept that any process
+or user that can read that file can use those secrets.
+
 ## Metadata
 
 Library read commands include cached TMDb summary metadata by default. Use

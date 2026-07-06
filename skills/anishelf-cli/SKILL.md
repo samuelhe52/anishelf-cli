@@ -84,6 +84,20 @@ Collection commands use `.entries[]`. `lib get` uses `.items[]` because batch
 lookups can mix found entries and item-level errors. Inspect summary fields and
 item errors instead of relying only on the process exit code for batch reads.
 
+## Scheduled Automation
+
+Use `ani auth refresh --json` and `ani lib sync --json` as entries in macOS
+`launchd` plists or Linux systemd user timers to keep auth state warm or the
+library cache fresh. `lib sync` already refreshes the auth token, so a sync
+schedule usually eliminates the need for a separate auth refresh schedule.
+
+**Secret storage caveat:** Scheduled tasks run outside your desktop session,
+where the system credential store (macOS Keychain, GNOME Keyring, D-Bus Secret
+Service) may be locked. If `ani` commands fail with an auth storage error,
+guide the user to switch to plaintext file storage with
+`ani config set-secrets-backend plaintext-file`, noting the security caveat
+that secrets are stored unencrypted on disk.
+
 ## References
 
 Read `references/commands.md` when you need command recipes, JSON shapes,
