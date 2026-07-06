@@ -58,6 +58,10 @@ ani lib status --json
 callback URL into the local CLI prompt. Do not ask the user to paste that URL
 into the agent chat, because it can contain auth material.
 
+When guiding the CloudKit web login, ask the user to sign in manually with their
+account and password instead of using passkeys when possible, and to check
+`Keep me signed in` so the returned auth token expires less quickly.
+
 TMDb is optional for basic CloudKit library export, but required for metadata
 enrichment, `lib search`, and global `tmdb search`.
 

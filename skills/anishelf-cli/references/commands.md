@@ -40,6 +40,9 @@ ani auth login
 
 If login uses a manual callback, let the user paste the callback URL directly
 into the CLI prompt. Do not echo or store callback URLs in chat, logs, or docs.
+During the CloudKit web login, prefer manual account/password sign-in instead of
+passkeys when possible, and check `Keep me signed in` for a longer-lived auth
+token.
 
 Configure TMDb when metadata enrichment or TMDb search is needed:
 
