@@ -937,7 +937,7 @@ def _library_command_service() -> LibraryCommandService:
         make_http_client=_make_http_client,
         secret_store_factory=default_secret_store,
         library_lock_factory=library_lock_factory,
-        tmdb_summary_client_or_none=_tmdb_summary_client_or_none,
+        tmdb_summary_client=_tmdb_summary_client,
     )
 
 
@@ -1097,12 +1097,8 @@ def _refresh_metadata_targets(
     )
 
 
-def _tmdb_summary_client_or_none() -> TMDbClient | None:
-    try:
-        tmdb_token = resolve_tmdb_api_token(default_secret_store())
-    except MissingTMDbAPITokenError:
-        logger.debug("TMDb summary client -> unavailable reason=missing-api-key")
-        return None
+def _tmdb_summary_client() -> TMDbClient:
+    tmdb_token = resolve_tmdb_api_token(default_secret_store())
     client = TMDbClient(tmdb_token.value)
     client.language = _preferred_metadata_language()
     logger.debug(

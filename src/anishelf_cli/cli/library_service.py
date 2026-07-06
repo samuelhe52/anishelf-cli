@@ -44,6 +44,7 @@ from anishelf_cli.models.output import (
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError, SecretStore
 from anishelf_cli.tmdb.client import TMDbClient
+from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError
 
 logger = get_logger(__name__)
 
@@ -53,7 +54,7 @@ class LibraryCommandService:
     make_http_client: Callable[[], httpx.Client]
     secret_store_factory: Callable[[], SecretStore]
     library_lock_factory: LockFactory | None
-    tmdb_summary_client_or_none: Callable[[], TMDbClient | None]
+    tmdb_summary_client: Callable[[], TMDbClient]
 
     def status(self) -> CacheStatusResult:
         return library_status()
@@ -69,7 +70,7 @@ class LibraryCommandService:
             make_http_client=self.make_http_client,
             secret_store_factory=self.secret_store_factory,
             library_lock_factory=self.library_lock_factory,
-            tmdb_summary_client_or_none=self.tmdb_summary_client_or_none,
+            tmdb_summary_client=self.tmdb_summary_client,
             require_missing_cache=require_missing_cache,
             require_existing_cache=require_existing_cache,
             progress_callback=progress_callback,
@@ -175,7 +176,7 @@ def initialize_library_store(
     make_http_client: Callable[[], AbstractContextManager[httpx.Client]],
     secret_store_factory: Callable[[], SecretStore],
     library_lock_factory: Callable[[Path], AbstractContextManager[Any]] | None,
-    tmdb_summary_client_or_none: Callable[[], TMDbClient | None],
+    tmdb_summary_client: Callable[[], TMDbClient],
     require_missing_cache: bool = False,
     require_existing_cache: bool = False,
     progress_callback: Callable[[LibraryCacheProgress], None] | None = None,
@@ -217,7 +218,7 @@ def initialize_library_store(
                 raise LibraryCacheNotAvailableError(
                     "No local library cache is available. Run `ani lib init` first."
                 )
-            tmdb_client = tmdb_summary_client_or_none()
+            tmdb_client = tmdb_summary_client()
             logger.debug("TMDb summary hydration source -> enabled=%s", tmdb_client is not None)
             refresh_result = LibraryCacheSync(
                 store=store,
@@ -225,13 +226,14 @@ def initialize_library_store(
                 metadata_language=_preferred_metadata_language(),
                 metadata_depth=_preferred_hydration_depth(),
                 tmdb_client=tmdb_client,
-                collect_metadata_targets=tmdb_client is not None,
+                collect_metadata_targets=True,
                 progress_callback=progress_callback,
             ).refresh()
             return store, refresh_result
     except (
         CloudKitWhoamiError,
         MissingCloudKitAPITokenError,
+        MissingTMDbAPITokenError,
         LibraryCacheError,
         LibraryRecordDecodeError,
         SecretStorageUnavailableError,

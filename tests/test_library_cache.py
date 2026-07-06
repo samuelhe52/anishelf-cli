@@ -98,6 +98,15 @@ def _rich_metadata(
     )
 
 
+def _assert_missing_tmdb_api_key(result: Any) -> None:
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "TMDb API key is not configured." in result.stderr
+    assert "ANI_TMDB_API_KEY" in result.stderr
+    assert "TMDB_API_KEY" in result.stderr
+    assert "config set-tmdb-api-key" in result.stderr
+
+
 def test_cloudkit_record_types_nested_cloudkit_metadata() -> None:
     payload = {
         "recordID": {
@@ -1069,6 +1078,11 @@ def test_library_list_refreshes_cache_and_emits_clean_json(tmp_path, monkeypatch
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
     monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -1102,6 +1116,15 @@ def test_library_list_refreshes_cache_and_emits_clean_json(tmp_path, monkeypatch
 
     client = httpx.Client(transport=httpx.MockTransport(handler))
     monkeypatch.setattr(library_commands, "_make_http_client", lambda: client)
+
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Initialized")
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
 
     result = runner.invoke(app, ["--json", "lib", "init"])
 
@@ -1257,6 +1280,11 @@ def test_library_init_rejects_existing_cache_and_points_to_sync(
     monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
     monkeypatch.setattr(
         library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+    monkeypatch.setattr(
+        library_commands,
         "_make_http_client",
         lambda: httpx.Client(
             transport=httpx.MockTransport(
@@ -1291,6 +1319,11 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
     monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -1315,6 +1348,15 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Synced")
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
+
     result = runner.invoke(app, ["--json", "lib", "sync"])
 
     assert result.exit_code == 0, result.output
@@ -1324,6 +1366,72 @@ def test_library_sync_refreshes_existing_cache_and_emits_clean_json(
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
     cached_entries = initialized_store.list_entry_models()
     assert {entry.identity for entry in cached_entries} == {"series:22", "movie:55"}
+
+
+def test_library_init_requires_configured_tmdb_api_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _isolate_paths(monkeypatch, tmp_path)
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+    requests: list[httpx.Request] = []
+
+    monkeypatch.delenv("ANI_TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(500)
+
+    monkeypatch.setattr(
+        library_commands,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "init"])
+
+    _assert_missing_tmdb_api_key(result)
+    assert len(requests) == 1
+    assert requests[0].url.path.endswith("/users/current")
+
+
+def test_library_sync_requires_configured_tmdb_api_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+    requests: list[httpx.Request] = []
+
+    monkeypatch.delenv("ANI_TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(500)
+
+    monkeypatch.setattr(
+        library_commands,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "sync"])
+
+    _assert_missing_tmdb_api_key(result)
+    assert len(requests) == 1
+    assert requests[0].url.path.endswith("/users/current")
 
 
 def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
@@ -1447,6 +1555,11 @@ def test_library_list_refresh_decode_error_exits_cleanly_in_json_mode(
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(library_commands, "default_secret_store", lambda: store)
     monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
 
     bad_record = _live_record("movie:55", "movie", 55)
     bad_record["fields"]["schemaVersion"]["value"] = 3
@@ -1541,6 +1654,11 @@ def test_library_list_sync_refreshes_cache_before_reading(
     monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
     monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
     monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
@@ -1565,6 +1683,15 @@ def test_library_list_sync_refreshes_cache_before_reading(
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
 
+    class FakeTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            assert api_key == "tmdb-secret-token"
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Synced")
+
+    monkeypatch.setattr(library_commands, "TMDbClient", FakeTMDbClient)
+
     result = runner.invoke(app, ["--json", "lib", "list", "--sync"])
 
     assert result.exit_code == 0, result.output
@@ -1573,6 +1700,43 @@ def test_library_list_sync_refreshes_cache_before_reading(
     assert payload["summary"]["cache"]["records"] == 1
     assert any(request.url.path.endswith("/changes/zone") for request in requests)
     assert {entry["id"] for entry in payload["entries"]} == {"movie:55", "series:22"}
+
+
+def test_library_list_sync_requires_configured_tmdb_api_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+    )
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+    requests: list[httpx.Request] = []
+
+    monkeypatch.delenv("ANI_TMDB_API_KEY", raising=False)
+    monkeypatch.delenv("TMDB_API_KEY", raising=False)
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(500)
+
+    monkeypatch.setattr(
+        library_commands,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+    result = runner.invoke(app, ["--json", "lib", "list", "--sync"])
+
+    _assert_missing_tmdb_api_key(result)
+    assert len(requests) == 1
+    assert requests[0].url.path.endswith("/users/current")
 
 
 def test_library_export_reads_existing_cache_without_cloudkit_update(
