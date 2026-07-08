@@ -1,28 +1,6 @@
 # AniShelf CLI Command Reference
 
-## Install
-
-Use the bundled bootstrap helper from the skill directory:
-
-```bash
-python3 scripts/bootstrap_anishelf_cli.py
-```
-
-Equivalent manual beta install:
-
-```bash
-uv tool install --python 3.13 git+https://github.com/samuelhe52/anishelf-cli.git@v0.1.1
-uv tool update-shell
-ani --help
-```
-
-For local development from a clone:
-
-```bash
-uv sync
-uv run ani --help
-make check
-```
+For install, bootstrap, or first-run setup, read `references/install.md`.
 
 ## Auth And Configuration
 
@@ -199,6 +177,7 @@ ani lib get movie:55 --json | jq '.items[].entry'
 Collection commands emit `entries`. `lib get` emits `items` so each requested id
 can contain either `entry` or an item-level error. Partial batch failures can
 remain in the JSON payload, so inspect `summary.errors` and each item result.
+For the entry field contract, read `references/entries.md`.
 
 ## Troubleshooting
 

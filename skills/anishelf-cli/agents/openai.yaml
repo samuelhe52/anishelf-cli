@@ -1,4 +1,4 @@
 interface:
   display_name: "AniShelf CLI"
-  short_description: "Install and operate the AniShelf CLI"
+  short_description: "Operate AniShelf CLI workflows"
   default_prompt: "Use $anishelf-cli to inspect my AniShelf library from the command line."
