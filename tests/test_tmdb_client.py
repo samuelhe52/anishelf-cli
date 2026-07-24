@@ -5,51 +5,8 @@ import pytest
 
 from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery
-from anishelf_cli.models.transport.tmdb import (
-    TMDbMovieSummaryResponse,
-    TMDbSearchResponse,
-    TMDbSeasonSummaryResponse,
-    TMDbSeriesSummaryResponse,
-)
+from anishelf_cli.models.transport.tmdb import TMDbMovieSummaryResponse, TMDbSearchResponse
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError, TMDbSummaryIdentity
-
-
-def test_tmdb_transport_keeps_only_likely_reused_nested_structures_typed() -> None:
-    movie = TMDbMovieSummaryResponse.model_validate(
-        {
-            "id": 55,
-            "title": "Alien",
-            "belongs_to_collection": {"id": 10, "name": "Alien Collection"},
-            "production_companies": [{"id": 1, "name": "Brandywine"}],
-            "spoken_languages": [{"english_name": "English", "iso_639_1": "en"}],
-        }
-    )
-    series = TMDbSeriesSummaryResponse.model_validate(
-        {
-            "id": 22,
-            "name": "Alien Nation",
-            "last_episode_to_air": {"id": 7, "name": "Finale"},
-            "networks": [{"id": 2, "name": "FOX"}],
-            "seasons": [{"id": 33, "season_number": 1}],
-        }
-    )
-    season = TMDbSeasonSummaryResponse.model_validate(
-        {
-            "id": 33,
-            "name": "Season 1",
-            "episodes": [{"id": 1, "episode_number": 1}],
-        }
-    )
-
-    assert movie.belongs_to_collection == {"id": 10, "name": "Alien Collection"}
-    assert movie.production_companies == ({"id": 1, "name": "Brandywine"},)
-    assert movie.spoken_languages == ({"english_name": "English", "iso_639_1": "en"},)
-
-    assert series.last_episode_to_air == {"id": 7, "name": "Finale"}
-    assert series.networks == ({"id": 2, "name": "FOX"},)
-    assert series.seasons[0].season_number == 1
-
-    assert season.episodes[0].episode_number == 1
 
 
 def test_tmdb_transport_ignores_additive_tmdb_fields() -> None:

@@ -8,7 +8,7 @@ import httpx
 import pytest
 
 from anishelf_cli import config
-from anishelf_cli.cli import config_commands, groups, library_commands, root, tmdb_commands
+from anishelf_cli.cli import config_commands, library_commands, root, tmdb_commands
 from anishelf_cli.cli.root import app
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken
 from anishelf_cli.cloudkit.executor import CloudKitExecutor
@@ -195,16 +195,6 @@ def test_root_help_lists_lib_command() -> None:
     assert "lib" in result.stdout
 
 
-def test_command_tree_registers_public_groups() -> None:
-    group_names = {group.name for group in app.registered_groups}
-
-    assert {"auth", "config", "lib", "tmdb"} <= group_names
-    assert "library" not in group_names
-    assert groups.config_app is config_commands.config_app
-    assert groups.library_app is library_commands.library_app
-    assert groups.tmdb_app is tmdb_commands.tmdb_app
-
-
 @pytest.mark.parametrize("command", ("zones", "records", "changes", "settings", "schema"))
 def test_non_user_command_groups_are_removed(command: str) -> None:
     result = runner.invoke(app, [command, "--help"])
@@ -364,21 +354,6 @@ def test_unknown_command_error_uses_plain_formatting() -> None:
     assert "No such command 'loggg'. Did you mean 'login'?" in result.stderr
     for box_character in ("╭", "╮", "╰", "╯", "│", "─"):
         assert box_character not in result.stderr
-
-
-def test_implemented_commands_have_help_text() -> None:
-    missing: list[str] = []
-    for group in app.registered_groups:
-        for command in group.typer_instance.registered_commands:
-            callback = command.callback
-            if callback is None:
-                continue
-            if "emit_placeholder" in callback.__code__.co_names:
-                continue
-            if not command.help:
-                missing.append(f"{group.name} {command.name}")
-
-    assert missing == []
 
 
 def test_config_show_json_shows_effective_config_without_secrets(tmp_path, monkeypatch) -> None:

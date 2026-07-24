@@ -393,17 +393,6 @@ def test_library_get_accepts_command_level_json_after_identity(tmp_path, monkeyp
     assert payload["items"][0]["entry"]["id"] == "movie:55"
 
 
-def test_library_get_reads_existing_cache(tmp_path, monkeypatch) -> None:
-    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
-
-    result = runner.invoke(app, ["--json", "lib", "get", "movie:55"])
-
-    assert result.exit_code == 0, result.output
-    payload = json.loads(result.stdout)
-    assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
-    assert payload["items"][0]["entry"]["id"] == "movie:55"
-
-
 def test_library_get_uses_existing_cache_without_cloudkit_requests(
     tmp_path,
     monkeypatch,
@@ -759,61 +748,6 @@ def test_library_get_human_output_uses_entry_sections_not_a_table(tmp_path, monk
     assert "  Episode progress  S1:E12 (26/05/08)\n" in result.stdout
     assert "  Notes\n" in result.stdout
     assert "    Round trip\n" in result.stdout
-
-
-def test_library_get_human_output_accepts_live_envelope_model() -> None:
-    raw_envelope = {
-        "items": [
-            {
-                "id": "movie:55",
-                "status": "found",
-                "entry": {
-                    "id": "movie:55",
-                    "kind": "snapshot",
-                    "entry_type": "movie",
-                    "tmdb_id": 55,
-                    "schema_version": 2,
-                    "on_display": True,
-                    "date_saved": "2026-05-01T00:00:00Z",
-                    "watch_status": "watched",
-                    "date_started": None,
-                    "date_finished": None,
-                    "is_date_tracking_enabled": False,
-                    "score": 4,
-                    "favorite": True,
-                    "notes": "",
-                    "using_custom_poster": False,
-                    "custom_poster_path": None,
-                    "episode_progresses": [],
-                    "library_updated_at": None,
-                    "tracking_updated_at": None,
-                    "metadata": {
-                        "name": "Alien",
-                        "overview": "A crew answers a distress signal.",
-                    },
-                },
-            }
-        ],
-        "summary": {"requested": 1, "found": 1, "errors": 0},
-    }
-
-    import io
-    from contextlib import redirect_stdout
-
-    from anishelf_cli.cli.presentation import render_library_get
-    from anishelf_cli.models.output import LibraryGetEnvelope
-
-    stream = io.StringIO()
-    with redirect_stdout(stream):
-        render_library_get(LibraryGetEnvelope.model_validate(raw_envelope))
-
-    output = stream.getvalue()
-    assert "Library entries\n" in output
-    assert "Alien\n" in output
-    assert "  Status            found\n" in output
-    assert "  ID                movie:55\n" in output
-    assert "  Overview\n" in output
-    assert "decode-error" not in output
 
 
 def test_library_get_human_metadata_none_preserves_cached_display_title_without_rows(

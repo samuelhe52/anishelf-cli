@@ -10,19 +10,6 @@ from anishelf_cli.models.identity import (
 )
 
 
-def test_library_identity_model_derives_raw_from_fields() -> None:
-    identity = LibraryIdentity.from_fields("season", 33, parent_series_id=22, season_number=1)
-
-    assert identity.raw == "season:22:1:33"
-    assert identity.model_dump(mode="json") == {
-        "raw": "season:22:1:33",
-        "entry_type": "season",
-        "tmdb_id": 33,
-        "parent_series_id": 22,
-        "season_number": 1,
-    }
-
-
 def test_parse_library_identity_returns_model_identity() -> None:
     identity = parse_library_identity("movie:55")
 

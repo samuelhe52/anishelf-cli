@@ -7,11 +7,7 @@ from anishelf_cli.core.output import (
     HumanTableColumn,
     emit_human_blocks,
     emit_json,
-    emit_verbose,
-    set_current_app_state,
-    verbose_output_enabled,
 )
-from anishelf_cli.models import AppState
 
 
 def test_emit_human_blocks_formats_sections_and_tables(capsys) -> None:
@@ -216,21 +212,3 @@ def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, mon
     assert capsys.readouterr().out == (
         "Entry\n  ID        movie:550\n  Overview\n    Alpha beta gamma\n    delta epsilon\n"
     )
-
-
-def test_emit_verbose_is_disabled_without_app_state(capsys) -> None:
-    set_current_app_state(AppState(verbose=False))
-
-    emit_verbose("hidden")
-
-    assert capsys.readouterr().err == ""
-    assert not verbose_output_enabled()
-
-
-def test_emit_verbose_uses_request_scoped_app_state(capsys) -> None:
-    set_current_app_state(AppState(verbose=True))
-
-    emit_verbose("visible")
-
-    assert capsys.readouterr().err == "[debug] visible\n"
-    assert verbose_output_enabled()

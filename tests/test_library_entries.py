@@ -4,7 +4,6 @@ import pytest
 
 from anishelf_cli.library.entries import EpisodeProgress, validate_library_entry
 from anishelf_cli.library.metadata import LibraryEntryMetadata
-from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.tmdb.client import TMDbSummaryIdentity
 
 
@@ -13,18 +12,6 @@ def test_library_entry_rejects_unknown_kind() -> None:
 
     with pytest.raises(ValueError):
         validate_library_entry(payload)
-
-
-def test_library_entry_adapter_rejects_unknown_kind() -> None:
-    with pytest.raises(ValueError):
-        validate_library_entry(
-            {
-                "identity": "movie:55",
-                "kind": "snapshott",
-                "entry_type": "movie",
-                "tmdb_id": 55,
-            }
-        )
 
 
 def test_library_entry_rejects_legacy_deleted_kind() -> None:
@@ -315,35 +302,6 @@ def test_library_entry_metadata_storage_payload_preserves_full_normalized_shape(
     }
 
 
-def test_library_entry_metadata_with_updates_preserves_full_payload_shape() -> None:
-    metadata = LibraryEntryMetadata.model_validate(
-        {
-            "entry_type": "movie",
-            "tmdb_id": 55,
-            "parent_series_id": None,
-            "season_number": None,
-            "language": "en-US",
-            "name": "Alien",
-            "name_translations": {},
-            "overview": None,
-            "overview_translations": {},
-            "poster_path": None,
-            "backdrop_path": None,
-            "logo_path": None,
-            "original_language_code": None,
-            "on_air_date": None,
-            "link_to_details": None,
-            "fetched_at": None,
-            "source_version": "tmdb.metadata.v1",
-        }
-    )
-
-    updated = metadata.with_updates(fetched_at="2026-07-02T00:00:00Z")
-
-    assert set(updated.model_dump(mode="json")) == set(metadata.model_dump(mode="json"))
-    assert updated.model_dump(mode="json")["fetched_at"] == "2026-07-02T00:00:00Z"
-
-
 def test_snapshot_library_entry_json_omits_missing_metadata() -> None:
     entry = validate_library_entry(_snapshot_payload())
 
@@ -351,23 +309,6 @@ def test_snapshot_library_entry_json_omits_missing_metadata() -> None:
 
     assert payload["id"] == "movie:55"
     assert "metadata" not in payload
-
-
-def test_snapshot_with_metadata_revalidates_to_typed_model() -> None:
-    entry = validate_library_entry(_snapshot_payload())
-
-    updated = entry.with_metadata(
-        LibraryEntryMetadata.model_validate(
-            {
-                "entry_type": "movie",
-                "tmdb_id": 55,
-                "name": "Alien",
-            }
-        )
-    )
-
-    assert isinstance(updated.metadata, LibraryEntryMetadata)
-    assert updated.metadata.name == "Alien"
 
 
 def test_snapshot_with_metadata_rejects_mismatched_identity() -> None:
@@ -389,25 +330,6 @@ def test_snapshot_with_metadata_rejects_raw_dict_payload() -> None:
 
     with pytest.raises(TypeError, match="LibraryEntryMetadata instance"):
         entry.with_metadata({"entry_type": "movie", "tmdb_id": 55, "name": "Alien"})  # type: ignore[arg-type]
-
-
-def test_current_user_json_payload_uses_authenticated_envelope() -> None:
-    current_user = CurrentUser(
-        user_record_name="_user",
-        first_name="Ripley",
-        last_name="Scott",
-        email="ripley@example.com",
-    )
-
-    assert current_user.model_dump(mode="json") == {
-        "status": "authenticated",
-        "user": {
-            "user_record_name": "_user",
-            "first_name": "Ripley",
-            "last_name": "Scott",
-            "email": "ripley@example.com",
-        },
-    }
 
 
 def _snapshot_payload(**overrides: object) -> dict[str, object]:

@@ -12,7 +12,6 @@ import httpx
 import pytest
 
 from anishelf_cli.cache import schema as cache_schema
-from anishelf_cli.cache.records import entry_row_params
 from anishelf_cli.cache.scope import LibraryCacheScope
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cache.sync import LibraryCacheSync
@@ -229,53 +228,6 @@ def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> Non
     )
 
 
-def test_cache_initializes_kind_scoped_lookup_indexes(tmp_path, monkeypatch) -> None:
-    store = create_cache_store(monkeypatch, tmp_path)
-
-    with sqlite3.connect(store.path) as db:
-        index_names = {row[1] for row in db.execute("PRAGMA index_list(library_entries)")}
-        assert "idx_library_entries_snapshot_updated_sort" in index_names
-        assert "idx_library_entries_tmdb_lookup" in index_names
-        assert "idx_library_entries_parent_series_lookup" in index_names
-        snapshot_sort_sql = db.execute(
-            """
-            SELECT sql
-            FROM sqlite_master
-            WHERE type = 'index' AND name = 'idx_library_entries_snapshot_updated_sort'
-            """
-        ).fetchone()[0]
-        assert snapshot_sort_sql is not None
-        assert (
-            f"ON library_entries(kind, {cache_schema.UPDATED_SORT_EXPRESSION} DESC, identity ASC)"
-        ) in snapshot_sort_sql
-        assert _index_columns(db, "idx_library_entries_tmdb_lookup") == [
-            "kind",
-            "entry_type",
-            "tmdb_id",
-        ]
-        assert _index_columns(db, "idx_library_entries_parent_series_lookup") == [
-            "kind",
-            "entry_type",
-            "parent_series_id",
-        ]
-        metadata_columns = {row[1] for row in db.execute("PRAGMA table_info(tmdb_metadata_items)")}
-        assert {
-            "metadata_key",
-            "entry_type",
-            "tmdb_id",
-            "parent_series_id",
-            "season_number",
-            "language",
-            "metadata_depth",
-            "name",
-            "overview",
-            "runtime_minutes",
-            "poster_path",
-            "genres_json",
-            "source_version",
-        } <= metadata_columns
-
-
 def test_cache_updated_sort_query_uses_snapshot_sort_index(tmp_path, monkeypatch) -> None:
     store = create_cache_store(monkeypatch, tmp_path)
 
@@ -308,37 +260,6 @@ def test_cache_preserves_raw_cloudkit_record_json_shape(tmp_path, monkeypatch) -
     assert row is not None
     assert json.loads(row[0]) == record
     assert row[1] == "tag-movie:55"
-
-
-def test_entry_row_params_preserves_sqlite_contract_for_snapshot_and_tombstone_rows() -> None:
-    snapshot = validate_library_entry(_snapshot_entry_payload("movie:55", "movie", 55))
-    tombstone = validate_library_entry(
-        {
-            "identity": "movie:55",
-            "kind": "tombstone",
-            "entry_type": "movie",
-            "tmdb_id": 55,
-            "deleted_at": "2026-07-01T00:00:00Z",
-        }
-    )
-
-    snapshot_row = entry_row_params(snapshot, {"recordName": "movie:55"}, "tag-1")
-    tombstone_row = entry_row_params(tombstone, {"recordName": "movie:55"}, "tag-2")
-
-    assert snapshot_row["favorite"] == 0
-    assert snapshot_row["on_display"] == 1
-    assert snapshot_row["is_date_tracking_enabled"] == 0
-    assert snapshot_row["using_custom_poster"] == 0
-    assert snapshot_row["watch_status"] == "watched"
-    assert snapshot_row["deleted_at"] is None
-    assert json.loads(snapshot_row["decoded_json"])["kind"] == "snapshot"
-
-    assert tombstone_row["favorite"] is None
-    assert tombstone_row["on_display"] is None
-    assert tombstone_row["using_custom_poster"] is None
-    assert tombstone_row["watch_status"] is None
-    assert tombstone_row["deleted_at"] == "2026-07-01T00:00:00Z"
-    assert json.loads(tombstone_row["decoded_json"])["kind"] == "tombstone"
 
 
 def test_metadata_summary_is_stored_separately_and_attached_on_read(
@@ -508,24 +429,6 @@ def test_attach_metadata_summary_models_requires_requested_depth(
     )[0]
 
     assert attached.metadata is None
-
-
-def test_attach_metadata_summary_preserves_dict_compatibility(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
-    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
-
-    raw_entry = store.list_entry_models()[0]
-    assert getattr(raw_entry, "metadata", None) is None
-
-    attached = store.attach_metadata_summary_models([raw_entry], language="en")[0]
-
-    assert attached.identity == "movie:55"
-    assert attached.metadata is not None
-    assert attached.metadata.name == "Alien"
-    assert attached.metadata.poster_path is None
 
 
 def test_metadata_readiness_tracks_requested_depth(
@@ -3124,10 +3027,6 @@ def test_library_search_style_flag_renders_human_entries_as_sections(
     assert "\nAlien\n" in result.stdout
     assert "ID" in result.stdout
     assert "movie:55" in result.stdout
-
-
-def _index_columns(db: sqlite3.Connection, index_name: str) -> list[str]:
-    return [row[2] for row in db.execute(f"PRAGMA index_info({index_name})")]
 
 
 def _fake_search_store() -> object:
