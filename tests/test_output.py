@@ -212,3 +212,56 @@ def test_emit_human_blocks_formats_paragraph_values_with_indentation(capsys, mon
     assert capsys.readouterr().out == (
         "Entry\n  ID        movie:550\n  Overview\n    Alpha beta gamma\n    delta epsilon\n"
     )
+
+
+def test_library_table_keeps_ids_whole_and_truncates_titles_on_narrow_terminals(
+    capsys, monkeypatch
+) -> None:
+    from rich.console import Console
+
+    from anishelf_cli.cli.presentation import DISPLAY_FIELD_COLUMNS
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.setattr(
+        output_module,
+        "console",
+        lambda stderr=False: Console(width=60, stderr=stderr),
+    )
+
+    emit_human_blocks(
+        [
+            HumanTable(
+                "Library entries",
+                tuple(
+                    DISPLAY_FIELD_COLUMNS[key] for key in ("title", "id", "type", "status", "score")
+                ),
+                (
+                    {
+                        "title": "葬送のフリーレン A Very Long Localized Season Title",
+                        "id": "season:209867:1:307972",
+                        "type": "season",
+                        "status": "watched",
+                        "score": 5,
+                    },
+                ),
+            )
+        ]
+    )
+
+    output = capsys.readouterr().out
+    assert "season:209867:1:307972" in output
+    assert "..." in output
+    assert all(len(line) <= 60 for line in output.splitlines())
+
+
+def test_console_uses_unbounded_width_when_output_is_piped(monkeypatch) -> None:
+    from anishelf_cli.core import output as output_module
+
+    monkeypatch.delenv("COLUMNS", raising=False)
+    piped = output_module.console()
+    monkeypatch.setenv("COLUMNS", "72")
+    sized = output_module.console()
+
+    assert not piped.is_terminal
+    assert piped.width >= 1000
+    assert sized.width == 72

@@ -39,8 +39,6 @@ from anishelf_cli.models.tmdb import (
 _TMDB_SEARCH_ALL = "all"
 _TABLE_TITLE_MAX_WIDTH = 48
 _TABLE_TITLE_MIN_WIDTH = 24
-_TABLE_ID_MAX_WIDTH = 24
-_TABLE_ID_MIN_WIDTH = 12
 
 LIBRARY_LIST_DEFAULT_FIELDS = (
     "title",
@@ -67,13 +65,9 @@ DISPLAY_FIELD_COLUMNS = {
         max_width=_TABLE_TITLE_MAX_WIDTH,
         min_width=_TABLE_TITLE_MIN_WIDTH,
     ),
-    "id": HumanTableColumn(
-        "id",
-        "ID",
-        flexible=True,
-        max_width=_TABLE_ID_MAX_WIDTH,
-        min_width=_TABLE_ID_MIN_WIDTH,
-    ),
+    # Ids are the handle for `ani lib get`, so they are never truncated; the title
+    # column absorbs narrow terminals instead.
+    "id": HumanTableColumn("id", "ID"),
     "type": HumanTableColumn("type", "Type"),
     "status": HumanTableColumn("status", "Status"),
     "score": HumanTableColumn("score", "Score", "right"),
@@ -646,14 +640,7 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
             HumanTable(
                 "Results",
                 (
-                    HumanTableColumn(
-                        "tmdb_id",
-                        "TMDb ID",
-                        "right",
-                        flexible=True,
-                        max_width=_TABLE_ID_MAX_WIDTH,
-                        min_width=_TABLE_ID_MIN_WIDTH,
-                    ),
+                    HumanTableColumn("tmdb_id", "TMDb ID", "right"),
                     HumanTableColumn(
                         "title",
                         "Title",
@@ -679,14 +666,7 @@ def _tmdb_search_table(
     return HumanTable(
         title,
         (
-            HumanTableColumn(
-                "tmdb_id",
-                "TMDb ID",
-                "right",
-                flexible=True,
-                max_width=_TABLE_ID_MAX_WIDTH,
-                min_width=_TABLE_ID_MIN_WIDTH,
-            ),
+            HumanTableColumn("tmdb_id", "TMDb ID", "right"),
             HumanTableColumn(
                 "title",
                 "Title",

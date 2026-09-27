@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -49,11 +50,17 @@ type HumanBlock = HumanSection | HumanTable
 
 _PARAGRAPH_CONTENT_INDENT = 4
 _PARAGRAPH_MAX_WIDTH = 88
+_PIPED_OUTPUT_WIDTH = 10_000
 _APP_STATE: ContextVar[AppState | None] = ContextVar("anishelf_cli_app_state", default=None)
 
 
 def console(stderr: bool = False) -> Console:
-    return Console(stderr=stderr)
+    out = Console(stderr=stderr)
+    if out.is_terminal or os.environ.get("COLUMNS"):
+        return out
+    # Rich assumes 80 columns when output is piped, which would truncate table
+    # cells and wrap long lines. Pipes and files should receive complete values.
+    return Console(stderr=stderr, width=_PIPED_OUTPUT_WIDTH)
 
 
 def set_current_app_state(state: AppState) -> None:
