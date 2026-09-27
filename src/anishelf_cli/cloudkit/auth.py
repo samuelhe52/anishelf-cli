@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
@@ -26,6 +26,8 @@ logger = get_logger(__name__)
 # - returned web-auth tokens are single-round-trip and replaced by a response token
 # The official docs confirm the callback query key. They do not name the exact
 # successor response key; those keys are kept as local observed fixture evidence.
+# Live production responses (checked 2026-09-27) carry the successor only in the
+# X-Apple-CloudKit-Web-Auth-Token header, and it authenticates as the same user.
 CLOUDKIT_AUTH_BEHAVIOR_FIXTURE: dict[str, Any] = {
     "docs": [
         "https://developer.apple.com/library/archive/documentation/DataManagement/"
@@ -42,6 +44,9 @@ CLOUDKIT_AUTH_BEHAVIOR_FIXTURE: dict[str, Any] = {
     },
     "callback_query": {"ckWebAuthToken": "<web-auth-token>"},
     "observed_successor_token_response_keys": ("webAuthToken", "ckWebAuthToken"),
+    # CloudKit JS reads the rolling token from this header, which every
+    # authenticated response carries; it is listed in Access-Control-Expose-Headers.
+    "observed_successor_token_response_header": "X-Apple-CloudKit-Web-Auth-Token",
 }
 
 
@@ -179,7 +184,16 @@ def _cloudkit_login_response_log(response: httpx.Response, payload: object) -> s
     return " ".join(parts)
 
 
-def successor_web_auth_token(payload: dict[str, Any]) -> str | None:
+def successor_web_auth_token(
+    payload: dict[str, Any],
+    headers: Mapping[str, str] | None = None,
+) -> str | None:
+    if headers is not None:
+        header_token = headers.get(
+            CLOUDKIT_AUTH_BEHAVIOR_FIXTURE["observed_successor_token_response_header"]
+        )
+        if header_token:
+            return header_token
     for key in CLOUDKIT_AUTH_BEHAVIOR_FIXTURE["observed_successor_token_response_keys"]:
         token = payload.get(key)
         if isinstance(token, str) and token:

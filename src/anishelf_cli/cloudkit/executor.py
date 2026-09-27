@@ -181,7 +181,7 @@ class CloudKitExecutor:
             )
             payload = self._parse_response(response, redactor, response_description)
 
-            successor_token = successor_web_auth_token(payload)
+            successor_token = successor_web_auth_token(payload, response.headers)
             redactor.register(successor_token, "cloudkit-successor-web-auth-token")
 
             if _is_authentication_failure(response, payload):

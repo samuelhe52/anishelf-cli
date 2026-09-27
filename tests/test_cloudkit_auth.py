@@ -65,6 +65,17 @@ def test_auth_fixture_captures_documented_redirect_and_successor_shapes() -> Non
     assert successor_web_auth_token({"ckWebAuthToken": "next-token"}) == "next-token"
 
 
+def test_successor_web_auth_token_prefers_response_header() -> None:
+    headers = httpx.Headers({"x-apple-cloudkit-web-auth-token": "header-token"})
+
+    assert successor_web_auth_token({}, headers) == "header-token"
+    assert successor_web_auth_token({"webAuthToken": "body-token"}, headers) == "header-token"
+    assert successor_web_auth_token({"webAuthToken": "body-token"}, httpx.Headers()) == (
+        "body-token"
+    )
+    assert successor_web_auth_token({}, httpx.Headers()) is None
+
+
 def test_login_http_client_supports_socks_proxy_env(monkeypatch) -> None:
     monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:9999")
 

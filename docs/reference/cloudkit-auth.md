@@ -47,7 +47,10 @@ executor owns:
 - adding app and web auth query parameters;
 - holding a local lock across token read, HTTP request, response parse,
   successor-token save, and auth-failure cleanup;
-- replacing the stored web auth token when CloudKit returns successor state;
+- replacing the stored web auth token when a successful response returns
+  successor state, read from the `X-Apple-CloudKit-Web-Auth-Token` response
+  header (where production CloudKit returns it) or, as a fallback, a
+  `webAuthToken`/`ckWebAuthToken` body key;
 - clearing stored user auth state on authentication failures;
 - classifying errors into actionable CLI failures;
 - redacting tokens and callback URLs in errors and diagnostics.
