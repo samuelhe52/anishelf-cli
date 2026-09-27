@@ -91,6 +91,13 @@ class LibraryEntriesCacheResult(AniShelfBaseModel):
     user_record_name: str
 
 
+class LibraryExportFileResult(AniShelfBaseModel):
+    path: str
+    format: str
+    entries: int
+    cache: LibraryEntriesCacheResult
+
+
 class LibraryCacheUpdateSummaryResult(AniShelfBaseModel):
     cache: LibraryEntriesCacheResult
 

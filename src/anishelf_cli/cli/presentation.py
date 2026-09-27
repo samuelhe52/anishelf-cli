@@ -21,6 +21,7 @@ from anishelf_cli.models.domain import (
 )
 from anishelf_cli.models.output import (
     LibraryEntriesCacheResult,
+    LibraryExportFileResult,
     LibraryGetEnvelope,
     LibraryGetItemErrorResult,
     LibraryGetItemFound,
@@ -581,6 +582,23 @@ def render_library_export_result(
                     ("Entries", len(entries)),
                     ("Cache", cache.mode),
                     ("User", cache.user_record_name),
+                ),
+            )
+        ]
+    )
+
+
+def render_library_export_file_result(result: LibraryExportFileResult) -> None:
+    emit_human_blocks(
+        [
+            HumanSection(
+                "Library export",
+                (
+                    ("Entries", result.entries),
+                    ("Format", result.format),
+                    ("Output", result.path),
+                    ("Cache", result.cache.mode),
+                    ("User", result.cache.user_record_name),
                 ),
             )
         ]
