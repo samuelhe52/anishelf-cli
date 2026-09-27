@@ -96,9 +96,11 @@ ani lib stats --json
 ```
 
 `lib stats` reports `types`, `watch_status`, `scores` (`average` is `null` when
-nothing is scored; `distribution` keys are "1".."5"), `finished_by_year`, and
-`genres` (top 10, `null` without details metadata). Hidden entries are excluded
-unless `--show-hidden` is set.
+nothing is scored; `distribution` keys are "1".."5"; out-of-range scores count
+as unscored), `finished_by_year` (UTC years of any entry with a finish date),
+`genres` (top 10 by title, where a series and its seasons are one title; `null`
+without details metadata), and `genre_coverage` (`titles`,
+`titles_with_genres`). Hidden entries are excluded unless `--show-hidden` is set.
 
 Search the initialized library:
 

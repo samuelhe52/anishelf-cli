@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
+from typing import Protocol
 
 from anishelf_cli import config
 from anishelf_cli.library.queries import LibraryQueryStore, visible_snapshots
@@ -9,6 +10,7 @@ from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel
 from anishelf_cli.models.output import (
     LibraryEntriesCacheResult,
+    LibraryStatsGenreCoverageResult,
     LibraryStatsGenreResult,
     LibraryStatsResult,
     LibraryStatsScoresResult,
@@ -22,8 +24,17 @@ SCORE_VALUES = (1, 2, 3, 4, 5)
 TOP_GENRE_LIMIT = 10
 
 
+class LibraryStatsStore(LibraryQueryStore, Protocol):
+    def series_genre_names(
+        self,
+        series_ids: set[int],
+        *,
+        language: str,
+    ) -> dict[int, tuple[str, ...]]: ...
+
+
 def build_library_stats_result(
-    store: LibraryQueryStore,
+    store: LibraryStatsStore,
     *,
     cache: LibraryEntriesCacheResult,
     show_hidden: bool,
@@ -38,6 +49,17 @@ def build_library_stats_result(
         language=metadata_language,
         depth=MetadataDepth.DETAILS,
     )
+    titles = genre_titles(
+        entries,
+        store.series_genre_names(
+            {
+                entry.parent_series_id
+                for entry in entries
+                if entry.entry_type == "season" and entry.parent_series_id is not None
+            },
+            language=metadata_language,
+        ),
+    )
     return LibraryStatsResult(
         summary=LibraryStatsSummaryResult(
             entries=len(entries),
@@ -49,7 +71,11 @@ def build_library_stats_result(
         watch_status=count_by_watch_status(entries),
         scores=score_summary(entries),
         finished_by_year=finished_by_year(entries),
-        genres=top_genres(entries),
+        genres=top_genres(titles),
+        genre_coverage=LibraryStatsGenreCoverageResult(
+            titles=len(titles),
+            titles_with_genres=sum(1 for genres in titles.values() if genres),
+        ),
     )
 
 
@@ -75,7 +101,7 @@ def score_summary(entries: Sequence[LibraryEntryModel]) -> LibraryStatsScoresRes
 
 
 def finished_by_year(entries: Sequence[LibraryEntryModel]) -> dict[str, int]:
-    """Count finished entries per calendar year, newest year first."""
+    """Count entries with a finish date per (UTC) calendar year."""
     years = Counter(
         finished[:4]
         for entry in entries
@@ -84,23 +110,48 @@ def finished_by_year(entries: Sequence[LibraryEntryModel]) -> dict[str, int]:
     return dict(sorted(years.items(), reverse=True))
 
 
-def top_genres(entries: Sequence[LibraryEntryModel]) -> tuple[LibraryStatsGenreResult, ...] | None:
-    """Most common genres, or None when no entry has genre metadata attached."""
-    counts: Counter[str] = Counter()
-    has_genre_metadata = False
+def genre_titles(
+    entries: Sequence[LibraryEntryModel],
+    series_genres: Mapping[int, tuple[str, ...]],
+) -> dict[tuple[str, int], tuple[str, ...]]:
+    """Group entries into titles and resolve each title's genre names.
+
+    TMDb seasons carry no genres, so a series and its saved seasons form one title
+    whose genres come from the series metadata; a movie is its own title.
+    """
+    titles: dict[tuple[str, int], tuple[str, ...]] = {}
     for entry in entries:
-        metadata = getattr(entry, "metadata", None)
-        if not isinstance(metadata, LibraryEntryMetadata) or not metadata.genres:
-            continue
-        has_genre_metadata = True
-        counts.update({genre.name for genre in metadata.genres if genre.name})
-    if not has_genre_metadata:
+        if entry.entry_type == "season" and entry.parent_series_id is not None:
+            key = ("series", entry.parent_series_id)
+            genres = series_genres.get(entry.parent_series_id, ())
+        else:
+            key = (entry.entry_type, entry.tmdb_id)
+            genres = _entry_genres(entry)
+        if genres or key not in titles:
+            titles[key] = titles.get(key) or genres
+    return titles
+
+
+def top_genres(
+    titles: Mapping[tuple[str, int], tuple[str, ...]],
+) -> tuple[LibraryStatsGenreResult, ...] | None:
+    """Most common genres across titles, or None when no title has genres."""
+    counts: Counter[str] = Counter()
+    for genres in titles.values():
+        counts.update(set(genres))
+    if not counts:
         return None
     ranked = sorted(counts.items(), key=lambda item: (-item[1], item[0]))
     return tuple(
-        LibraryStatsGenreResult(name=name, entries=count)
-        for name, count in ranked[:TOP_GENRE_LIMIT]
+        LibraryStatsGenreResult(name=name, titles=count) for name, count in ranked[:TOP_GENRE_LIMIT]
     )
+
+
+def _entry_genres(entry: LibraryEntryModel) -> tuple[str, ...]:
+    metadata = getattr(entry, "metadata", None)
+    if not isinstance(metadata, LibraryEntryMetadata):
+        return ()
+    return tuple(genre.name for genre in metadata.genres if genre.name)
 
 
 def _watch_status(entry: LibraryEntryModel) -> str | None:
@@ -108,8 +159,9 @@ def _watch_status(entry: LibraryEntryModel) -> str | None:
 
 
 def _score(entry: LibraryEntryModel) -> int | None:
+    # AniShelf treats scores outside its valid range as unscored.
     score = getattr(entry, "score", None)
-    return score if isinstance(score, int) else None
+    return score if isinstance(score, int) and score in SCORE_VALUES else None
 
 
 def _date_finished(entry: LibraryEntryModel) -> str | None:

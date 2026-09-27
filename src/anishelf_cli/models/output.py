@@ -115,7 +115,13 @@ class LibraryStatsScoresResult(AniShelfBaseModel):
 
 class LibraryStatsGenreResult(AniShelfBaseModel):
     name: str
-    entries: int
+    titles: int
+
+
+class LibraryStatsGenreCoverageResult(AniShelfBaseModel):
+    # A title is a movie, or a series together with its saved seasons.
+    titles: int
+    titles_with_genres: int
 
 
 class LibraryStatsSummaryResult(AniShelfBaseModel):
@@ -131,8 +137,9 @@ class LibraryStatsResult(AniShelfBaseModel):
     watch_status: dict[str, int]
     scores: LibraryStatsScoresResult
     finished_by_year: dict[str, int]
-    # None when no entry has details-depth genre metadata cached.
+    # None when no title has details-depth genre metadata cached.
     genres: tuple[LibraryStatsGenreResult, ...] | None = None
+    genre_coverage: LibraryStatsGenreCoverageResult
 
 
 class LibraryEntriesMetadataResult(AniShelfBaseModel):

@@ -618,10 +618,14 @@ def render_library_stats(result: LibraryStatsResult) -> None:
     if result.finished_by_year:
         blocks.append(HumanSection("Finished by year", tuple(result.finished_by_year.items())))
     if result.genres:
+        coverage = result.genre_coverage
         blocks.append(
             HumanSection(
                 "Top genres",
-                tuple((genre.name, genre.entries) for genre in result.genres),
+                (
+                    *((genre.name, genre.titles) for genre in result.genres),
+                    ("Coverage", f"{coverage.titles_with_genres}/{coverage.titles} titles"),
+                ),
             )
         )
     emit_human_blocks(blocks)
