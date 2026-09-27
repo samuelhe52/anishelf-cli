@@ -26,7 +26,8 @@ dependencies = [
   "keyrings.alt>=5.0.2",
   "pydantic>=2.11.7",
   "rich>=14.1.0",
-  "typer>=0.16.1",
+  # Typer 0.27 renders help metavars as `{query}` / `<str>`; keep the tested format.
+  "typer>=0.16.1,<0.27",
 ]
 
 [project.scripts]
