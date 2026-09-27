@@ -38,8 +38,7 @@ from anishelf_cli.models.tmdb import (
 
 _TMDB_SEARCH_ALL = "all"
 _TABLE_TITLE_MAX_WIDTH = 48
-_TABLE_TITLE_MIN_WIDTH = 24
-_TABLE_ID_MAX_WIDTH = 24
+_TABLE_TITLE_MIN_WIDTH = 10
 _TABLE_ID_MIN_WIDTH = 12
 
 LIBRARY_LIST_DEFAULT_FIELDS = (
@@ -67,12 +66,14 @@ DISPLAY_FIELD_COLUMNS = {
         max_width=_TABLE_TITLE_MAX_WIDTH,
         min_width=_TABLE_TITLE_MIN_WIDTH,
     ),
+    # Ids are the handle for `ani lib get`: the title shrinks to its floor first and
+    # the id is truncated only as a last resort on very narrow terminals.
     "id": HumanTableColumn(
         "id",
         "ID",
         flexible=True,
-        max_width=_TABLE_ID_MAX_WIDTH,
         min_width=_TABLE_ID_MIN_WIDTH,
+        shrink_priority=1,
     ),
     "type": HumanTableColumn("type", "Type"),
     "status": HumanTableColumn("status", "Status"),
@@ -646,14 +647,7 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
             HumanTable(
                 "Results",
                 (
-                    HumanTableColumn(
-                        "tmdb_id",
-                        "TMDb ID",
-                        "right",
-                        flexible=True,
-                        max_width=_TABLE_ID_MAX_WIDTH,
-                        min_width=_TABLE_ID_MIN_WIDTH,
-                    ),
+                    HumanTableColumn("tmdb_id", "TMDb ID", "right"),
                     HumanTableColumn(
                         "title",
                         "Title",
@@ -679,14 +673,7 @@ def _tmdb_search_table(
     return HumanTable(
         title,
         (
-            HumanTableColumn(
-                "tmdb_id",
-                "TMDb ID",
-                "right",
-                flexible=True,
-                max_width=_TABLE_ID_MAX_WIDTH,
-                min_width=_TABLE_ID_MIN_WIDTH,
-            ),
+            HumanTableColumn("tmdb_id", "TMDb ID", "right"),
             HumanTableColumn(
                 "title",
                 "Title",
