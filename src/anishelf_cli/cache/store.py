@@ -22,6 +22,9 @@ LibraryCacheError = schema.LibraryCacheError
 LibraryCacheNotAvailableError = schema.LibraryCacheNotAvailableError
 
 
+_IDENTITY_LOOKUP_CHUNK_SIZE = 500
+
+
 @dataclass(frozen=True, slots=True)
 class LibraryCacheStore:
     scope: LibraryCacheScope
@@ -269,18 +272,26 @@ class LibraryCacheStore:
         return self._entry_models_from_rows(rows)
 
     def get_entry_models_by_identity(self, identities: list[str]) -> dict[str, LibraryEntryModel]:
-        if not identities:
+        unique_identities = list(dict.fromkeys(identities))
+        if not unique_identities:
             return {}
+        rows: list[sqlite3.Row] = []
         with self._connect_initialized() as db:
-            rows = db.execute(
-                f"""
-                SELECT decoded_json
-                FROM library_entries
-                WHERE kind = 'snapshot'
-                AND identity IN ({metadata.placeholders(identities)})
-                """,
-                identities,
-            ).fetchall()
+            # Chunk the IN clause to stay under SQLite's bound-variable limit for
+            # large batches read from stdin.
+            for start in range(0, len(unique_identities), _IDENTITY_LOOKUP_CHUNK_SIZE):
+                chunk = unique_identities[start : start + _IDENTITY_LOOKUP_CHUNK_SIZE]
+                rows.extend(
+                    db.execute(
+                        f"""
+                        SELECT decoded_json
+                        FROM library_entries
+                        WHERE kind = 'snapshot'
+                        AND identity IN ({metadata.placeholders(chunk)})
+                        """,
+                        chunk,
+                    ).fetchall()
+                )
         entries = self._entry_models_from_rows(rows)
         return {entry.identity: entry for entry in entries}
 

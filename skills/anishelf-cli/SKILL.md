@@ -30,7 +30,8 @@ output with optional TMDb anime metadata, and emits scriptable JSON.
 2. Prefer local reads from the initialized cache.
 3. Use `--sync` only when the user wants a fresh CloudKit pull before a read.
 4. Run `ani lib refresh-meta --json` only when metadata is missing or stale.
-5. Inspect JSON summaries and item-level errors; do not rely only on exit code.
+5. Inspect JSON summaries and item-level errors; do not rely only on exit code
+   unless you pass `lib get --strict`.
 
 ```bash
 ani lib status --json
@@ -42,7 +43,9 @@ ani tmdb search "Frieren" --limit 5 --json
 
 Collection commands use `.entries[]`. `lib get` uses `.items[]` because batch
 lookups can mix found entries and item-level errors. Inspect summary fields and
-item errors instead of relying only on the process exit code for batch reads.
+item errors instead of relying only on the process exit code for batch reads, or
+pass `--strict` so any item error exits 1. Feed ids from another command with
+`... --json | jq -r '.entries[].id' | ani lib get - --json`.
 
 ## References
 

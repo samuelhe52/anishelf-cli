@@ -170,7 +170,7 @@ def library_get(
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
-    lookup_record_names = valid_lookup_record_names(identities)
+    lookup_record_names = list(dict.fromkeys(valid_lookup_record_names(identities)))
     cached_entries: dict[str, LibraryEntryModel] = {}
     store: LibraryCacheStore | None = None
     if lookup_record_names:
@@ -238,13 +238,29 @@ def library_get(
         raise typer.Exit(code=1)
 
 
+def _stdin_is_interactive() -> bool:
+    isatty = getattr(sys.stdin, "isatty", None)
+    return bool(isatty()) if callable(isatty) else False
+
+
 def _expand_stdin_identities(identities: list[str]) -> list[str]:
     """Replace a `-` argument with ids read from stdin, preserving caller order."""
     if "-" not in identities:
         return identities
+    if identities.count("-") > 1:
+        emit_error("Pass `-` at most once; stdin can only be read once.")
+        raise typer.Exit(code=2)
+    if _stdin_is_interactive():
+        emit_error("`-` reads ids from stdin; pipe them in, e.g. `... | ani lib get -`.")
+        raise typer.Exit(code=2)
+    try:
+        text = sys.stdin.read()
+    except UnicodeDecodeError as exc:
+        emit_error("Could not read ids from stdin: input is not valid UTF-8.")
+        raise typer.Exit(code=2) from exc
     stdin_identities = [
         token
-        for line in sys.stdin.read().splitlines()
+        for line in text.lstrip("\ufeff").splitlines()
         if not line.lstrip().startswith("#")
         for token in line.split()
     ]

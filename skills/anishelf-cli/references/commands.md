@@ -130,7 +130,7 @@ ani lib get movie:55 bogus --strict --json
 ```
 
 `-` reads whitespace-separated ids from stdin in place of the `-` argument
-(`#` lines ignored). Without `--strict`, mixed batches exit 0 when at least one
+(whole `#` lines ignored; empty stdin exits 2, so guard empty upstream results). Without `--strict`, mixed batches exit 0 when at least one
 id is found, so inspect `summary.errors`; with `--strict`, any invalid or
 missing id exits 1 while still printing the full envelope.
 
