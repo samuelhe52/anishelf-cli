@@ -55,6 +55,15 @@ executor owns:
 Retry behavior should be bounded and reserved for transient or throttled
 requests. Access denied and user-auth failures should not retry blindly.
 
+Because web auth tokens roll, a request that reached CloudKit may already have
+consumed the token it carried, and replaying it would look like an auth failure
+that clears the saved login. The executor therefore retries only
+connection-phase failures (`httpx.ConnectError` and `httpx.ConnectTimeout`,
+including TLS handshake errors), where the request never left the machine: up to
+four attempts with a short linear backoff. Read errors, timeouts after sending,
+and HTTP error responses are surfaced immediately with the transport error class
+and a network hint.
+
 ## Security
 
 Never print app auth, `ckWebAuthToken`, successor web auth tokens, TMDb API keys,

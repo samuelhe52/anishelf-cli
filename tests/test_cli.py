@@ -2121,3 +2121,91 @@ def test_whoami_locking_serializes_token_consuming_requests(tmp_path, monkeypatc
     assert sorted(results) == ["_user1", "_user2"]
     assert request_count == 2
     assert max_active_requests == 1
+
+
+def _executor_with_handler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    handler,
+) -> tuple[CloudKitExecutor, MemorySecretStore, list[float]]:
+    monkeypatch.setenv("ANISHELF_CLI_DATA_DIR", str(tmp_path / "data"))
+    sleeps: list[float] = []
+    monkeypatch.setattr("anishelf_cli.cloudkit.executor.time.sleep", sleeps.append)
+    store = MemorySecretStore()
+    descriptor = cloudkit_web_auth_token_secret()
+    store.set_password(descriptor.service, descriptor.account, "web-secret-token")
+    executor = CloudKitExecutor(
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+        api_token_resolver=lambda: CloudKitAPIToken("api-secret-token", "test"),
+        secret_store=store,
+    )
+    return executor, store, sleeps
+
+
+def test_cloudkit_executor_retries_connection_failures(tmp_path, monkeypatch) -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if len(requests) == 1:
+            raise httpx.ConnectError("[SSL: UNEXPECTED_EOF_WHILE_READING]", request=request)
+        return httpx.Response(200, json={"userRecordName": "_user"})
+
+    executor, _, sleeps = _executor_with_handler(tmp_path, monkeypatch, handler)
+
+    assert executor.get_current_user().user_record_name == "_user"
+    assert len(requests) == 2
+    assert sleeps == [0.5]
+
+
+def test_cloudkit_executor_does_not_retry_failures_after_the_request_was_sent(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from anishelf_cli.cloudkit.executor import CloudKitRequestFailedError
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ReadError("connection reset", request=request)
+
+    executor, store, sleeps = _executor_with_handler(tmp_path, monkeypatch, handler)
+
+    with pytest.raises(CloudKitRequestFailedError) as exc_info:
+        executor.get_current_user()
+
+    assert len(requests) == 1
+    assert sleeps == []
+    assert str(exc_info.value) == (
+        "CloudKit whoami request failed (ReadError). Check your network connection and try again."
+    )
+    descriptor = cloudkit_web_auth_token_secret()
+    assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
+
+
+def test_cloudkit_executor_gives_up_after_bounded_connection_retries(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from anishelf_cli.cloudkit.executor import CloudKitRequestFailedError
+
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        raise httpx.ConnectTimeout(f"timed out connecting for {request.url}", request=request)
+
+    executor, store, sleeps = _executor_with_handler(tmp_path, monkeypatch, handler)
+
+    with pytest.raises(CloudKitRequestFailedError) as exc_info:
+        executor.get_current_user()
+
+    assert len(requests) == 4
+    assert sleeps == [0.5, 1.0, 1.5]
+    message = str(exc_info.value)
+    assert "(ConnectTimeout)" in message
+    assert "web-secret-token" not in message
+    assert "api-secret-token" not in message
+    descriptor = cloudkit_web_auth_token_secret()
+    assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
