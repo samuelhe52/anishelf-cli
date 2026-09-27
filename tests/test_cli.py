@@ -37,7 +37,7 @@ def _fake_store() -> object:
         list_entry_models=lambda *, include_tombstones=False: [],
         list_entry_models_filtered=lambda **kwargs: [],
         search_entry_models=lambda query, **kwargs: [],
-        metadata_summary_status=lambda **kwargs: SimpleNamespace(
+        metadata_status_for_entries=lambda entries, **kwargs: SimpleNamespace(
             tracked_entries=0,
             hydrated_entries=0,
             missing_entries=0,

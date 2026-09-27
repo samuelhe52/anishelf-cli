@@ -88,8 +88,12 @@ ani lib search "Frieren" --limit 10 --json
 ```
 
 `lib search` depends on cached TMDb metadata because it searches localized
-titles, translations, parent-series metadata, overviews, notes, and dates. If
-metadata is incomplete, run:
+titles, translations, parent-series metadata, overviews, notes, and dates. It
+fails (exit 2) only when no entry has cached metadata. When some entries lack
+metadata it still succeeds, warns on stderr, and sets
+`summary.metadata_missing` to the number of affected entries; treat a nonzero
+value as possibly incomplete results. `lib sync` retries missing metadata; to
+refetch everything, run:
 
 ```bash
 ani lib refresh-meta --json
@@ -184,8 +188,9 @@ For the entry field contract, read `references/entries.md`.
 - If `ani` is not found after `uv tool install`, run `uv tool update-shell`,
   open a new shell, and try `ani --help`.
 - If library commands report an uninitialized cache, run `ani lib init --json`.
-- If `lib search` reports missing metadata, configure a TMDb key and run
-  `ani lib refresh-meta --json`.
+- If `lib search` fails for missing metadata, configure a TMDb key and run
+  `ani lib refresh-meta --json`. If it succeeds with a nonzero
+  `summary.metadata_missing`, run `ani lib sync --json` to retry those entries.
 - If auth fails, run `ani auth status --json`, then `ani auth login` when the
   user is present for browser or callback handling.
 - Use `-v` only for redacted diagnostics. Keep diagnostics on stderr separate

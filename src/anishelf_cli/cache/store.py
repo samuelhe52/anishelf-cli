@@ -524,22 +524,37 @@ class LibraryCacheStore:
         language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
         depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> CacheMetadataStatusResult:
-        entries = self.list_entry_models(include_tombstones=False)
-        if not entries:
+        return self.metadata_status_for_entries(
+            self.list_entry_models(include_tombstones=False),
+            language=language,
+            depth=depth,
+        )
+
+    def metadata_status_for_entries(
+        self,
+        entries: list[LibraryEntryModel],
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+        depth: MetadataDepth = MetadataDepth.SUMMARY,
+    ) -> CacheMetadataStatusResult:
+        tracked = self.metadata_summary_targets_for_entries(entries)
+        if not tracked:
             return CacheMetadataStatusResult(
                 tracked_entries=0,
                 hydrated_entries=0,
                 missing_entries=0,
                 ready=True,
             )
-
-        tracked = self.metadata_summary_targets_for_entries(entries)
-        missing = self.incomplete_metadata_summary_targets(language=language, depth=depth)
-        tracked_count = len(tracked)
-        missing_count = len(missing)
+        with self._connect_initialized() as db:
+            missing_count = sum(
+                1
+                for target in tracked
+                if metadata.metadata_summary_state(db, target, language=language, depth=depth)
+                != "current"
+            )
         return CacheMetadataStatusResult(
-            tracked_entries=tracked_count,
-            hydrated_entries=tracked_count - missing_count,
+            tracked_entries=len(tracked),
+            hydrated_entries=len(tracked) - missing_count,
             missing_entries=missing_count,
             ready=missing_count == 0,
         )

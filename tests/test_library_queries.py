@@ -161,6 +161,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     with pytest.raises(MetadataCompletenessError) as exc_info:
         check_metadata_coverage(
             store,
+            store.list_entry_models(),
             action="search cached library entries",
             hint="Run `ani lib refresh-meta`.",
         )
@@ -170,7 +171,7 @@ def test_metadata_completeness_error_is_typed_and_descriptive() -> None:
     assert exc.hydrated == 0
     assert exc.missing == 1
     assert str(exc) == (
-        "Cannot search cached library entries because no entry has cached TMDb "
+        "Cannot search cached library entries because no entry has current cached TMDb "
         "metadata (0/1 hydrated). Run `ani lib refresh-meta`."
     )
 
@@ -197,7 +198,7 @@ def test_search_proceeds_with_warning_when_metadata_is_partially_hydrated() -> N
     assert store.search_query == "alien"
     assert result.metadata_missing == 1
     assert result.warnings == (
-        "Results may be incomplete: cached TMDb metadata is missing for 1 of 2 entries. "
+        "Results may be incomplete: current cached TMDb metadata is missing for 1 of 2 entries. "
         "Run `ani lib sync` to retry missing metadata, or `ani lib refresh-meta` after "
         "configuring a TMDb API key.",
     )
@@ -337,6 +338,7 @@ class FakeQueryStore:
         self.list_filter_kwargs: dict[str, Any] = {}
         self.search_query: str | None = None
         self.status_requests: list[MetadataDepth] = []
+        self.status_scopes: list[list[str]] = []
 
     def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
         _ = include_tombstones
@@ -375,17 +377,23 @@ class FakeQueryStore:
         self.search_query = query
         return [validate_library_entry(entry) for entry in self.entries]
 
-    def metadata_summary_status(
+    def metadata_status_for_entries(
         self,
+        entries: list[LibraryEntryModel],
         *,
         language: str = "en",
         depth: MetadataDepth = MetadataDepth.SUMMARY,
     ) -> CacheMetadataStatusResult:
         _ = language
         self.status_requests.append(depth)
+        self.status_scopes.append([entry.identity for entry in entries])
         ready = self.metadata_ready_by_depth.get(depth, self.metadata_ready)
-        tracked = len(self.entries)
-        missing = 0 if ready else (self.metadata_missing or tracked)
+        tracked = len(entries)
+        missing = 0
+        if not ready:
+            missing = (
+                tracked if self.metadata_missing is None else min(self.metadata_missing, tracked)
+            )
         return CacheMetadataStatusResult(
             tracked_entries=tracked,
             hydrated_entries=tracked - missing,
