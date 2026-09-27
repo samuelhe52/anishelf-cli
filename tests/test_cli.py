@@ -1340,6 +1340,165 @@ def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
     }
 
 
+def test_tmdb_search_marks_titles_already_in_the_library(tmp_path, monkeypatch) -> None:
+    from tests.support import create_seeded_cache_store, live_record
+
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record("movie:55", "movie", 55),
+        live_record("season:95:2:902", "season", 902),
+        live_record("series:95", "series", 95),
+    )
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie", 55, "Alien", release_date="1979-05-25", overview="", poster_path=""
+            ),
+            _tmdb_match(
+                "movie", 56, "Aliens", release_date="1986-07-18", overview="", poster_path=""
+            ),
+        ),
+        series=(
+            _tmdb_match(
+                "series", 95, "Alien Nation", release_date="1989-09-18", overview="", poster_path=""
+            ),
+        ),
+    )
+
+    machine = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+    human = runner.invoke(app, ["tmdb", "search", "Alien"])
+
+    assert machine.exit_code == 0, machine.output
+    payload = json.loads(machine.stdout)
+    assert payload["summary"]["in_library"] == 2
+    assert [match["library_ids"] for match in payload["results"]["movies"]] == [["movie:55"], []]
+    assert payload["results"]["series"][0]["library_ids"] == ["series:95", "season:95:2:902"]
+    assert human.exit_code == 0, human.output
+    assert "In library  2" in human.stdout
+    assert "yes, S2" in human.stdout
+
+
+def _install_alien_search(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie", 95, "Alien", release_date="1979-05-25", overview="", poster_path=""
+            ),
+        ),
+        series=(
+            _tmdb_match(
+                "series", 95, "Alien Nation", release_date="1989-09-18", overview="", poster_path=""
+            ),
+        ),
+    )
+
+
+def test_tmdb_search_library_markers_keep_movie_and_series_ids_apart(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from tests.support import create_seeded_cache_store, live_record
+
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record("season:95:10:910", "season", 910),
+        live_record("season:95:2:902", "season", 902, on_display=False),
+    )
+    _install_alien_search(monkeypatch)
+
+    machine = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+    human = runner.invoke(app, ["tmdb", "search", "Alien"])
+
+    payload = json.loads(machine.stdout)
+    # Movie 95 is a different title from series 95; only the series has saved seasons.
+    assert payload["results"]["movies"][0]["library_ids"] == []
+    assert payload["results"]["series"][0]["library_ids"] == [
+        "season:95:2:902",
+        "season:95:10:910",
+    ]
+    assert "S2, S10" in human.stdout
+
+
+def test_tmdb_search_omits_markers_for_an_empty_cache(tmp_path, monkeypatch) -> None:
+    from tests.support import create_seeded_cache_store
+
+    create_seeded_cache_store(monkeypatch, tmp_path)
+    _install_alien_search(monkeypatch)
+
+    result = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert "in_library" not in json.loads(result.stdout)["summary"]
+
+
+def test_tmdb_search_never_rewrites_a_cache_with_another_schema_version(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    import sqlite3
+
+    from tests.support import create_seeded_cache_store, live_record
+
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record("movie:95", "movie", 95),
+    )
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE cache_meta SET value = '2' WHERE key = 'schema_version'")
+    _install_alien_search(monkeypatch)
+
+    result = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert "in_library" not in json.loads(result.stdout)["summary"]
+    with sqlite3.connect(store.path) as db:
+        assert db.execute("SELECT COUNT(*) FROM library_entries").fetchone()[0] == 1
+
+
+def test_tmdb_search_survives_cache_filesystem_errors(monkeypatch) -> None:
+    from anishelf_cli.cache.store import LibraryCacheStore
+
+    def fail_scope() -> LibraryCacheStore:
+        raise PermissionError(13, "Permission denied")
+
+    monkeypatch.setattr(LibraryCacheStore, "find_default_scope", staticmethod(fail_scope))
+    _install_alien_search(monkeypatch)
+
+    result = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+
+    assert result.exit_code == 0, result.output
+    assert "in_library" not in json.loads(result.stdout)["summary"]
+
+
+def test_tmdb_search_omits_library_markers_without_a_local_cache(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie", 55, "Alien", release_date="1979-05-25", overview="", poster_path=""
+            ),
+        ),
+        series=(),
+    )
+
+    machine = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+    human = runner.invoke(app, ["tmdb", "search", "Alien"])
+
+    assert machine.exit_code == 0, machine.output
+    payload = json.loads(machine.stdout)
+    assert "in_library" not in payload["summary"]
+    assert "library_ids" not in payload["results"]["movies"][0]
+    assert "Library" not in human.stdout
+
+
 def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
     _install_tmdb_search_client(
         monkeypatch,

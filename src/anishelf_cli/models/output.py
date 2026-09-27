@@ -268,6 +268,8 @@ class TMDbSearchSummaryResult(AniShelfBaseModel):
     movies: int
     series: int
     total: int
+    # Present only when a local library cache was available to compare against.
+    in_library: int | None = None
 
 
 class TMDbSearchMatchResult(AniShelfBaseModel):
@@ -280,10 +282,19 @@ class TMDbSearchMatchResult(AniShelfBaseModel):
     overview: str | None = None
     poster_path: str | None = None
     details_url: str | None = None
+    # Library entry ids for this title (the movie or series itself and any saved
+    # seasons); None when no local library cache was available.
+    library_ids: tuple[str, ...] | None = None
 
     @classmethod
-    def from_match(cls, match: TMDbTitleSearchMatch) -> TMDbSearchMatchResult:
+    def from_match(
+        cls,
+        match: TMDbTitleSearchMatch,
+        *,
+        library_ids: tuple[str, ...] | None = None,
+    ) -> TMDbSearchMatchResult:
         return cls(
+            library_ids=library_ids,
             entry_type=match.entry_type,
             tmdb_id=match.tmdb_id,
             title=match.title,

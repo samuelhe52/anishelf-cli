@@ -605,14 +605,29 @@ def render_library_export_file_result(result: LibraryExportFileResult) -> None:
     )
 
 
+TMDbLibraryIds = Mapping[tuple[str, int], tuple[str, ...]]
+
+
 def tmdb_search_payload(
     query: TMDbTitleSearchQuery,
     result: TMDbTitleSearchResult,
     *,
     limit: int | None = None,
+    library_ids: TMDbLibraryIds | None = None,
 ) -> TMDbSearchOutputResult:
-    movies = tuple(TMDbSearchMatchResult.from_match(match) for match in result.movies)
-    series = tuple(TMDbSearchMatchResult.from_match(match) for match in result.series)
+    def match_result(match: TMDbTitleSearchMatch) -> TMDbSearchMatchResult:
+        return TMDbSearchMatchResult.from_match(
+            match,
+            library_ids=_match_library_ids(match, library_ids),
+        )
+
+    movies = tuple(match_result(match) for match in result.movies)
+    series = tuple(match_result(match) for match in result.series)
+    in_library = (
+        sum(1 for match in (*movies, *series) if match.library_ids)
+        if library_ids is not None
+        else None
+    )
     return TMDbSearchOutputResult(
         query=TMDbSearchQueryResult(
             mode=query.mode,
@@ -626,6 +641,7 @@ def tmdb_search_payload(
             movies=len(movies),
             series=len(series),
             total=len(movies) + len(series),
+            in_library=in_library,
         ),
         results=TMDbSearchResultsResult(
             movies=movies,
@@ -634,7 +650,21 @@ def tmdb_search_payload(
     )
 
 
-def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResult) -> None:
+def _match_library_ids(
+    match: TMDbTitleSearchMatch,
+    library_ids: TMDbLibraryIds | None,
+) -> tuple[str, ...] | None:
+    if library_ids is None:
+        return None
+    return library_ids.get((match.entry_type, match.tmdb_id), ())
+
+
+def render_tmdb_search(
+    query: TMDbTitleSearchQuery,
+    result: TMDbTitleSearchResult,
+    *,
+    library_ids: TMDbLibraryIds | None = None,
+) -> None:
     summary_rows: list[tuple[str, object | None]] = [
         ("Mode", query.mode),
     ]
@@ -652,6 +682,17 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
             ("Total", len(result.movies) + len(result.series)),
         ]
     )
+    if library_ids is not None:
+        summary_rows.append(
+            (
+                "In library",
+                sum(
+                    1
+                    for match in (*result.movies, *result.series)
+                    if _match_library_ids(match, library_ids)
+                ),
+            )
+        )
     blocks: list[HumanSection | HumanTable] = [
         HumanSection(
             "TMDb search",
@@ -660,9 +701,9 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
     ]
 
     if result.movies:
-        blocks.append(_tmdb_search_table("Movies", result.movies))
+        blocks.append(_tmdb_search_table("Movies", result.movies, library_ids=library_ids))
     if result.series:
-        blocks.append(_tmdb_search_table("Series", result.series))
+        blocks.append(_tmdb_search_table("Series", result.series, library_ids=library_ids))
     if not result.movies and not result.series:
         blocks.append(
             HumanTable(
@@ -690,32 +731,59 @@ def render_tmdb_search(query: TMDbTitleSearchQuery, result: TMDbTitleSearchResul
 def _tmdb_search_table(
     title: str,
     matches: tuple[TMDbTitleSearchMatch, ...],
+    *,
+    library_ids: TMDbLibraryIds | None = None,
 ) -> HumanTable:
+    columns = [
+        HumanTableColumn("tmdb_id", "TMDb ID", "right"),
+        HumanTableColumn(
+            "title",
+            "Title",
+            flexible=True,
+            max_width=_TABLE_TITLE_MAX_WIDTH,
+            min_width=_TABLE_TITLE_MIN_WIDTH,
+        ),
+        HumanTableColumn("release_date", "Date"),
+        HumanTableColumn("original_language_code", "Lang"),
+    ]
+    if library_ids is not None:
+        columns.append(HumanTableColumn("library", "Library"))
     return HumanTable(
         title,
-        (
-            HumanTableColumn("tmdb_id", "TMDb ID", "right"),
-            HumanTableColumn(
-                "title",
-                "Title",
-                flexible=True,
-                max_width=_TABLE_TITLE_MAX_WIDTH,
-                min_width=_TABLE_TITLE_MIN_WIDTH,
-            ),
-            HumanTableColumn("release_date", "Date"),
-            HumanTableColumn("original_language_code", "Lang"),
-        ),
-        [_human_tmdb_search_row(match) for match in matches],
+        tuple(columns),
+        [_human_tmdb_search_row(match, library_ids=library_ids) for match in matches],
     )
 
 
-def _human_tmdb_search_row(match: TMDbTitleSearchMatch) -> dict[str, object]:
+def _human_tmdb_search_row(
+    match: TMDbTitleSearchMatch,
+    *,
+    library_ids: TMDbLibraryIds | None = None,
+) -> dict[str, object]:
     return {
         "tmdb_id": match.tmdb_id,
         "title": match.title or match.original_title or f"{match.entry_type}:{match.tmdb_id}",
         "release_date": _compact_date(match.release_date),
         "original_language_code": match.original_language_code,
+        "library": _library_marker(_match_library_ids(match, library_ids) or ()),
     }
+
+
+def _library_marker(ids: tuple[str, ...]) -> str:
+    """Summarize saved ids: `yes` for the title itself, `S<n>` for saved seasons."""
+    if not ids:
+        return "no"
+    seasons: list[str] = []
+    saved_directly = False
+    for identity in ids:
+        parts = identity.split(":")
+        if parts[0] == "season" and len(parts) == 4:
+            seasons.append(f"S{parts[2]}")
+        else:
+            saved_directly = True
+    # Ids arrive with the title itself first and seasons in numeric order.
+    labels = (["yes"] if saved_directly else []) + list(dict.fromkeys(seasons))
+    return ", ".join(labels)
 
 
 def normalized_tmdb_title(title: str | None) -> str | None:

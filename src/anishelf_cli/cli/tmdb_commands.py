@@ -1,23 +1,30 @@
 from __future__ import annotations
 
+import sqlite3
 from enum import StrEnum
 from typing import Annotated
 
 import typer
 
 from anishelf_cli import config
+from anishelf_cli.cache.schema import LibraryCacheError
+from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cli.common import json_output_requested
 from anishelf_cli.cli.presentation import (
     normalized_tmdb_title,
     render_tmdb_search,
     tmdb_search_payload,
 )
+from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import emit_error, emit_json
 from anishelf_cli.models import TMDbMetadataLanguage
+from anishelf_cli.models.domain import LibraryEntryModel
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery, TMDbTitleSearchResult
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
 from anishelf_cli.tmdb.tokens import MissingTMDbAPITokenError, resolve_tmdb_api_token
+
+logger = get_logger(__name__)
 
 tmdb_app = typer.Typer(
     help="Global TMDb anime discovery commands.",
@@ -106,13 +113,54 @@ def tmdb_search(
         emit_error(str(exc))
         raise typer.Exit(code=2) from exc
     result = _limited_tmdb_search_result(result, limit=limit)
+    library_ids = _library_ids_for_matches(result)
 
-    payload = tmdb_search_payload(query, result, limit=limit)
+    payload = tmdb_search_payload(query, result, limit=limit, library_ids=library_ids)
     if json_output_requested(ctx, json_output):
         emit_json(payload.model_dump(mode="json", exclude_none=True))
         return
 
-    render_tmdb_search(query, result)
+    render_tmdb_search(query, result, library_ids=library_ids)
+
+
+def _library_ids_for_matches(
+    result: TMDbTitleSearchResult,
+) -> dict[tuple[str, int], tuple[str, ...]] | None:
+    """Map each search match to its saved library ids, or None when unavailable.
+
+    Marking is best effort: TMDb search must keep working before `lib init`, so a
+    missing, empty, ambiguous, or unreadable cache omits the markers instead of
+    failing the search. The lookup is read-only and never takes the cache lock.
+    """
+    try:
+        store = LibraryCacheStore.find_default_scope()
+        if not store.has_entries(read_only=True):
+            return None
+        entries = store.search_cached_entry_models(
+            movie_ids={match.tmdb_id for match in result.movies},
+            series_ids={match.tmdb_id for match in result.series},
+            read_only=True,
+        )
+    except (LibraryCacheError, sqlite3.Error, OSError) as exc:
+        logger.debug("TMDb search library marker -> skipped reason=%s", exc)
+        return None
+    grouped: dict[tuple[str, int], list[LibraryEntryModel]] = {}
+    for entry in entries:
+        if entry.entry_type == "season" and entry.parent_series_id is not None:
+            key = ("series", entry.parent_series_id)
+        else:
+            key = (entry.entry_type, entry.tmdb_id)
+        grouped.setdefault(key, []).append(entry)
+    return {
+        key: tuple(
+            entry.identity
+            for entry in sorted(
+                group,
+                key=lambda entry: (entry.entry_type == "season", entry.season_number or 0),
+            )
+        )
+        for key, group in grouped.items()
+    }
 
 
 def _user_defaults_or_exit() -> config.UserDefaults:
