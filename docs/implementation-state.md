@@ -8,8 +8,7 @@ spec.
 
 - Python `>=3.13` package managed with `uv`; console script is `ani`.
 - Typer command tree is in `src/anishelf_cli/cli/`.
-- Implemented command groups are `auth`, `config`, and the first library read
-  surfaces.
+- Implemented command groups are `auth`, `config`, `lib`, and `tmdb`.
 - `auth login` starts CloudKit web auth, supports manual callback paste and an
   optional loopback callback strategy, and stores the user web auth token in
   the configured secret backend. The default backend is OS secure storage via
@@ -38,14 +37,22 @@ spec.
   counts, TMDb metadata readiness, and
   `lib clear-cache` removes all local library cache files after explicit
   confirmation.
-- `lib get`, `lib list`, `lib export`, and `lib search <query>`
-  read from the initialized local cache and fail closed until init has been
-  run. These read commands also support `--sync` for an explicit CloudKit
-  refresh before serving results.
-- `lib search <query>` requires complete cached TMDb metadata and
-  searches titles, translations, parent-series metadata, overviews, notes, and
-  on-air dates in the same priority order as AniShelf's library search. It
-  accepts `--limit` to cap visible matches.
+- `lib get`, `lib list`, `lib export`, `lib search <query>`, and `lib stats`
+  read from the initialized local cache without a network call and fail closed
+  until init has been run. These read commands also support `--sync` for an
+  explicit CloudKit refresh before serving results.
+- `lib get` accepts `-` to read whitespace-separated ids from stdin and
+  `--strict` to exit 1 on any item error.
+- `lib search <query>` searches cached titles, translations, parent-series
+  metadata, overviews, notes, and on-air dates in the same priority order as
+  AniShelf's library search, and accepts `--limit`. Metadata-dependent reads
+  fail only when no in-scope entry has current metadata; partial coverage warns
+  on stderr and reports `summary.metadata_missing`.
+- `lib export` streams `--format json|jsonl|csv` or writes `--output` files
+  atomically with owner-only permissions (CSV files carry a UTF-8 BOM and
+  neutralize spreadsheet formulas).
+- `lib stats` summarizes types, watch statuses, favorites, scores, finishes per
+  year, and top genres from details metadata.
 - The SQLite cache keeps CloudKit-derived library state separate from
   `tmdb_metadata_items`. Library reads attach cached summary metadata by
   default, `--metadata none` suppresses attachment, and `--metadata
@@ -53,8 +60,9 @@ spec.
   the configured preferred TMDb metadata language and stores a readiness depth.
 - `lib init` hydrates TMDb metadata for the full fetched library at the
   configured hydration depth when a TMDb key is available. Later `lib sync`
-  refreshes hydrate all newly added or insufficiently hydrated entries
-  automatically. `lib refresh-meta` explicitly refreshes cached TMDb metadata
+  refreshes hydrate all newly added, missing (for example after a transient
+  failure), or insufficiently hydrated entries automatically, and warn with the
+  ids of entries that still failed. `lib refresh-meta` explicitly refreshes cached TMDb metadata
   for the full local library, and `lib get` supports `--live-meta` for targeted
   per-entry refresh at the configured hydration depth, promoted to `full` when
   full output is requested. A
@@ -69,18 +77,24 @@ spec.
   fields readable, shrinks the title first and truncates ids only as a last
   resort on very narrow terminals, uses compact dates and missing-value labels,
   and omits the display column unless hidden entries are included. When stdout
-  is a pipe or file (and `COLUMNS` is unset), tables are not fitted to a width. List-style
-  human output appends bounded metadata rows according to
+  is a pipe or file (and `COLUMNS` is unset), tables are not fitted to a
+  width. List-style human output appends bounded metadata rows according to
   `--metadata`, while `--metadata none` suppresses metadata rows but may still
   use cached TMDb display titles. Hidden entries are excluded from collection
   reads by default and can be included with `--show-hidden` or a library config
   default.
 - Low-level CloudKit diagnostics and schema checks are not
   user-facing command groups.
+- CloudKit requests retry only connection-phase failures (the rolling web auth
+  token is unused then); TMDb requests back off exponentially with jitter and
+  honor `Retry-After`.
 - `tmdb search` performs global TMDb anime title search from either positional
   title or `--title`, and discover-style popular anime lookup when no title is
   provided. It accepts `--limit` to cap returned rows and sends the preferred
   TMDb metadata language unless `--tmdb-language` is supplied for that request.
+  When a local cache exists, results are marked with saved library ids.
+- CI runs `make check` and a build on Ubuntu and macOS for pushes and pull
+  requests; version tags draft a GitHub release with the wheel and sdist.
 
 ## Near-Term Direction
 
@@ -111,6 +125,13 @@ spec.
 
 ## Decisions Still Open
 
-- Exact command grammar for filters and stdin/file batch inputs.
-- Staleness and invalidation rules for TMDb metadata depth refreshes.
-- Whether low-level CloudKit diagnostics need a separate dev-only entry point.
+- Filter grammar beyond the current repeatable flags (for example score or date
+  ranges) and file/JSONL batch input for `lib get`; add them when a real
+  workflow needs them.
+- Age-based TMDb metadata staleness. Depth, source-version, and missing rows are
+  refreshed automatically; `fetched_at` is stored and indexed but not yet used,
+  so upstream TMDb edits are only picked up by `lib refresh-meta` or
+  `--live-meta`.
+- Whether low-level CloudKit diagnostics need a separate dev-only entry point
+  (today only `--verbose` redacted network logs exist).
+- Publishing to PyPI (the beta installs from a tagged Git URL).
