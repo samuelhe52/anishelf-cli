@@ -241,32 +241,7 @@ For the entry field contract, read `references/entries.md`.
   `summary.metadata_missing`, run `ani lib sync --json` to retry those entries.
 - If auth fails, run `ani auth status --json`, then `ani auth login` when the
   user is present for browser or callback handling.
-- Use `-v` only for redacted diagnostics; see Verbose Diagnostics below.
-
-## Verbose Diagnostics
-
-`-v`/`--verbose` is a root option, so it goes before the command group:
-`ani -v --json lib sync` works, `ani lib sync -v` is a usage error. It adds
-redacted `[debug]` lines to stderr and leaves JSON stdout unchanged, so keep
-parsing stdout as usual and read stderr separately.
-
-Reach for it when a normal run's error or result is not enough:
-
-- Slow or failing CloudKit calls: `CloudKit response <-` lines show the HTTP
-  status, `attempt=N/4`, `elapsed=`, and `requestId=`; `CloudKit transport
-  error <-` lines name the network error class.
-- Auth trouble: `CloudKit web auth token ->` shows whether the login was
-  `rolled forward`, `kept`, or `cleared` after an authentication failure.
-- Suspected schema drift after an AniShelf app update: during `lib sync`, each
-  `CloudKit schema <- page=N` line lists record types, `schemaVersions=`, and
-  `unknownFields=` (field names the CLI does not decode). Anything other than
-  `unknownFields=none` means the app writes fields this CLI ignores.
-- Unexpected cache results: `Library cache query ->` lines show the query's
-  filters, `rows=` or `hydrated=` coverage, and timing.
-- Slow TMDb hydration or search: `TMDb response <-` timings and `TMDb request
-  -> retrying in` delays.
-- Environment confusion: the first lines show the command, config/cache/data
-  paths, the secrets backend, and which override variables are set (names only).
-
-Token values never appear, but lines do include local paths and cache file
-names. Quote the relevant lines to the user instead of pasting the whole log.
+- Use `ani -v ...` (root option, before the command group) for redacted
+  `[debug]` diagnostics on stderr: request timing and CloudKit request ids,
+  auth token handling, cache queries, and during `lib sync` any
+  `unknownFields=` other than `none`, which signals AniShelf schema drift.
