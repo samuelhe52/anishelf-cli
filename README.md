@@ -154,8 +154,10 @@ ani tmdb search --year 2024 --type series
 ```
 
 When a local library cache exists, results are marked with what you already
-saved: `yes` for the movie or series itself and `S<n>` for saved seasons (JSON:
-`library_ids` per result and `summary.in_library`).
+saved, including hidden entries: `yes` for the movie or series itself and
+`S<n>` for saved seasons (JSON: `library_ids` per result and
+`summary.in_library`). The lookup is read-only and offline; the markers are
+omitted when there is no initialized cache or more than one user's cache.
 
 Export your cached library:
 

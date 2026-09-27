@@ -197,8 +197,10 @@ the user's initialized AniShelf library.
 
 When a local library cache exists, each result carries `library_ids` (the saved
 movie or series id plus any saved season ids; `[]` when not saved) and
-`summary.in_library` counts saved results. Both are omitted when no cache is
-available, so check for the key rather than treating absence as "not saved".
+`summary.in_library` counts saved results. Hidden entries count as saved. Both
+are omitted when no usable cache is available (not initialized, empty, from
+another schema version, or several user caches), so check for the key rather
+than treating absence as "not saved".
 
 ## JSON Shapes
 

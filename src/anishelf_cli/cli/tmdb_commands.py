@@ -18,6 +18,7 @@ from anishelf_cli.cli.presentation import (
 from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import emit_error, emit_json
 from anishelf_cli.models import TMDbMetadataLanguage
+from anishelf_cli.models.domain import LibraryEntryModel
 from anishelf_cli.models.tmdb import TMDbTitleSearchQuery, TMDbTitleSearchResult
 from anishelf_cli.secrets import SecretStorageUnavailableError, default_secret_store
 from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError
@@ -125,28 +126,41 @@ def tmdb_search(
 def _library_ids_for_matches(
     result: TMDbTitleSearchResult,
 ) -> dict[tuple[str, int], tuple[str, ...]] | None:
-    """Map each search match to its saved library ids, or None without a local cache.
+    """Map each search match to its saved library ids, or None when unavailable.
 
-    Marking is best effort: TMDb search must keep working before `lib init`, so any
-    cache problem just omits the marker instead of failing the search.
+    Marking is best effort: TMDb search must keep working before `lib init`, so a
+    missing, empty, ambiguous, or unreadable cache omits the markers instead of
+    failing the search. The lookup is read-only and never takes the cache lock.
     """
     try:
         store = LibraryCacheStore.find_default_scope()
+        if not store.has_entries(read_only=True):
+            return None
         entries = store.search_cached_entry_models(
             movie_ids={match.tmdb_id for match in result.movies},
             series_ids={match.tmdb_id for match in result.series},
+            read_only=True,
         )
-    except (LibraryCacheError, sqlite3.Error) as exc:
+    except (LibraryCacheError, sqlite3.Error, OSError) as exc:
         logger.debug("TMDb search library marker -> skipped reason=%s", exc)
         return None
-    library_ids: dict[tuple[str, int], list[str]] = {}
+    grouped: dict[tuple[str, int], list[LibraryEntryModel]] = {}
     for entry in entries:
         if entry.entry_type == "season" and entry.parent_series_id is not None:
             key = ("series", entry.parent_series_id)
         else:
             key = (entry.entry_type, entry.tmdb_id)
-        library_ids.setdefault(key, []).append(entry.identity)
-    return {key: tuple(sorted(ids)) for key, ids in library_ids.items()}
+        grouped.setdefault(key, []).append(entry)
+    return {
+        key: tuple(
+            entry.identity
+            for entry in sorted(
+                group,
+                key=lambda entry: (entry.entry_type == "season", entry.season_number or 0),
+            )
+        )
+        for key, group in grouped.items()
+    }
 
 
 def _user_defaults_or_exit() -> config.UserDefaults:

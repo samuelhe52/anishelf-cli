@@ -96,7 +96,9 @@ metadata last, including under `lib list --reverse`.
 `lib sync` retries entries with missing metadata, so transient gaps heal on the
 next sync. Use `tmdb search <title>` or `tmdb search --title <title>` for
 global TMDb anime title search, or omit a title for popular anime discovery.
-`tmdb search <title>` is equivalent to `tmdb search --title <title>`. `--limit`
+`tmdb search <title>` is equivalent to `tmdb search --title <title>`. When a
+single initialized user cache exists, results carry `library_ids` for saved
+entries (read-only lookup, no lock, no network). `--limit`
 on `lib search` caps visible local matches after filtering; `--limit` on
 `tmdb search` caps total grouped rows returned to the user.
 

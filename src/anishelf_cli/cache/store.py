@@ -112,8 +112,9 @@ class LibraryCacheStore:
         with self._connect_initialized() as db:
             return schema.read_meta(db, schema.ZONE_SYNC_TOKEN_META_KEY)
 
-    def has_entries(self) -> bool:
-        with self._connect_initialized() as db:
+    def has_entries(self, *, read_only: bool = False) -> bool:
+        connection = self._connect_read_only() if read_only else self._connect_initialized()
+        with connection as db:
             row = db.execute("SELECT 1 FROM library_entries LIMIT 1").fetchone()
             return row is not None
 
@@ -300,6 +301,7 @@ class LibraryCacheStore:
         *,
         movie_ids: set[int],
         series_ids: set[int],
+        read_only: bool = False,
     ) -> list[LibraryEntryModel]:
         query_parts: list[str] = []
         params: list[int] = []
@@ -330,7 +332,8 @@ class LibraryCacheStore:
         if not query_parts:
             return []
 
-        with self._connect_initialized() as db:
+        connection = self._connect_read_only() if read_only else self._connect_initialized()
+        with connection as db:
             rows = db.execute(
                 f"""
                 SELECT decoded_json
@@ -728,6 +731,26 @@ class LibraryCacheStore:
         return metadata.metadata_key_from_target(
             TMDbSummaryIdentity(entry_type="series", tmdb_id=entry.parent_series_id)
         )
+
+    @contextmanager
+    def _connect_read_only(self) -> Generator[sqlite3.Connection]:
+        """Open an existing cache without creating, migrating, or resetting it.
+
+        Best-effort readers outside the `lib` commands use this so they never
+        write to the cache or hold its lock; any mismatch reads as unavailable.
+        """
+        if not self.path.exists():
+            raise LibraryCacheNotAvailableError("No local library cache is available.")
+        db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
+        db.row_factory = sqlite3.Row
+        try:
+            if schema.read_meta(db, "schema_version") != schema.CACHE_SCHEMA_VERSION:
+                raise LibraryCacheNotAvailableError(
+                    "The local library cache uses a different schema version."
+                )
+            yield db
+        finally:
+            db.close()
 
     @contextmanager
     def _connect_initialized(self) -> Generator[sqlite3.Connection]:

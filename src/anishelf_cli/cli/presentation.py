@@ -781,10 +781,8 @@ def _library_marker(ids: tuple[str, ...]) -> str:
             seasons.append(f"S{parts[2]}")
         else:
             saved_directly = True
-    labels = (["yes"] if saved_directly else []) + sorted(
-        dict.fromkeys(seasons),
-        key=lambda label: int(label[1:]) if label[1:].isdigit() else 0,
-    )
+    # Ids arrive with the title itself first and seasons in numeric order.
+    labels = (["yes"] if saved_directly else []) + list(dict.fromkeys(seasons))
     return ", ".join(labels)
 
 
