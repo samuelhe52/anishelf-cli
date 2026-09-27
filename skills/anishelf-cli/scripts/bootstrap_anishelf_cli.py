@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass
 
 DEFAULT_REPO_URL = "git+https://github.com/samuelhe52/anishelf-cli.git"
-DEFAULT_REF = "v0.1.1"
+DEFAULT_REF = "v0.2.0"
 
 
 @dataclass(frozen=True)
