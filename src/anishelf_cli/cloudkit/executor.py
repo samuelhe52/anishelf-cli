@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
@@ -75,6 +76,15 @@ class CloudKitChangeTokenExpiredError(CloudKitWhoamiError):
     pass
 
 
+CONNECT_RETRY_DELAY_SECONDS = 0.5
+# httpcore raises these only while opening the TCP connection or completing the
+# TLS handshake (httpcore/_backends/sync.py), before any request bytes are sent.
+# Failures on a reused pooled connection surface as RemoteProtocolError instead.
+# Never widen this to TimeoutException or NetworkError: those include read and
+# write failures after CloudKit may have consumed the rolling web auth token.
+_PRE_SEND_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
+
+
 @dataclass(slots=True)
 class CloudKitExecutor:
     client: httpx.Client
@@ -83,6 +93,7 @@ class CloudKitExecutor:
     profile_id: str = DEFAULT_PROFILE_ID
     lock_factory: LockFactory | None = None
     lock_timeout_seconds: float = -1.0
+    connect_attempts: int = 4
 
     def get_current_user(self) -> CurrentUser:
         payload = self.authenticated_request(
@@ -250,29 +261,41 @@ class CloudKitExecutor:
         if json_payload is not None:
             message += f" {_cloudkit_request_payload_log(json_payload)}"
         logger.debug(message, extra={"redactor": redactor})
-        try:
-            response = self.client.request(
-                method,
-                endpoint_url,
-                params=request_params,
-                json=json_payload,
-            )
+        attempts = max(1, self.connect_attempts)
+        for attempt in range(1, attempts + 1):
+            try:
+                response = self.client.request(
+                    method,
+                    endpoint_url,
+                    params=request_params,
+                    json=json_payload,
+                )
+            except httpx.HTTPError as exc:
+                logger.debug(
+                    "CloudKit transport error <- "
+                    f"{method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc} "
+                    f"attempt={attempt}/{attempts}",
+                    extra={"redactor": redactor},
+                )
+                # Only connection-phase failures are retried: the request never
+                # reached CloudKit, so the rolling web auth token is still unused.
+                # Anything later may have consumed it, and replaying a consumed
+                # token would read as an auth failure and clear the saved login.
+                if isinstance(exc, _PRE_SEND_ERRORS) and attempt < attempts:
+                    time.sleep(CONNECT_RETRY_DELAY_SECONDS * attempt)
+                    continue
+                raise CloudKitRequestFailedError(
+                    f"{error_context} failed ({exc.__class__.__name__}). "
+                    "Check your network connection and try again.",
+                    redactor=redactor,
+                ) from exc
             logger.debug(
                 "CloudKit response <- "
                 f"HTTP {response.status_code} {method.upper()} {response.request.url}",
                 extra={"redactor": redactor},
             )
             return response
-        except httpx.HTTPError as exc:
-            logger.debug(
-                "CloudKit transport error <- "
-                f"{method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc}",
-                extra={"redactor": redactor},
-            )
-            raise CloudKitRequestFailedError(
-                f"{error_context} failed.",
-                redactor=redactor,
-            ) from exc
+        raise AssertionError("unreachable: the retry loop always returns or raises")
 
     def _parse_response(
         self,
