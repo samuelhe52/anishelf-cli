@@ -172,7 +172,7 @@ Collection command JSON includes:
 | `summary.cache` | Cache scope and refresh metadata for this read. |
 | `summary.metadata_missing` | Present when the command depends on cached TMDb metadata (`lib search`, `lib list --sort title\|air-date`, `--metadata details\|full`). `0` means complete; `N` means `N` in-scope entries lack metadata, so results may be incomplete. Absent when not applicable. |
 | `metadata` | Requested metadata projection and whether metadata was attached. |
-| `filters` | Present on `lib list`; captures filters, sort, visibility, favorite flag, and limit. |
+| `filters` | Present on `lib list`; echoes `watch_status` and `entry_type` (lists, or `null` when unfiltered), `favorite`, `show_hidden`, `sort`, `reverse`, and `limit`. |
 | `query` | Present on `lib search`; captures search text and limit. |
 
 `lib get` JSON includes:

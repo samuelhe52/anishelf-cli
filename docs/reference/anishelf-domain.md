@@ -89,7 +89,8 @@ Coverage counts only entries in scope: hidden entries are ignored unless
 `--show-hidden` is set, list filters apply, and attachment checks cover the
 returned entries. `summary.metadata_missing` is absent when a command does not
 depend on metadata, `0` when coverage is complete, and otherwise the number of
-entries without metadata. Title sorting places entries without metadata last.
+entries without metadata. Title and air-date sorting place entries without
+metadata last, including under `lib list --reverse`.
 `lib sync` retries entries with missing metadata, so transient gaps heal on the
 next sync. Use `tmdb search <title>` or `tmdb search --title <title>` for
 global TMDb anime title search, or omit a title for popular anime discovery.

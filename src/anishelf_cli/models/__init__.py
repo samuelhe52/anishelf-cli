@@ -42,6 +42,12 @@ class LibraryWatchStatus(StrEnum):
     DROPPED = "dropped"
 
 
+class LibraryEntryType(StrEnum):
+    MOVIE = "movie"
+    SERIES = "series"
+    SEASON = "season"
+
+
 class TMDbMetadataLanguage(StrEnum):
     EN = "en"
     JA = "ja"
@@ -68,6 +74,7 @@ __all__ = [
     "AppState",
     "CallbackStrategy",
     "HumanOutputStyle",
+    "LibraryEntryType",
     "LibraryIdentity",
     "LibraryIdentityError",
     "LibraryListSort",

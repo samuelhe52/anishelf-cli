@@ -61,9 +61,10 @@ spec.
   per-command `--tmdb-language` override on library reads is ad-hoc when it
   differs from the preferred language: metadata is fetched live for output
   and is not written to the cache.
-- `lib list` has first-pass ergonomic filters and ordering for common
-  questions: watch status, favorites, recent/activity/date ordering, metadata-
-  backed title/date ordering, and result limits. Human output supports `--style
+- `lib list` has ergonomic filters and ordering for common questions:
+  repeatable watch status and entry type filters (matching any value),
+  favorites, recent/activity/date ordering, metadata-backed title/date
+  ordering, `--reverse`, and result limits. Human output supports `--style
   table|list` and configurable display fields. Table output keeps inflexible
   fields readable, shrinks the title first and truncates ids only as a last
   resort on very narrow terminals, uses compact dates and missing-value labels,

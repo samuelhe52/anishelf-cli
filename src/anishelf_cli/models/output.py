@@ -106,10 +106,12 @@ class LibraryEntriesMetadataResult(AniShelfBaseModel):
 
 
 class LibraryListFiltersResult(AniShelfBaseModel):
-    watch_status: str | None = None
+    watch_status: tuple[str, ...] | None = None
+    entry_type: tuple[str, ...] | None = None
     show_hidden: bool
     favorite: bool
     sort: str
+    reverse: bool = False
     limit: int | None = None
 
 

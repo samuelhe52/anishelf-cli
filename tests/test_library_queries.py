@@ -36,7 +36,6 @@ def test_title_sort_uses_metadata_without_attaching_it_when_metadata_is_none() -
         store,
         metadata_depth=MetadataDepth.NONE,
         cache=cache_summary_payload(store, None),
-        watch_status=None,
         show_hidden=False,
         favorite=False,
         sort=LibraryListSort.TITLE,
@@ -72,7 +71,6 @@ def test_air_date_sort_uses_metadata_without_attaching_it_when_metadata_is_none(
         store,
         metadata_depth=MetadataDepth.NONE,
         cache=cache_summary_payload(store, None),
-        watch_status=None,
         show_hidden=False,
         favorite=False,
         sort=LibraryListSort.AIR_DATE,
@@ -104,7 +102,6 @@ def test_list_show_hidden_controls_default_display_filter() -> None:
         store,
         metadata_depth=MetadataDepth.NONE,
         cache=cache_summary_payload(store, None),
-        watch_status=None,
         show_hidden=True,
         favorite=False,
         sort=LibraryListSort.SAVED,
@@ -284,7 +281,6 @@ def test_live_metadata_skips_deep_cache_readiness_gate() -> None:
         store,
         metadata_depth=MetadataDepth.DETAILS,
         cache=cache_summary_payload(store, None),
-        watch_status=None,
         show_hidden=False,
         favorite=False,
         sort=LibraryListSort.UPDATED,
@@ -348,16 +344,20 @@ class FakeQueryStore:
         self,
         *,
         include_tombstones: bool = False,
-        watch_status: str | None = None,
+        watch_statuses: tuple[str, ...] | None = None,
+        entry_types: tuple[str, ...] | None = None,
         hidden: bool | None = None,
         favorite: bool | None = None,
         on_display: bool | None = None,
         sort: str = "updated",
+        reverse: bool = False,
         limit: int | None = None,
     ) -> list[LibraryEntryModel]:
         self.list_filter_kwargs = {
+            "reverse": reverse,
             "include_tombstones": include_tombstones,
-            "watch_status": watch_status,
+            "watch_statuses": watch_statuses,
+            "entry_types": entry_types,
             "hidden": hidden,
             "favorite": favorite,
             "on_display": on_display,
@@ -449,3 +449,31 @@ def _entry(
         payload["parent_series_id"] = int(parent_series_id)
         payload["season_number"] = int(season_number)
     return payload
+
+
+def test_reverse_sql_sorts_keep_the_sql_limit() -> None:
+    store = FakeQueryStore(
+        [_entry("movie:55", "movie", 55), _entry("movie:66", "movie", 66)],
+        metadata={},
+    )
+
+    build_library_list_result(
+        store,
+        metadata_depth=MetadataDepth.NONE,
+        cache=cache_summary_payload(store, None),
+        show_hidden=True,
+        favorite=False,
+        sort=LibraryListSort.SCORE,
+        reverse=True,
+        limit=1,
+    )
+
+    assert store.list_filter_kwargs["reverse"] is True
+    assert store.list_filter_kwargs["limit"] == 1
+
+
+def test_library_entry_type_enum_matches_identity_entry_types() -> None:
+    from anishelf_cli.models import LibraryEntryType
+    from anishelf_cli.models.identity import VALID_LIBRARY_ENTRY_TYPES
+
+    assert {member.value for member in LibraryEntryType} == set(VALID_LIBRARY_ENTRY_TYPES)

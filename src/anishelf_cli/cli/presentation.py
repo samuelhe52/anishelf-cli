@@ -303,11 +303,14 @@ def render_library_list(
     style: HumanOutputStyle = HumanOutputStyle.TABLE,
     display_titles: Mapping[str, str] | None = None,
     metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
+    filtered: bool = False,
 ) -> None:
     resolved_display_titles = display_titles or {}
     rows = [_human_library_row(entry, display_titles=resolved_display_titles) for entry in entries]
     title = "Library entries"
-    empty_message = "No cached library entries."
+    empty_message = (
+        "No library entries matched the filters." if filtered else "No cached library entries."
+    )
     if style is HumanOutputStyle.LIST:
         emit_human_blocks(
             _library_entries_as_sections(
