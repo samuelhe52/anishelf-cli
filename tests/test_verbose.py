@@ -4,6 +4,7 @@ import json
 
 import httpx
 
+from anishelf_cli.cache.store import _log_value
 from anishelf_cli.cli import tmdb_commands
 from anishelf_cli.cli.root import app
 from anishelf_cli.library.records import library_record_schema_summary
@@ -138,3 +139,41 @@ def test_schema_summary_names_unknown_fields_without_values() -> None:
         "deleted=1 unknownFields=rewatchCount:1"
     )
     assert "424242" not in summary
+
+
+def test_cache_query_log_values_never_echo_free_text_or_forge_lines() -> None:
+    forged = "x\n[debug] forged line"
+
+    assert _log_value(forged, redact_text=True) == f"<{len(forged)} chars>"
+    assert "\n" not in _log_value(forged)
+    assert _log_value("title") == "title"
+
+
+def test_verbose_tmdb_search_logs_read_only_cache_open(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, live_record("movie:55", "movie", 55))
+    monkeypatch.setattr(
+        tmdb_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+    monkeypatch.setattr(tmdb_commands, "default_secret_store", lambda: None)
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200, json={"results": [{"id": 55, "title": "Alien", "genre_ids": [16]}]}
+            )
+        )
+    )
+    monkeypatch.setattr(
+        tmdb_commands, "TMDbClient", lambda api_key: TMDbClient(api_key, client=client)
+    )
+
+    result = runner.invoke(
+        app,
+        ["--verbose", "--json", "tmdb", "search", "--title", "Alien", "--type", "movie"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["results"]["movies"][0]["library_ids"] == ["movie:55"]
+    assert "[debug] Library cache open -> mode=read-only path=" in result.stderr
+    assert "[debug] Library cache query -> search_cached_entry_models" in result.stderr

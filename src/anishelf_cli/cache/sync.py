@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -207,11 +208,12 @@ class LibraryCacheSync:
                 sync_token=next_token,
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
-            logger.debug(
-                "CloudKit schema <- page=%s %s",
-                pages + 1,
-                library_record_schema_summary(page.records),
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "CloudKit schema <- page=%s %s",
+                    pages + 1,
+                    library_record_schema_summary(page.records),
+                )
             apply_started = time.perf_counter()
             metadata_targets.extend(
                 self.store.apply_page_and_collect_new_summary_targets(
@@ -279,11 +281,12 @@ class LibraryCacheSync:
                 sync_token=next_token,
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
-            logger.debug(
-                "CloudKit schema <- page=%s %s",
-                pages + 1,
-                library_record_schema_summary(page.records),
-            )
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.debug(
+                    "CloudKit schema <- page=%s %s",
+                    pages + 1,
+                    library_record_schema_summary(page.records),
+                )
             apply_started = time.perf_counter()
             metadata_targets.extend(
                 self.store.apply_page_and_collect_new_summary_targets(

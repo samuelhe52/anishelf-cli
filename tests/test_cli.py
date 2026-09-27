@@ -2499,6 +2499,31 @@ def test_whoami_auth_failure_with_successor_header_clears_login(monkeypatch) -> 
 
     assert result.exit_code == 2
     assert store.get_password(descriptor.service, descriptor.account) is None
+    assert (
+        "[debug] CloudKit web auth token -> cleared after serverErrorCode=AUTHENTICATION_FAILED"
+        in result.stderr
+    )
+    assert "header-successor-token" not in result.stdout + result.stderr
+
+
+def test_whoami_verbose_logs_ignored_successor_on_error_response(monkeypatch) -> None:
+    store = _store_with_web_auth_token("old-web-secret-token")
+    descriptor = cloudkit_web_auth_token_secret()
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            503,
+            headers={"X-Apple-CloudKit-Web-Auth-Token": "header-successor-token"},
+            json={"serverErrorCode": "SERVICE_UNAVAILABLE", "reason": "try later"},
+        ),
+    )
+
+    result = runner.invoke(app, ["--verbose", "--json", "auth", "status"])
+
+    assert result.exit_code == 2
+    assert "[debug] CloudKit web auth token -> successor ignored on HTTP 503" in result.stderr
+    assert store.get_password(descriptor.service, descriptor.account) == "old-web-secret-token"
     assert "header-successor-token" not in result.stdout + result.stderr
 
 
