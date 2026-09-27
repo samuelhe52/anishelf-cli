@@ -2250,3 +2250,22 @@ def test_cloudkit_executor_connection_retries_reuse_token_and_save_successor(
     ]
     descriptor = cloudkit_web_auth_token_secret()
     assert store.get_password(descriptor.service, descriptor.account) == "successor-secret-token"
+
+
+def test_config_set_defaults_hydration_depth_accepts_only_cache_depths(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("ANISHELF_CLI_CONFIG_DIR", str(tmp_path / "config"))
+
+    raised = runner.invoke(app, ["config", "set-defaults", "--hydration-depth", "full"])
+    invalid = runner.invoke(app, ["config", "set-defaults", "--hydration-depth", "summary"])
+    shown = runner.invoke(app, ["config", "show"], env={"ANI_CLOUDKIT_API_TOKEN": "api"})
+    help_text = runner.invoke(app, ["config", "set-defaults", "--help"])
+
+    assert raised.exit_code == 0, raised.output
+    assert "next `ani lib sync`" in " ".join(raised.stderr.split())
+    assert invalid.exit_code == 2
+    assert "  Hydration depth    full" in shown.stdout
+    assert "[details|full]" in help_text.stdout
+    assert "none, summary, details, or full" in " ".join(help_text.stdout.split())

@@ -26,6 +26,7 @@ from anishelf_cli.core.output import (
 from anishelf_cli.models import (
     CallbackStrategy,
     HumanOutputStyle,
+    HydrationDepth,
     MetadataDepth,
     SecretBackend,
     TMDbMetadataLanguage,
@@ -153,6 +154,7 @@ def config_show(
                 (
                     ("API key envs", ", ".join(config.DEFAULT_TMDB_API_KEY_ENVS)),
                     ("Metadata language", payload.tmdb.defaults.metadata_language),
+                    ("Hydration depth", payload.tmdb.defaults.hydration_depth),
                 ),
             ),
             HumanSection(
@@ -280,7 +282,10 @@ def config_set_defaults(
         typer.Option(
             "--metadata",
             "-m",
-            help="Default metadata level for library read commands: none or summary.",
+            help=(
+                "Default metadata level attached by library read commands: "
+                "none, summary, details, or full."
+            ),
             show_default=False,
         ),
     ] = None,
@@ -303,7 +308,7 @@ def config_set_defaults(
         ),
     ] = None,
     hydration_depth: Annotated[
-        str | None,
+        HydrationDepth | None,
         typer.Option(
             "--hydration-depth",
             help="Default TMDb cache hydration depth: details or full.",
@@ -357,13 +362,12 @@ def config_set_defaults(
     if tmdb_language is not None:
         tmdb_defaults = replace(tmdb_defaults, metadata_language=tmdb_language.value)
 
+    original_hydration_depth = tmdb_defaults.hydration_depth
     if hydration_depth is not None:
-        try:
-            resolved_hydration_depth = config.resolve_configured_hydration_depth(hydration_depth)
-        except config.UserConfigError as exc:
-            emit_error(str(exc))
-            raise typer.Exit(code=2) from exc
-        tmdb_defaults = replace(tmdb_defaults, hydration_depth=resolved_hydration_depth)
+        tmdb_defaults = replace(
+            tmdb_defaults,
+            hydration_depth=config.resolve_configured_hydration_depth(hydration_depth.value),
+        )
 
     if show_hidden is not None:
         library_defaults = replace(library_defaults, show_hidden=show_hidden)
@@ -383,6 +387,14 @@ def config_set_defaults(
         emit_progress(
             "TMDb metadata language changed. Run `ani lib clear-cache --yes` and "
             "`ani lib init` to rebuild persisted metadata in the new language."
+        )
+    elif (
+        original_hydration_depth is MetadataDepth.DETAILS
+        and tmdb_defaults.hydration_depth is MetadataDepth.FULL
+    ):
+        emit_progress(
+            "TMDb hydration depth raised to full. The next `ani lib sync` (or "
+            "`ani lib refresh-meta`) fetches the deeper metadata."
         )
 
     payload = ConfigSetDefaultsResult(

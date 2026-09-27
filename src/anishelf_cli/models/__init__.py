@@ -48,6 +48,13 @@ class LibraryEntryType(StrEnum):
     SEASON = "season"
 
 
+class HydrationDepth(StrEnum):
+    """Depths the metadata cache can be hydrated to (a subset of MetadataDepth)."""
+
+    DETAILS = "details"
+    FULL = "full"
+
+
 class ExportFormat(StrEnum):
     JSON = "json"
     JSONL = "jsonl"
@@ -81,6 +88,7 @@ __all__ = [
     "CallbackStrategy",
     "ExportFormat",
     "HumanOutputStyle",
+    "HydrationDepth",
     "LibraryEntryType",
     "LibraryIdentity",
     "LibraryIdentityError",
