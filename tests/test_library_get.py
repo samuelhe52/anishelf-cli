@@ -1264,3 +1264,54 @@ def _tombstone_record(
         parent_series_id=parent_series_id,
         season_number=season_number,
     )
+
+
+def _seed_get_library(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("series:22", "series", 22),
+    )
+
+
+def test_library_get_reads_ids_from_stdin_in_caller_order(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "series:22", "-", "--metadata", "none"],
+        input="# ids from a pipeline\nmovie:55  movie:404\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [item["id"] for item in payload["items"]] == [
+        "series:22",
+        "movie:55",
+        "movie:404",
+    ]
+    assert payload["summary"] == {"requested": 3, "found": 2, "errors": 1}
+
+
+def test_library_get_rejects_empty_stdin(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["--json", "lib", "get", "-"], input="\n# nothing\n")
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "No AniShelf ids were provided on stdin." in result.stderr
+
+
+def test_library_get_strict_fails_on_partial_errors(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    lenient = runner.invoke(app, ["--json", "lib", "get", "movie:55", "bogus"])
+    strict = runner.invoke(app, ["--json", "lib", "get", "movie:55", "bogus", "--strict"])
+    strict_clean = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--strict"])
+
+    assert lenient.exit_code == 0, lenient.output
+    assert strict.exit_code == 1
+    assert json.loads(strict.stdout)["summary"]["errors"] == 1
+    assert strict_clean.exit_code == 0, strict_clean.output

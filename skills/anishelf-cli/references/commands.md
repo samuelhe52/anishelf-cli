@@ -125,7 +125,14 @@ Read entries by AniShelf id:
 ```bash
 ani lib get movie:55 --json
 ani lib get series:1399 season:1399:1:3624 --json
+ani lib list -w watching --json | jq -r '.entries[].id' | ani lib get - --json
+ani lib get movie:55 bogus --strict --json
 ```
+
+`-` reads whitespace-separated ids from stdin in place of the `-` argument
+(`#` lines ignored). Without `--strict`, mixed batches exit 0 when at least one
+id is found, so inspect `summary.errors`; with `--strict`, any invalid or
+missing id exits 1 while still printing the full envelope.
 
 AniShelf ids use these stable forms:
 

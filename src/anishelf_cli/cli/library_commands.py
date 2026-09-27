@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, NoReturn, cast
@@ -122,7 +123,10 @@ def _make_http_client() -> httpx.Client:
 @library_app.command("get", help="Read AniShelf library entries by AniShelf id.")
 def library_get(
     ctx: typer.Context,
-    identities: Annotated[list[str], typer.Argument(help="AniShelf ids.")],
+    identities: Annotated[
+        list[str],
+        typer.Argument(help="AniShelf ids. Use - to read whitespace-separated ids from stdin."),
+    ],
     metadata: MetadataOption = None,
     sync: Annotated[
         bool | None,
@@ -131,6 +135,13 @@ def library_get(
             help="Sync the initialized local library cache from CloudKit before reading.",
         ),
     ] = None,
+    strict: Annotated[
+        bool,
+        typer.Option(
+            "--strict",
+            help="Exit with status 1 if any requested id is invalid or not found.",
+        ),
+    ] = False,
     live_meta: Annotated[
         bool,
         typer.Option(
@@ -154,6 +165,7 @@ def library_get(
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    identities = _expand_stdin_identities(identities)
     metadata_depth = _metadata_depth(metadata)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
@@ -222,8 +234,27 @@ def library_get(
         )
         render_library_get(envelope, display_titles=display_titles, metadata_depth=metadata_depth)
 
-    if not has_any_found_item(envelope):
+    if not has_any_found_item(envelope) or (strict and envelope.summary.errors):
         raise typer.Exit(code=1)
+
+
+def _expand_stdin_identities(identities: list[str]) -> list[str]:
+    """Replace a `-` argument with ids read from stdin, preserving caller order."""
+    if "-" not in identities:
+        return identities
+    stdin_identities = [
+        token
+        for line in sys.stdin.read().splitlines()
+        if not line.lstrip().startswith("#")
+        for token in line.split()
+    ]
+    if not stdin_identities:
+        emit_error("No AniShelf ids were provided on stdin.")
+        raise typer.Exit(code=2)
+    expanded: list[str] = []
+    for identity in identities:
+        expanded.extend(stdin_identities if identity == "-" else [identity])
+    return expanded
 
 
 @library_app.command("init", help="Initialize the local library cache from CloudKit.")
