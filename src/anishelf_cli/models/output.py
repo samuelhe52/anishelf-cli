@@ -106,6 +106,42 @@ class LibraryCacheUpdateResult(AniShelfBaseModel):
     summary: LibraryCacheUpdateSummaryResult
 
 
+class LibraryStatsScoresResult(AniShelfBaseModel):
+    scored: int
+    unscored: int
+    average: float | None = None
+    distribution: dict[str, int]
+
+
+class LibraryStatsGenreResult(AniShelfBaseModel):
+    name: str
+    titles: int
+
+
+class LibraryStatsGenreCoverageResult(AniShelfBaseModel):
+    # A title is a movie, or a series together with its saved seasons.
+    titles: int
+    titles_with_genres: int
+
+
+class LibraryStatsSummaryResult(AniShelfBaseModel):
+    entries: int
+    favorites: int
+    show_hidden: bool
+    cache: LibraryEntriesCacheResult
+
+
+class LibraryStatsResult(AniShelfBaseModel):
+    summary: LibraryStatsSummaryResult
+    types: dict[str, int]
+    watch_status: dict[str, int]
+    scores: LibraryStatsScoresResult
+    finished_by_year: dict[str, int]
+    # None when no title has details-depth genre metadata cached.
+    genres: tuple[LibraryStatsGenreResult, ...] | None = None
+    genre_coverage: LibraryStatsGenreCoverageResult
+
+
 class LibraryEntriesMetadataResult(AniShelfBaseModel):
     requested: str
     attached: bool

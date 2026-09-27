@@ -89,6 +89,19 @@ without a value for the sort key (unscored, undated, or without metadata) stay
 last, so `--sort score --reverse --limit 5` lists the five lowest scores. JSON `filters.watch_status` and
 `filters.entry_type` are lists, or `null` when not filtered.
 
+Summarize the library:
+
+```bash
+ani lib stats --json
+```
+
+`lib stats` reports `types`, `watch_status`, `scores` (`average` is `null` when
+nothing is scored; `distribution` keys are "1".."5"; out-of-range scores count
+as unscored), `finished_by_year` (UTC years of any entry with a finish date),
+`genres` (top 10 by title, where a series and its seasons are one title; `null`
+without details metadata), and `genre_coverage` (`titles`,
+`titles_with_genres`). Hidden entries are excluded unless `--show-hidden` is set.
+
 Search the initialized library:
 
 ```bash

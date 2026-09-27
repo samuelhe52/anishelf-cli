@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 from anishelf_cli.core.output import (
+    HumanBlock,
     HumanParagraph,
     HumanSection,
     HumanTable,
@@ -25,6 +26,7 @@ from anishelf_cli.models.output import (
     LibraryGetEnvelope,
     LibraryGetItemErrorResult,
     LibraryGetItemFound,
+    LibraryStatsResult,
     TMDbSearchMatchResult,
     TMDbSearchOutputResult,
     TMDbSearchQueryResult,
@@ -568,6 +570,65 @@ def _format_episode_summaries(summaries: tuple[LibraryEntryMetadataEpisode, ...]
     if not summaries:
         return None
     return f"{len(summaries)} episodes"
+
+
+_WATCH_STATUS_LABELS = {
+    "planToWatch": "Plan to watch",
+    "watching": "Watching",
+    "watched": "Watched",
+    "dropped": "Dropped",
+}
+
+
+def render_library_stats(result: LibraryStatsResult) -> None:
+    summary = result.summary
+    scores = result.scores
+    blocks: list[HumanBlock] = [
+        HumanSection(
+            "Library stats",
+            (
+                ("Entries", summary.entries),
+                ("Hidden", "included" if summary.show_hidden else "excluded"),
+                ("Favorites", summary.favorites),
+                ("Movies", result.types.get("movie", 0)),
+                ("Series", result.types.get("series", 0)),
+                ("Seasons", result.types.get("season", 0)),
+            ),
+        ),
+        HumanSection(
+            "Watch status",
+            tuple(
+                (label, result.watch_status.get(status, 0))
+                for status, label in _WATCH_STATUS_LABELS.items()
+            ),
+        ),
+        HumanSection(
+            "Scores",
+            (
+                ("Scored", scores.scored),
+                ("Unscored", scores.unscored),
+                ("Average", f"{scores.average:.2f}" if scores.average is not None else None),
+                *(
+                    (f"{value} star" if value == "1" else f"{value} stars", count)
+                    for value, count in sorted(scores.distribution.items(), reverse=True)
+                ),
+            ),
+        ),
+    ]
+    if result.finished_by_year:
+        blocks.append(HumanSection("Finished by year", tuple(result.finished_by_year.items())))
+    if result.genres:
+        coverage = result.genre_coverage
+        blocks.append(
+            HumanSection(
+                "Top genres",
+                (
+                    *((genre.name, genre.titles) for genre in result.genres),
+                    ("Coverage", f"{coverage.titles_with_genres}/{coverage.titles} titles"),
+                ),
+            )
+        )
+    emit_human_blocks(blocks)
 
 
 def render_library_export_result(

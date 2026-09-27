@@ -54,6 +54,12 @@ include:
 - `lib status`
 - `lib clear-cache`
 - `lib refresh-meta`
+- `lib stats [--sync] [--show-hidden]`: counts by type and watch status,
+  favorites, score average and 1-5 distribution (out-of-range scores count as
+  unscored, as in AniShelf), finishes per year, and top genres per title from
+  details-depth metadata (seasons use their parent series' genres; `genres:
+  null` when none is cached, with `genre_coverage` reporting how many titles
+  had genres)
 - `lib get <id...> [--sync] [--live-meta] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full]`
 - `lib list [--sync] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full] [--style table|list]`
 - `lib search <query>` with optional `--sync`, `--tmdb-language`,

@@ -611,6 +611,34 @@ class LibraryCacheStore:
             for entry in entries
         ]
 
+    def series_genre_names(
+        self,
+        series_ids: set[int],
+        *,
+        language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
+    ) -> dict[int, tuple[str, ...]]:
+        """Genre names from cached details-depth series metadata, keyed by series id."""
+        if not series_ids:
+            return {}
+        with self._connect_initialized() as db:
+            rows = db.execute(
+                f"""
+                SELECT tmdb_id, metadata_depth, metadata_json
+                FROM tmdb_metadata_items
+                WHERE entry_type = 'series'
+                AND tmdb_id IN ({metadata.placeholders(series_ids)})
+                AND language = ?
+                """,
+                [*sorted(series_ids), language],
+            ).fetchall()
+        return {
+            int(row["tmdb_id"]): tuple(
+                genre.name for genre in metadata.metadata_row(row).genres if genre.name
+            )
+            for row in rows
+            if metadata.metadata_depth_satisfies(row["metadata_depth"], MetadataDepth.DETAILS)
+        }
+
     def display_titles_for_entries(
         self,
         entries: list[LibraryEntryModel],
