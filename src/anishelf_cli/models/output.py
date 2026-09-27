@@ -131,12 +131,18 @@ class LibraryEntriesResult(AniShelfBaseModel):
     metadata: LibraryEntriesMetadataResult | None = None
     filters: LibraryListFiltersResult | None = None
     query: LibrarySearchQueryResult | None = None
+    metadata_missing: int | None = None
+    warnings: tuple[str, ...] = Field(default_factory=tuple, exclude=True, repr=False)
 
     @model_serializer(mode="wrap", when_used="json")
     def _serialize(self, handler: SerializerFunctionWrapHandler) -> dict[str, object]:
         payload = cast(dict[str, object], handler(self))
         cache = payload.pop("cache")
-        payload["summary"] = {"entries": len(self.entries), "cache": cache}
+        metadata_missing = payload.pop("metadata_missing", None)
+        summary: dict[str, object] = {"entries": len(self.entries), "cache": cache}
+        if metadata_missing is not None:
+            summary["metadata_missing"] = metadata_missing
+        payload["summary"] = summary
         if payload.get("metadata") is None:
             payload.pop("metadata", None)
         if payload.get("filters") is None:

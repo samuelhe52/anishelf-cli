@@ -3004,14 +3004,18 @@ def test_library_search_metadata_default_and_none(monkeypatch) -> None:
         scope = LibraryCacheScope.default_for_user("_user")
         attach_calls = 0
 
-        def metadata_summary_status(
+        def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
+            _ = include_tombstones
+            return []
+
+        def metadata_status_for_entries(
             self,
+            entries: list[LibraryEntryModel],
             *,
             language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
-            _ = language
-            _ = depth
+            _ = entries, language, depth
             return CacheMetadataStatusResult(
                 tracked_entries=1,
                 hydrated_entries=1,
@@ -3094,6 +3098,159 @@ def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
     ]
 
 
+def test_library_search_warns_but_succeeds_when_metadata_is_partially_hydrated(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("movie:66", "movie", 66),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
+    assert payload["summary"]["metadata_missing"] == 1
+    assert "current cached TMDb metadata is missing for 1 of 2 entries" in " ".join(
+        result.stderr.split()
+    )
+
+
+def _normalized(text: str) -> str:
+    return " ".join(text.split())
+
+
+def test_library_list_title_sort_puts_entries_without_metadata_last(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:1", "movie", 1),
+        _live_record("movie:2", "movie", 2),
+        _live_record("movie:3", "movie", 3),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 1, name="Zeta"))
+    store.upsert_metadata_summary(_metadata_summary("movie", 3, name="Alpha"))
+
+    result = runner.invoke(app, ["--json", "lib", "list", "--sort", "title", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:3", "movie:1", "movie:2"]
+    assert payload["summary"]["metadata_missing"] == 1
+    assert "missing for 1 of 3 entries" in _normalized(result.stderr)
+
+
+def test_library_search_ignores_hidden_entries_without_metadata_unless_shown(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("movie:66", "movie", 66, on_display=False),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    default_result = runner.invoke(app, ["--json", "lib", "search", "Alien"])
+    shown_result = runner.invoke(app, ["--json", "lib", "search", "Alien", "--show-hidden"])
+
+    assert default_result.exit_code == 0, default_result.output
+    assert json.loads(default_result.stdout)["summary"]["metadata_missing"] == 0
+    assert default_result.stderr == ""
+    assert shown_result.exit_code == 0, shown_result.output
+    assert json.loads(shown_result.stdout)["summary"]["metadata_missing"] == 1
+    assert "missing for 1 of 2 entries" in _normalized(shown_result.stderr)
+
+
+def test_library_list_reports_one_warning_when_sort_and_attach_checks_both_find_gaps(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:1", "movie", 1),
+        _live_record("movie:2", "movie", 2),
+        _live_record("movie:3", "movie", 3),
+    )
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 1, name="Alpha")],
+        depth=MetadataDepth.DETAILS,
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 2, name="Beta"))
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "list", "--sort", "title", "--metadata", "details"],
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["metadata_missing"] == 2
+    warning_lines = [line for line in result.stderr.splitlines() if "may be incomplete" in line]
+    assert len(warning_lines) == 1
+    assert "details metadata is missing for 2 of 3 entries" in _normalized(result.stderr)
+
+
+def test_library_export_details_warns_on_partial_coverage_and_keeps_stdout_clean(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:1", "movie", 1),
+        _live_record("movie:2", "movie", 2),
+    )
+    store.upsert_metadata_summaries(
+        [_metadata_summary("movie", 1, name="Alpha")],
+        depth=MetadataDepth.DETAILS,
+    )
+
+    json_result = runner.invoke(app, ["--json", "lib", "export", "--metadata", "details"])
+    human_result = runner.invoke(app, ["lib", "export", "--metadata", "details"])
+
+    assert json_result.exit_code == 0, json_result.output
+    assert json.loads(json_result.stdout)["summary"]["metadata_missing"] == 1
+    assert human_result.exit_code == 0, human_result.output
+    assert "may be incomplete" not in human_result.stdout
+    assert "details metadata is missing for 1 of 2 entries" in _normalized(human_result.stderr)
+
+
+def test_library_search_details_fails_when_only_summary_metadata_is_cached(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien", "--metadata", "details"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "no entry has current cached TMDb details metadata (0/1 hydrated)" in _normalized(
+        result.stderr
+    )
+
+
+def test_library_search_fails_when_no_metadata_is_hydrated(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "no entry has current cached TMDb metadata (0/1 hydrated)" in " ".join(
+        result.stderr.split()
+    )
+
+
 def test_library_search_human_uses_cached_titles_when_configured_metadata_default_is_none(
     tmp_path,
     monkeypatch,
@@ -3153,14 +3310,18 @@ def _fake_search_store() -> object:
         search_query_arg: str | None = None
         scope = LibraryCacheScope.default_for_user("_user")
 
-        def metadata_summary_status(
+        def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
+            _ = include_tombstones
+            return []
+
+        def metadata_status_for_entries(
             self,
+            entries: list[LibraryEntryModel],
             *,
             language: str = "en",
             depth: MetadataDepth = MetadataDepth.SUMMARY,
         ) -> CacheMetadataStatusResult:
-            _ = language
-            _ = depth
+            _ = entries, language, depth
             return CacheMetadataStatusResult(
                 tracked_entries=3,
                 hydrated_entries=3,

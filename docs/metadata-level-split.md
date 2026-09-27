@@ -123,8 +123,9 @@ added later as a separate debug-only cache if there is a concrete need.
 - `summary` cached data satisfies only `summary`.
 - Search and title-sort readiness can depend on internal cached fields without
   changing the selected output level.
-- If a command requests `details` or `full` and that depth is incomplete, fail
-  explicitly with a hydration hint.
+- If a command requests `details` or `full` and no returned entry has that
+  depth cached, fail explicitly with a hydration hint. If only some entries lack
+  it, warn on stderr and report `summary.metadata_missing` instead.
 
 ## Hydration Boundaries
 

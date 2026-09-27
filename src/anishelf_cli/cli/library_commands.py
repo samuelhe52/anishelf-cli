@@ -37,7 +37,13 @@ from anishelf_cli.cli.presentation import (
     render_library_search,
 )
 from anishelf_cli.core.logging import get_logger
-from anishelf_cli.core.output import HumanSection, emit_error, emit_human_blocks, emit_json
+from anishelf_cli.core.output import (
+    HumanSection,
+    emit_error,
+    emit_human_blocks,
+    emit_json,
+    emit_warning,
+)
 from anishelf_cli.library import (
     has_any_found_item,
     library_get_cache_envelope,
@@ -459,6 +465,7 @@ def library_list(
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
+    _emit_result_warnings(result)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
@@ -564,6 +571,7 @@ def library_search(
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
+    _emit_result_warnings(result)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
@@ -657,6 +665,7 @@ def library_export(
         )
     except MetadataCompletenessError as exc:
         _exit_metadata_completeness(exc)
+    _emit_result_warnings(result)
     if ad_hoc_language and metadata_depth is not MetadataDepth.NONE:
         result = _result_with_entries(
             result,
@@ -1127,6 +1136,11 @@ def _tmdb_summary_client_or_exit(*, language: str) -> TMDbClient:
 
 def _emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
     emit_library_cache_progress(progress)
+
+
+def _emit_result_warnings(result: LibraryEntriesResult) -> None:
+    for warning in result.warnings:
+        emit_warning(warning)
 
 
 def _exit_metadata_completeness(exc: MetadataCompletenessError) -> NoReturn:
