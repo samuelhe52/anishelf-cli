@@ -48,6 +48,12 @@ class LibraryEntryType(StrEnum):
     SEASON = "season"
 
 
+class ExportFormat(StrEnum):
+    JSON = "json"
+    JSONL = "jsonl"
+    CSV = "csv"
+
+
 class TMDbMetadataLanguage(StrEnum):
     EN = "en"
     JA = "ja"
@@ -73,6 +79,7 @@ __all__ = [
     "AniShelfBaseModel",
     "AppState",
     "CallbackStrategy",
+    "ExportFormat",
     "HumanOutputStyle",
     "LibraryEntryType",
     "LibraryIdentity",

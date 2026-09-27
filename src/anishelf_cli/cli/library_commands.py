@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Annotated, NoReturn, cast
 
 import httpx
@@ -31,6 +32,7 @@ from anishelf_cli.cli.options import FieldListOption, MetadataOption, OutputStyl
 from anishelf_cli.cli.presentation import (
     LIBRARY_LIST_DEFAULT_FIELDS,
     LIBRARY_SEARCH_DEFAULT_FIELDS,
+    render_library_export_file_result,
     render_library_export_result,
     render_library_get,
     render_library_list,
@@ -49,6 +51,12 @@ from anishelf_cli.library import (
     library_get_cache_envelope,
     valid_lookup_record_names,
 )
+from anishelf_cli.library.export import (
+    export_format_for_path,
+    file_encoding_for_format,
+    render_export,
+    write_export_file,
+)
 from anishelf_cli.library.queries import (
     MetadataCompletenessError,
     attach_metadata_for_depth,
@@ -59,6 +67,7 @@ from anishelf_cli.library.queries import (
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
 from anishelf_cli.models import (
+    ExportFormat,
     HumanOutputStyle,
     LibraryEntryType,
     LibraryListSort,
@@ -75,6 +84,7 @@ from anishelf_cli.models.output import (
     LibraryClearCacheResult,
     LibraryEntriesCacheResult,
     LibraryEntriesResult,
+    LibraryExportFileResult,
     LibraryRefreshMetadataCacheResult,
     LibraryRefreshMetadataResult,
     LibraryRefreshMetadataSummaryResult,
@@ -666,11 +676,45 @@ def library_export(
             show_default=False,
         ),
     ] = None,
+    export_format: Annotated[
+        ExportFormat | None,
+        typer.Option(
+            "--format",
+            help=(
+                "Write entries as json (the JSON envelope), jsonl (one entry per line), "
+                "or csv. Defaults to the --output file extension, else json."
+            ),
+            show_default=False,
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option(
+            "--output",
+            "-o",
+            help="Write the export to this file (readable only by you) instead of stdout.",
+            dir_okay=False,
+            show_default=False,
+        ),
+    ] = None,
     json_output: Annotated[
         bool,
         typer.Option("--json", "-j", help="Emit machine-readable JSON."),
     ] = False,
 ) -> None:
+    machine_output = json_output_requested(ctx, json_output)
+    if output is not None and str(output) == "-":
+        # `-o -` conventionally means stdout.
+        output = None
+        export_format = export_format or ExportFormat.JSON
+    if output is not None and not output.parent.is_dir():
+        emit_error(f"Cannot write export: directory {output.parent} does not exist.")
+        raise typer.Exit(code=2)
+    resolved_format = _resolve_export_format(
+        export_format,
+        output=output,
+        machine_output=machine_output,
+    )
     metadata_depth = _metadata_depth(metadata)
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
@@ -698,20 +742,49 @@ def library_export(
             ),
         )
     payload = result.model_dump(mode="json")
-    if json_output_requested(ctx, json_output):
-        _add_parent_series_titles_to_entries_payload(
-            payload,
-            _parent_series_titles_for_entries(
-                store,
-                list(result.entries),
-                language=request_language,
-                preferred_language=preferred_language,
-                metadata_depth=metadata_depth,
-            ),
-        )
-        emit_json(payload)
+    if resolved_format is None:
+        render_library_export_result(list(result.entries), result.cache)
         return
-    render_library_export_result(list(result.entries), result.cache)
+    _add_parent_series_titles_to_entries_payload(
+        payload,
+        _parent_series_titles_for_entries(
+            store,
+            list(result.entries),
+            language=request_language,
+            preferred_language=preferred_language,
+            metadata_depth=metadata_depth,
+        ),
+    )
+    display_titles = (
+        _display_titles_for_entries(
+            store,
+            list(result.entries),
+            language=request_language,
+            preferred_language=preferred_language,
+            metadata_depth=metadata_depth,
+        )
+        if resolved_format is ExportFormat.CSV
+        else {}
+    )
+    content = render_export(payload, resolved_format, display_titles=display_titles)
+    if output is None:
+        typer.echo(content, nl=False)
+        return
+    try:
+        write_export_file(output, content, encoding=file_encoding_for_format(resolved_format))
+    except OSError as exc:
+        emit_error(f"Could not write export to {output}: {exc.strerror or exc}.")
+        raise typer.Exit(code=2) from exc
+    written = LibraryExportFileResult(
+        path=str(output.resolve()),
+        format=resolved_format.value,
+        entries=len(result.entries),
+        cache=result.cache,
+    )
+    if machine_output:
+        emit_json(written.model_dump(mode="json"))
+        return
+    render_library_export_file_result(written)
 
 
 @library_app.command(
@@ -1163,6 +1236,26 @@ def _emit_library_cache_progress(progress: LibraryCacheProgress) -> None:
 def _emit_result_warnings(result: LibraryEntriesResult) -> None:
     for warning in result.warnings:
         emit_warning(warning)
+
+
+def _resolve_export_format(
+    export_format: ExportFormat | None,
+    *,
+    output: Path | None,
+    machine_output: bool,
+) -> ExportFormat | None:
+    """Pick the export data format, or None for the human summary."""
+    if output is not None:
+        return export_format or export_format_for_path(output) or ExportFormat.JSON
+    if machine_output:
+        if export_format not in {None, ExportFormat.JSON}:
+            emit_error(
+                "--json prints the JSON envelope; drop it to stream --format "
+                f"{export_format}, or add --output to write a file."
+            )
+            raise typer.Exit(code=2)
+        return ExportFormat.JSON
+    return export_format
 
 
 def _exit_metadata_completeness(exc: MetadataCompletenessError) -> NoReturn:

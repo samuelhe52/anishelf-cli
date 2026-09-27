@@ -58,7 +58,9 @@ include:
 - `lib list [--sync] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full] [--style table|list]`
 - `lib search <query>` with optional `--sync`, `--tmdb-language`,
   `--metadata`, `--style table|list`, and `--limit`
-- `lib export` with optional `--sync`, `--tmdb-language`, and `--metadata`
+- `lib export` with optional `--sync`, `--tmdb-language`, `--metadata`,
+  `--format json|jsonl|csv`, and `--output <path>` (written atomically with
+  owner-only permissions)
 - `tmdb search [title] [--title] [--tmdb-language] [--limit]`
 
 `lib init` is the explicit bootstrap entry point for the local cache.

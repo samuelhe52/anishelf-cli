@@ -107,6 +107,19 @@ refetch everything, run:
 ani lib refresh-meta --json
 ```
 
+Export the library (private user data; only write files the user asked for):
+
+```bash
+ani lib export --json
+ani lib export --format jsonl --metadata none
+ani --json lib export -o library.csv
+```
+
+`--format jsonl` streams one entry object per line; `--format csv` streams a
+flat table. With `-o`, the format comes from `--format` or the file extension,
+the file is created with owner-only permissions, and `--json` prints
+`{path, format, entries, cache}` instead of the data.
+
 Read entries by AniShelf id:
 
 ```bash
