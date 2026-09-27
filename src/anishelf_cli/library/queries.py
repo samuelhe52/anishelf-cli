@@ -274,7 +274,7 @@ def build_library_search_result(
     # Coverage is measured over every entry the query could have matched.
     searchable = store.list_entry_models(include_tombstones=False)
     if not show_hidden:
-        searchable = _visible_snapshots(searchable)
+        searchable = visible_snapshots(searchable)
     gaps: list[MetadataCoverageGap | None] = [
         check_metadata_coverage(
             store,
@@ -287,7 +287,7 @@ def build_library_search_result(
     ]
     entries = store.search_entry_models(query, metadata_language=metadata_language)
     if not show_hidden:
-        entries = _visible_snapshots(entries)
+        entries = visible_snapshots(entries)
     if limit is not None:
         entries = entries[:limit]
     gaps.extend(
@@ -326,7 +326,7 @@ def build_library_export_result(
 ) -> LibraryEntriesResult:
     entries = store.list_entry_models(include_tombstones=False)
     if not show_hidden:
-        entries = _visible_snapshots(entries)
+        entries = visible_snapshots(entries)
     gaps = _attach_coverage_gap(
         store,
         entries,
@@ -520,7 +520,7 @@ def strip_entry_metadata(entries: list[LibraryEntryModel]) -> list[LibraryEntryM
     return [entry.without_metadata() for entry in entries]
 
 
-def _visible_snapshots(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
+def visible_snapshots(entries: list[LibraryEntryModel]) -> list[LibraryEntryModel]:
     return [
         entry for entry in entries if isinstance(entry, LibraryEntrySnapshot) and entry.on_display
     ]

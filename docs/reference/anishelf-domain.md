@@ -54,6 +54,9 @@ include:
 - `lib status`
 - `lib clear-cache`
 - `lib refresh-meta`
+- `lib stats [--sync] [--show-hidden]`: counts by type and watch status,
+  favorites, score average and 1-5 distribution, finishes per year, and top
+  genres from details-depth metadata (`genres: null` when none is cached)
 - `lib get <id...> [--sync] [--live-meta] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full]`
 - `lib list [--sync] [--tmdb-language en|ja|zh] [--metadata none|summary|details|full] [--style table|list]`
 - `lib search <query>` with optional `--sync`, `--tmdb-language`,

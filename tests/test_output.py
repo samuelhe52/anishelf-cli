@@ -337,3 +337,13 @@ def test_default_library_table_truncates_ids_only_as_last_resort(capsys, monkeyp
     assert all(cell_len(line) <= 60 for line in lines)
     assert "season:209867:1:307972" not in output
     assert "season..." in output
+
+
+def test_section_labels_align_by_display_width(capsys) -> None:
+    from rich.cells import cell_len
+
+    emit_human_blocks([HumanSection("Genres", (("アニメ", 3), ("Drama", 12)))])
+
+    lines = capsys.readouterr().out.splitlines()[1:]
+    value_columns = {cell_len(line.rstrip()[: -len(line.split()[-1])]) for line in lines}
+    assert len(value_columns) == 1

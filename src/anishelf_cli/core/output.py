@@ -110,7 +110,7 @@ def emit_human_sections(sections: Sequence[HumanSection]) -> None:
 def _section_label_width(blocks: Sequence[HumanBlock]) -> int:
     label_width = max(
         (
-            len(label)
+            cell_len(label)
             for block in blocks
             if isinstance(block, HumanSection)
             for label, _ in block.rows
@@ -129,7 +129,8 @@ def _print_section(out: Console, section: HumanSection, label_width: int) -> Non
                 out.print()
             continue
         line = Text("  ")
-        line.append(f"{label:<{label_width}}", style="cyan")
+        # Pad by display cells so CJK labels (for example genre names) stay aligned.
+        line.append(_align(label, label_width, "left"), style="cyan")
         line.append("  ")
         line.append(_human_value(value))
         out.print(line)

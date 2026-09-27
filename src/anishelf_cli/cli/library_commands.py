@@ -38,6 +38,7 @@ from anishelf_cli.cli.presentation import (
     render_library_get,
     render_library_list,
     render_library_search,
+    render_library_stats,
 )
 from anishelf_cli.core.logging import get_logger
 from anishelf_cli.core.output import (
@@ -67,6 +68,7 @@ from anishelf_cli.library.queries import (
     cache_summary_payload,
 )
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
+from anishelf_cli.library.stats import build_library_stats_result
 from anishelf_cli.models import (
     ExportFormat,
     HumanOutputStyle,
@@ -832,6 +834,38 @@ def library_export(
         emit_json(written.model_dump(mode="json"))
         return
     render_library_export_file_result(written)
+
+
+@library_app.command("stats", help="Summarize the cached library.")
+def library_stats(
+    ctx: typer.Context,
+    sync: Annotated[
+        bool | None,
+        typer.Option(
+            "--sync/--no-sync",
+            help="Sync the initialized local library cache from CloudKit before reading.",
+        ),
+    ] = None,
+    show_hidden: Annotated[
+        bool,
+        typer.Option("--show-hidden", help="Include entries hidden from display."),
+    ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", "-j", help="Emit machine-readable JSON."),
+    ] = False,
+) -> None:
+    store, refresh_result = _library_read_store(sync=sync)
+    result = build_library_stats_result(
+        store,
+        cache=cache_summary_payload(store, refresh_result),
+        show_hidden=_show_hidden_requested(show_hidden),
+        metadata_language=_preferred_metadata_language(),
+    )
+    if json_output_requested(ctx, json_output):
+        emit_json(result.model_dump(mode="json"))
+        return
+    render_library_stats(result)
 
 
 @library_app.command(

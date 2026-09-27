@@ -127,6 +127,14 @@ Repeat `--watch-status` or `--type` (`movie`, `series`, `season`) to match any
 of several values. `--reverse` flips the sort direction; entries without a value
 for the sort key (unscored, undated, or without metadata) stay last.
 
+Summarize your library (counts by type and status, scores, finishes per year,
+and top genres when details metadata is cached):
+
+```bash
+ani lib stats
+ani lib stats --json | jq '.scores'
+```
+
 Search your cached library:
 
 ```bash
