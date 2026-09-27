@@ -138,7 +138,8 @@ def root_callback(
 
 
 def _make_http_client() -> httpx.Client:
-    return httpx.Client(timeout=30.0)
+    # A short connect timeout bounds how long connection retries hold the token lock.
+    return httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0))
 
 
 def _manual_callback_instructions(redirect_url: str) -> None:

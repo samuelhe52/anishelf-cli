@@ -104,7 +104,8 @@ _LIBRARY_GET_METADATA_FIELDS_TO_DROP: frozenset[str] = frozenset()
 
 
 def _make_http_client() -> httpx.Client:
-    return httpx.Client(timeout=30.0)
+    # A short connect timeout bounds how long connection retries hold the token lock.
+    return httpx.Client(timeout=httpx.Timeout(30.0, connect=10.0))
 
 
 @library_app.command("get", help="Read AniShelf library entries by AniShelf id.")

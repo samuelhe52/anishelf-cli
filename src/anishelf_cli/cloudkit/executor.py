@@ -77,6 +77,11 @@ class CloudKitChangeTokenExpiredError(CloudKitWhoamiError):
 
 
 CONNECT_RETRY_DELAY_SECONDS = 0.5
+# httpcore raises these only while opening the TCP connection or completing the
+# TLS handshake (httpcore/_backends/sync.py), before any request bytes are sent.
+# Failures on a reused pooled connection surface as RemoteProtocolError instead.
+# Never widen this to TimeoutException or NetworkError: those include read and
+# write failures after CloudKit may have consumed the rolling web auth token.
 _PRE_SEND_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
 
 
