@@ -78,9 +78,14 @@ counts or library list/export output.
 
 `lib search <query>` depends on cached TMDb metadata because it mirrors
 AniShelf's smart library search across titles, translations, parent-series
-metadata, overviews, notes, and on-air dates. If metadata is incomplete or
-unavailable, the command should fail explicitly and tell the user how to hydrate
-metadata first. Use `tmdb search <title>` or `tmdb search --title <title>` for
+metadata, overviews, notes, and on-air dates. If no entry has cached metadata,
+the command should fail explicitly and tell the user how to hydrate metadata
+first. If only some entries lack metadata (for example a transient TMDb failure
+or a TMDb id removed upstream), the command still runs, prints a stderr warning
+that results may be incomplete, and reports `summary.metadata_missing` in JSON.
+The same rule applies to metadata-backed `lib list` sorts and to
+`--metadata details|full` attachment. `lib sync` retries entries with missing
+metadata, so transient gaps heal on the next sync. Use `tmdb search <title>` or `tmdb search --title <title>` for
 global TMDb anime title search, or omit a title for popular anime discovery.
 `tmdb search <title>` is equivalent to `tmdb search --title <title>`. `--limit`
 on `lib search` caps visible local matches after filtering; `--limit` on

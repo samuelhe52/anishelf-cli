@@ -3094,6 +3094,37 @@ def test_library_search_hides_hidden_entries_by_default(tmp_path, monkeypatch) -
     ]
 
 
+def test_library_search_warns_but_succeeds_when_metadata_is_partially_hydrated(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("movie:66", "movie", 66),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien", "--metadata", "none"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
+    assert payload["summary"]["metadata_missing"] == 1
+    assert "cached TMDb metadata is missing for 1 of 2 entries" in " ".join(result.stderr.split())
+
+
+def test_library_search_fails_when_no_metadata_is_hydrated(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+
+    result = runner.invoke(app, ["--json", "lib", "search", "Alien"])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "no entry has cached TMDb metadata (0/1 hydrated)" in " ".join(result.stderr.split())
+
+
 def test_library_search_human_uses_cached_titles_when_configured_metadata_default_is_none(
     tmp_path,
     monkeypatch,

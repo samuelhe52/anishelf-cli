@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Protocol
 
 from anishelf_cli import config
@@ -13,6 +14,11 @@ from anishelf_cli.models.output import (
     LibraryEntriesResult,
     LibraryListFiltersResult,
     LibrarySearchQueryResult,
+)
+
+METADATA_SUMMARY_HINT = (
+    "Run `ani lib sync` to retry missing metadata, or `ani lib refresh-meta` after "
+    "configuring a TMDb API key."
 )
 
 
@@ -90,10 +96,35 @@ class MetadataCompletenessError(ValueError):
 
     def __str__(self) -> str:
         return (
-            f"Cannot {self.action} because TMDb metadata is incomplete "
-            f"({self.hydrated}/{self.tracked} hydrated, {self.missing} missing). "
-            f"{self.hint}"
+            f"Cannot {self.action} because no entry has cached TMDb metadata "
+            f"({self.hydrated}/{self.tracked} hydrated). {self.hint}"
         )
+
+
+@dataclass(frozen=True, slots=True)
+class MetadataCoverageGap:
+    tracked: int
+    missing: int
+    depth: MetadataDepth
+    hint: str
+
+    def warning(self) -> str:
+        depth_label = "" if self.depth is MetadataDepth.SUMMARY else f"{self.depth.value} "
+        return (
+            f"Results may be incomplete: cached TMDb {depth_label}metadata is missing for "
+            f"{self.missing} of {self.tracked} entries. {self.hint}"
+        )
+
+
+def _metadata_missing(gaps: list[MetadataCoverageGap | None]) -> int | None:
+    # None means the command did not depend on metadata coverage at all.
+    if not gaps:
+        return None
+    return max((gap.missing for gap in gaps if gap is not None), default=0)
+
+
+def _coverage_warnings(gaps: list[MetadataCoverageGap | None]) -> tuple[str, ...]:
+    return tuple(gap.warning() for gap in gaps if gap is not None)
 
 
 def build_library_list_result(
@@ -109,24 +140,29 @@ def build_library_list_result(
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
+    gaps: list[MetadataCoverageGap | None] = []
     if _sort_requires_summary_metadata(sort):
-        require_metadata_ready(
-            store,
-            action=f"sort library entries by {_sort_label(sort)}",
-            hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
-            metadata_language=metadata_language,
-            metadata_depth=MetadataDepth.SUMMARY,
+        gaps.append(
+            check_metadata_coverage(
+                store,
+                action=f"sort library entries by {_sort_label(sort)}",
+                hint=METADATA_SUMMARY_HINT,
+                metadata_language=metadata_language,
+                metadata_depth=MetadataDepth.SUMMARY,
+            )
         )
     if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
-        require_metadata_ready(
-            store,
-            action=f"attach {metadata_depth.value} metadata",
-            hint=(
-                f"Set hydration depth with `ani config set-defaults --hydration-depth "
-                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
-            ),
-            metadata_language=metadata_language,
-            metadata_depth=metadata_depth,
+        gaps.append(
+            check_metadata_coverage(
+                store,
+                action=f"attach {metadata_depth.value} metadata",
+                hint=(
+                    f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                    f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+                ),
+                metadata_language=metadata_language,
+                metadata_depth=metadata_depth,
+            )
         )
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
@@ -157,6 +193,8 @@ def build_library_list_result(
         entries=tuple(entries),
         cache=cache,
         metadata=metadata_payload(metadata_depth),
+        metadata_missing=_metadata_missing(gaps),
+        warnings=_coverage_warnings(gaps),
         filters=library_list_filters_payload(
             watch_status=watch_status,
             show_hidden=show_hidden,
@@ -178,23 +216,28 @@ def build_library_search_result(
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
-    require_metadata_ready(
-        store,
-        action="search cached library entries",
-        hint="Run `ani lib refresh-meta` after configuring a TMDb API key.",
-        metadata_language=metadata_language,
-        metadata_depth=MetadataDepth.SUMMARY,
+    gaps: list[MetadataCoverageGap | None] = []
+    gaps.append(
+        check_metadata_coverage(
+            store,
+            action="search cached library entries",
+            hint=METADATA_SUMMARY_HINT,
+            metadata_language=metadata_language,
+            metadata_depth=MetadataDepth.SUMMARY,
+        )
     )
     if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
-        require_metadata_ready(
-            store,
-            action=f"attach {metadata_depth.value} metadata",
-            hint=(
-                f"Set hydration depth with `ani config set-defaults --hydration-depth "
-                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
-            ),
-            metadata_language=metadata_language,
-            metadata_depth=metadata_depth,
+        gaps.append(
+            check_metadata_coverage(
+                store,
+                action=f"attach {metadata_depth.value} metadata",
+                hint=(
+                    f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                    f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+                ),
+                metadata_language=metadata_language,
+                metadata_depth=metadata_depth,
+            )
         )
     entries = store.search_entry_models(query, metadata_language=metadata_language)
     if not show_hidden:
@@ -212,6 +255,8 @@ def build_library_search_result(
         cache=cache,
         metadata=metadata_payload(metadata_depth),
         query=LibrarySearchQueryResult(text=query, limit=limit),
+        metadata_missing=_metadata_missing(gaps),
+        warnings=_coverage_warnings(gaps),
     )
 
 
@@ -224,19 +269,22 @@ def build_library_export_result(
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
+    gaps: list[MetadataCoverageGap | None] = []
     entries = store.list_entry_models(include_tombstones=False)
     if not show_hidden:
         entries = _visible_snapshots(entries)
     if not live_metadata and metadata_depth in {MetadataDepth.DETAILS, MetadataDepth.FULL}:
-        require_metadata_ready(
-            store,
-            action=f"attach {metadata_depth.value} metadata",
-            hint=(
-                f"Set hydration depth with `ani config set-defaults --hydration-depth "
-                f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
-            ),
-            metadata_language=metadata_language,
-            metadata_depth=metadata_depth,
+        gaps.append(
+            check_metadata_coverage(
+                store,
+                action=f"attach {metadata_depth.value} metadata",
+                hint=(
+                    f"Set hydration depth with `ani config set-defaults --hydration-depth "
+                    f"{metadata_depth.value}`, then run `ani lib refresh-meta`."
+                ),
+                metadata_language=metadata_language,
+                metadata_depth=metadata_depth,
+            )
         )
     entries = attach_metadata_for_depth(
         store,
@@ -248,6 +296,8 @@ def build_library_export_result(
         entries=tuple(entries),
         cache=cache,
         metadata=metadata_payload(metadata_depth),
+        metadata_missing=_metadata_missing(gaps),
+        warnings=_coverage_warnings(gaps),
     )
 
 
@@ -296,22 +346,34 @@ def attach_metadata_for_depth(
     )
 
 
-def require_metadata_ready(
+def check_metadata_coverage(
     store: LibraryQueryStore,
     *,
     action: str,
     hint: str,
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     metadata_depth: MetadataDepth = MetadataDepth.SUMMARY,
-) -> None:
+) -> MetadataCoverageGap | None:
+    """Fail when no entry has the metadata `action` needs; report partial gaps.
+
+    A few entries can stay unhydrated for good (for example a TMDb id that was
+    removed upstream), so partial coverage must not block the whole command.
+    """
     status = store.metadata_summary_status(language=metadata_language, depth=metadata_depth)
     if status.ready:
-        return
-    raise MetadataCompletenessError(
-        action=action,
+        return None
+    if status.hydrated_entries == 0:
+        raise MetadataCompletenessError(
+            action=action,
+            tracked=status.tracked_entries,
+            hydrated=status.hydrated_entries,
+            missing=status.missing_entries,
+            hint=hint,
+        )
+    return MetadataCoverageGap(
         tracked=status.tracked_entries,
-        hydrated=status.hydrated_entries,
         missing=status.missing_entries,
+        depth=metadata_depth,
         hint=hint,
     )
 
