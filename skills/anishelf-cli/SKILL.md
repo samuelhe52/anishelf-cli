@@ -19,6 +19,9 @@ output with optional TMDb anime metadata, and emits scriptable JSON.
 - Prefer `ani ... --json` for agent workflows and parse stdout; progress,
   warnings, and diagnostics belong on stderr.
 - Treat exported library JSON as private user data.
+- Pass `-v` before the command group (`ani -v --json lib sync`) only when
+  diagnosing a failure or slowdown; quote the relevant `[debug]` lines rather
+  than the whole stderr log.
 - Do not attempt CloudKit writes. This CLI is for inspection, cache refresh,
   metadata hydration, search, and export only.
 - Use separated option values for metadata, such as `--metadata summary`; do
