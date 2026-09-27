@@ -2510,7 +2510,10 @@ def test_whoami_verbose_saves_header_successor_without_printing_it(monkeypatch) 
         monkeypatch,
         lambda request: httpx.Response(
             200,
-            headers={"X-Apple-CloudKit-Web-Auth-Token": "header-successor-token"},
+            headers={
+                "X-Apple-CloudKit-Web-Auth-Token": "header-successor-token",
+                "X-Apple-Request-UUID": "request-uuid-1",
+            },
             json={"userRecordName": "_abc123"},
         ),
     )
@@ -2518,7 +2521,10 @@ def test_whoami_verbose_saves_header_successor_without_printing_it(monkeypatch) 
     result = runner.invoke(app, ["--verbose", "--json", "auth", "status"])
 
     assert result.exit_code == 0, result.output
-    assert "[debug] CloudKit response" in result.stderr
+    assert "[debug] CloudKit web auth token lock -> acquired wait=" in result.stderr
+    assert "attempt=1/4 elapsed=" in result.stderr
+    assert "requestId=request-uuid-1" in result.stderr
+    assert "[debug] CloudKit web auth token -> rolled forward, successor stored" in result.stderr
     assert store.get_password(descriptor.service, descriptor.account) == "header-successor-token"
     combined = result.stdout + result.stderr
     assert "header-successor-token" not in combined

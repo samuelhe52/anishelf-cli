@@ -84,7 +84,12 @@ spec.
   reads by default and can be included with `--show-hidden` or a library config
   default.
 - Low-level CloudKit diagnostics and schema checks are not
-  user-facing command groups.
+  user-facing command groups; `--verbose` covers them instead. It writes
+  redacted `[debug]` lines to stderr: runtime, paths, and override variable
+  names; request timing, retry attempts, and CloudKit request ids; web auth token
+  lock waits and rolling (never values); a per-page record shape summary that
+  names CloudKit fields the CLI does not decode; and cache query sizes and
+  timings.
 - CloudKit requests retry only connection-phase failures (the rolling web auth
   token is unused then); TMDb requests back off exponentially with jitter and
   honor `Retry-After`.
@@ -132,6 +137,4 @@ spec.
   refreshed automatically; `fetched_at` is stored and indexed but not yet used,
   so upstream TMDb edits are only picked up by `lib refresh-meta` or
   `--live-meta`.
-- Whether low-level CloudKit diagnostics need a separate dev-only entry point
-  (today only `--verbose` redacted network logs exist).
 - Publishing to PyPI (the beta installs from a tagged Git URL).

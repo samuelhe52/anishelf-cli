@@ -1,9 +1,14 @@
 from __future__ import annotations
 
+import functools
+import inspect
+import logging
 import sqlite3
-from collections.abc import Generator, Sequence
+import time
+from collections.abc import Callable, Generator, Sequence, Sized
 from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +18,7 @@ from anishelf_cli import config
 from anishelf_cli.cache import metadata, records, schema
 from anishelf_cli.cache.scope import LibraryCacheScope, scope_from_existing_database
 from anishelf_cli.cloudkit.executor import ANI_SHELF_LIBRARY_ZONE_NAME
+from anishelf_cli.core.logging import elapsed_ms, get_logger
 from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.domain import LibraryEntryMetadata, LibraryEntryModel, TMDbSummaryIdentity
 from anishelf_cli.models.output import CacheMetadataStatusResult, RemovedCacheFilesResult
@@ -23,6 +29,44 @@ LibraryCacheNotAvailableError = schema.LibraryCacheNotAvailableError
 
 
 _IDENTITY_LOOKUP_CHUNK_SIZE = 500
+
+logger = get_logger(__name__)
+
+
+def _logged_read[**P, R](method: Callable[P, R]) -> Callable[P, R]:
+    """Log a cache read's arguments, result size, and duration under --verbose."""
+
+    signature = inspect.signature(method)
+
+    @functools.wraps(method)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        if not logger.isEnabledFor(logging.DEBUG):
+            return method(*args, **kwargs)
+        started = time.perf_counter()
+        result = method(*args, **kwargs)
+        bound = signature.bind(*args, **kwargs).arguments
+        parts = [f"{name}={_log_value(value)}" for name, value in bound.items() if name != "self"]
+        if isinstance(result, Sized):
+            parts.append(f"rows={len(result)}")
+        elif isinstance(result, CacheMetadataStatusResult):
+            parts.append(f"hydrated={result.hydrated_entries}/{result.tracked_entries}")
+        parts.append(f"elapsed={elapsed_ms(started)}")
+        logger.debug("Library cache query -> %s %s", method.__name__, " ".join(parts))
+        return result
+
+    return wrapper
+
+
+def _log_value(value: object) -> str:
+    if isinstance(value, Enum):
+        return str(value.value)
+    if value is None or isinstance(value, str | int | float | bool):
+        return str(value)
+    if isinstance(value, tuple) and all(isinstance(item, str | Enum) for item in value):
+        return ",".join(_log_value(item) for item in value) or "none"
+    if isinstance(value, Sized):
+        return f"<{len(value)} items>"
+    return type(value).__name__
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +247,7 @@ class LibraryCacheStore:
             db.execute("DROP TABLE library_entries_stage")
             db.commit()
 
+    @_logged_read
     def list_entry_models(self, *, include_tombstones: bool = False) -> list[LibraryEntryModel]:
         where = "" if include_tombstones else "WHERE kind = 'snapshot'"
         with self._connect_initialized() as db:
@@ -216,6 +261,7 @@ class LibraryCacheStore:
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
+    @_logged_read
     def list_entry_models_filtered(
         self,
         *,
@@ -272,6 +318,7 @@ class LibraryCacheStore:
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
+    @_logged_read
     def get_entry_models_by_identity(self, identities: list[str]) -> dict[str, LibraryEntryModel]:
         unique_identities = list(dict.fromkeys(identities))
         if not unique_identities:
@@ -296,6 +343,7 @@ class LibraryCacheStore:
         entries = self._entry_models_from_rows(rows)
         return {entry.identity: entry for entry in entries}
 
+    @_logged_read
     def search_cached_entry_models(
         self,
         *,
@@ -344,6 +392,7 @@ class LibraryCacheStore:
             ).fetchall()
         return self._entry_models_from_rows(rows)
 
+    @_logged_read
     def search_entry_models(
         self,
         query: str,
@@ -537,6 +586,7 @@ class LibraryCacheStore:
             depth=depth,
         )
 
+    @_logged_read
     def metadata_summary_status(
         self,
         *,
@@ -549,6 +599,7 @@ class LibraryCacheStore:
             depth=depth,
         )
 
+    @_logged_read
     def metadata_status_for_entries(
         self,
         entries: list[LibraryEntryModel],
@@ -578,6 +629,7 @@ class LibraryCacheStore:
             ready=missing_count == 0,
         )
 
+    @_logged_read
     def attach_metadata_summary_models(
         self,
         entries: list[LibraryEntryModel],
@@ -611,6 +663,7 @@ class LibraryCacheStore:
             for entry in entries
         ]
 
+    @_logged_read
     def series_genre_names(
         self,
         series_ids: set[int],
@@ -639,6 +692,7 @@ class LibraryCacheStore:
             if metadata.metadata_depth_satisfies(row["metadata_depth"], MetadataDepth.DETAILS)
         }
 
+    @_logged_read
     def display_titles_for_entries(
         self,
         entries: list[LibraryEntryModel],
@@ -682,6 +736,7 @@ class LibraryCacheStore:
                 display_titles[identity] = parent_title.title
         return display_titles
 
+    @_logged_read
     def parent_series_titles_for_entries(
         self,
         entries: list[LibraryEntryModel],
@@ -769,6 +824,7 @@ class LibraryCacheStore:
         """
         if not self.path.exists():
             raise LibraryCacheNotAvailableError("No local library cache is available.")
+        logger.debug("Library cache open -> mode=read-only path=%s", self.path)
         db = sqlite3.connect(f"{self.path.resolve().as_uri()}?mode=ro", uri=True)
         db.row_factory = sqlite3.Row
         try:

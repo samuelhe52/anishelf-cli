@@ -16,7 +16,7 @@ from anishelf_cli import config
 from anishelf_cli.cloudkit.api_token import CloudKitAPIToken, resolve_cloudkit_api_token
 from anishelf_cli.cloudkit.auth import database_endpoint_url, successor_web_auth_token
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.core.logging import get_logger
+from anishelf_cli.core.logging import elapsed_ms, get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models.domain import CurrentUser
 from anishelf_cli.models.transport.cloudkit import (
@@ -83,6 +83,7 @@ CONNECT_RETRY_DELAY_SECONDS = 0.5
 # Never widen this to TimeoutException or NetworkError: those include read and
 # write failures after CloudKit may have consumed the rolling web auth token.
 _PRE_SEND_ERRORS = (httpx.ConnectError, httpx.ConnectTimeout)
+_TRACE_HEADERS = (("X-Apple-Request-UUID", "requestId"),)
 
 
 @dataclass(slots=True)
@@ -167,7 +168,11 @@ class CloudKitExecutor:
         api_token = self.api_token_resolver()
         redactor.register(api_token.value, "cloudkit-api-token")
 
+        lock_started = time.perf_counter()
         with self._token_lock():
+            logger.debug(
+                "CloudKit web auth token lock -> acquired wait=%s", elapsed_ms(lock_started)
+            )
             web_auth_token = self._load_web_auth_token(redactor)
             response = self._request_authenticated(
                 method,
@@ -191,9 +196,19 @@ class CloudKitExecutor:
 
             if _is_authentication_failure(response, payload):
                 self._clear_web_auth_token_after_auth_failure(redactor)
+                logger.debug(
+                    "CloudKit web auth token -> cleared after serverErrorCode=%s",
+                    payload.get("serverErrorCode"),
+                )
                 raise CloudKitAuthenticationFailedError(
                     "Your saved CloudKit login expired and was removed; run `ani auth login`.",
                     redactor=redactor,
+                )
+
+            if response.is_error and successor_token:
+                logger.debug(
+                    "CloudKit web auth token -> successor ignored on HTTP %s",
+                    response.status_code,
                 )
 
             if _is_change_token_expired_payload(response, payload):
@@ -213,6 +228,9 @@ class CloudKitExecutor:
 
             if successor_token:
                 self._store_successor_web_auth_token(successor_token, redactor)
+                logger.debug("CloudKit web auth token -> rolled forward, successor stored")
+            else:
+                logger.debug("CloudKit web auth token -> kept, response carried no successor")
 
             return payload
 
@@ -271,6 +289,7 @@ class CloudKitExecutor:
         logger.debug(message, extra={"redactor": redactor})
         attempts = max(1, self.connect_attempts)
         for attempt in range(1, attempts + 1):
+            started = time.perf_counter()
             try:
                 response = self.client.request(
                     method,
@@ -282,7 +301,7 @@ class CloudKitExecutor:
                 logger.debug(
                     "CloudKit transport error <- "
                     f"{method.upper()} {endpoint_url}: {exc.__class__.__name__}: {exc} "
-                    f"attempt={attempt}/{attempts}",
+                    f"attempt={attempt}/{attempts} elapsed={elapsed_ms(started)}",
                     extra={"redactor": redactor},
                 )
                 # Only connection-phase failures are retried: the request never
@@ -299,7 +318,9 @@ class CloudKitExecutor:
                 ) from exc
             logger.debug(
                 "CloudKit response <- "
-                f"HTTP {response.status_code} {method.upper()} {response.request.url}",
+                f"HTTP {response.status_code} {method.upper()} {response.request.url} "
+                f"attempt={attempt}/{attempts} elapsed={elapsed_ms(started)}"
+                f"{_response_trace_log(response)}",
                 extra={"redactor": redactor},
             )
             return response
@@ -493,6 +514,16 @@ def _cloudkit_payload_log(response: httpx.Response, payload: dict[str, Any]) -> 
     else:
         parts.append(f"keys={sorted(payload.keys())}")
     return " ".join(parts)
+
+
+def _response_trace_log(response: httpx.Response) -> str:
+    # Apple can trace a request by its id; trace headers never carry auth state.
+    parts = [
+        f" {label}={value}"
+        for header, label in _TRACE_HEADERS
+        if (value := response.headers.get(header))
+    ]
+    return "".join(parts)
 
 
 def _cloudkit_request_payload_log(payload: dict[str, Any]) -> str:

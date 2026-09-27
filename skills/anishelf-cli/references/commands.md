@@ -241,5 +241,6 @@ For the entry field contract, read `references/entries.md`.
   `summary.metadata_missing`, run `ani lib sync --json` to retry those entries.
 - If auth fails, run `ani auth status --json`, then `ani auth login` when the
   user is present for browser or callback handling.
-- Use `-v` only for redacted diagnostics. Keep diagnostics on stderr separate
-  from JSON stdout.
+- Use `-v` only for redacted diagnostics (timing, CloudKit request ids, token
+  rolling, cache queries, unknown CloudKit fields). Keep diagnostics on stderr
+  separate from JSON stdout.

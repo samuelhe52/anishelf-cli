@@ -12,7 +12,7 @@ from pydantic import ValidationError
 
 from anishelf_cli import config
 from anishelf_cli.core.coercion import nonempty_string_or_none
-from anishelf_cli.core.logging import get_logger
+from anishelf_cli.core.logging import elapsed_ms, get_logger
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.common import AniShelfBaseModel
@@ -229,6 +229,7 @@ class TMDbClient:
                 f"TMDb request -> GET {url} params={params_log} attempt={attempt}/{attempts}",
                 extra={"redactor": redactor},
             )
+            started = time.perf_counter()
             try:
                 response = self.client.get(
                     url,
@@ -237,7 +238,8 @@ class TMDbClient:
                     timeout=self.timeout_seconds,
                 )
                 logger.debug(
-                    f"TMDb response <- HTTP {response.status_code} GET {response.request.url}",
+                    f"TMDb response <- HTTP {response.status_code} GET {response.request.url} "
+                    f"elapsed={elapsed_ms(started)}",
                     extra={"redactor": redactor},
                 )
                 response.raise_for_status()
@@ -249,11 +251,12 @@ class TMDbClient:
                 if not _retryable_status(exc.response.status_code) or attempt == attempts:
                     raise
                 last_error = exc
-                time.sleep(_retry_delay_seconds(attempt, exc.response))
+                _sleep_before_retry(_retry_delay_seconds(attempt, exc.response))
                 continue
             except httpx.TransportError as exc:
                 logger.debug(
-                    f"TMDb transport error <- GET {url}: {exc.__class__.__name__}: {exc}",
+                    f"TMDb transport error <- GET {url}: {exc.__class__.__name__}: {exc} "
+                    f"elapsed={elapsed_ms(started)}",
                     extra={"redactor": redactor},
                 )
                 if attempt == attempts:
@@ -261,7 +264,7 @@ class TMDbClient:
                 last_error = exc
             else:
                 return response
-            time.sleep(_retry_delay_seconds(attempt, None))
+            _sleep_before_retry(_retry_delay_seconds(attempt, None))
 
         raise TMDbRequestError("TMDb request failed.") from last_error
 
@@ -418,3 +421,8 @@ __all__ = [
     "TMDbTitleSearchQuery",
     "TMDbTitleSearchResult",
 ]
+
+
+def _sleep_before_retry(delay_seconds: float) -> None:
+    logger.debug("TMDb request -> retrying in %.2fs", delay_seconds)
+    time.sleep(delay_seconds)

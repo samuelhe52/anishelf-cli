@@ -934,6 +934,7 @@ def _library_read_store(
 def _library_store_for_read() -> LibraryCacheStore:
     try:
         store = LibraryCacheStore.find_default_scope()
+        logger.debug("Library cache scope -> path=%s source=local-only", store.path)
         with store.locked():
             store.initialize()
             if not store.has_entries():
