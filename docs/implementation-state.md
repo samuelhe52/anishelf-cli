@@ -65,9 +65,10 @@ spec.
   questions: watch status, favorites, recent/activity/date ordering, metadata-
   backed title/date ordering, and result limits. Human output supports `--style
   table|list` and configurable display fields. Table output keeps inflexible
-  fields readable, truncates flexible title/id fields when needed, uses compact
-  dates and missing-value labels, and omits the display column unless hidden
-  entries are included. List-style
+  fields readable, shrinks the title first and truncates ids only as a last
+  resort on very narrow terminals, uses compact dates and missing-value labels,
+  and omits the display column unless hidden entries are included. When stdout
+  is a pipe or file (and `COLUMNS` is unset), tables are not fitted to a width. List-style
   human output appends bounded metadata rows according to
   `--metadata`, while `--metadata none` suppresses metadata rows but may still
   use cached TMDb display titles. Hidden entries are excluded from collection

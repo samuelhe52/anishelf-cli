@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from collections.abc import Mapping, Sequence
 from contextvars import ContextVar
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from typing import Any, Literal
 import typer
 from rich.cells import cell_len, set_cell_size
 from rich.console import Console
+from rich.markup import escape
 from rich.text import Text
 
 from anishelf_cli.core.logging import configure_logging, get_logger
@@ -36,6 +38,9 @@ class HumanTableColumn:
     flexible: bool = False
     max_width: int | None = None
     min_width: int = 1
+    # Flexible columns with a lower priority shrink to their min_width before any
+    # higher-priority column gives up width.
+    shrink_priority: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,12 +60,22 @@ _APP_STATE: ContextVar[AppState | None] = ContextVar("anishelf_cli_app_state", d
 
 
 def console(stderr: bool = False) -> Console:
-    out = Console(stderr=stderr)
-    if out.is_terminal or os.environ.get("COLUMNS"):
-        return out
-    # Rich assumes 80 columns when output is piped, which would truncate table
-    # cells and wrap long lines. Pipes and files should receive complete values.
+    stream = sys.stderr if stderr else sys.stdout
+    if _is_tty(stream) or os.environ.get("COLUMNS", "").isdigit():
+        return Console(stderr=stderr)
+    # When the stream is a pipe or file there is no terminal width to fit, and
+    # Rich may fall back to 80 columns, truncating table cells and wrapping long
+    # lines. Pipes and files should receive complete values instead.
     return Console(stderr=stderr, width=_PIPED_OUTPUT_WIDTH)
+
+
+def _is_tty(stream: object) -> bool:
+    isatty = getattr(stream, "isatty", None)
+    try:
+        return bool(isatty()) if callable(isatty) else False
+    except ValueError:
+        # Closed streams raise instead of answering.
+        return False
 
 
 def set_current_app_state(state: AppState) -> None:
@@ -181,12 +196,18 @@ def _fit_table_widths(
     def total_width() -> int:
         return sum(fitted_widths[column.key] for column in columns)
 
-    def shrink_to(minimum_width: int, *, respect_column_min_width: bool) -> None:
+    def shrink_to(
+        minimum_width: int,
+        *,
+        respect_column_min_width: bool,
+        max_priority: int | None = None,
+    ) -> None:
         while total_width() > available:
             shrinkable = [
                 column
                 for column in columns
                 if column.flexible
+                if max_priority is None or column.shrink_priority <= max_priority
                 if fitted_widths[column.key]
                 > _minimum_column_width(
                     column,
@@ -202,7 +223,8 @@ def _fit_table_widths(
             )
             fitted_widths[widest.key] -= 1
 
-    shrink_to(minimum_width=3, respect_column_min_width=True)
+    for priority in sorted({column.shrink_priority for column in columns if column.flexible}):
+        shrink_to(minimum_width=3, respect_column_min_width=True, max_priority=priority)
     shrink_to(minimum_width=3, respect_column_min_width=False)
     shrink_to(minimum_width=1, respect_column_min_width=False)
     return fitted_widths
@@ -272,7 +294,8 @@ def emit_placeholder(state: AppState, area: str) -> None:
 
 def emit_error(message: str, *, redactor: SecretRedactor | None = None) -> None:
     output = redactor.redact(message) if redactor else message
-    console(stderr=True).print(f"[red]{output}[/red]")
+    # Escape so bracketed text in messages is printed, not parsed as Rich markup.
+    console(stderr=True).print(f"[red]{escape(output)}[/red]")
 
 
 def emit_warning(message: str, *, redactor: SecretRedactor | None = None) -> None:

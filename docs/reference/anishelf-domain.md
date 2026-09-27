@@ -115,8 +115,8 @@ envelope, so agents should inspect `summary.errors`.
 resolve to either an entry or an item-level error. Homogeneous library
 collection commands (`lib list`, `lib search`, and `lib export`) use `entries`.
 
-Human collection tables should keep inflexible fields readable, truncate only
-declared flexible fields such as title and id, use compact dates, and omit the
+Human collection tables should keep inflexible fields readable, shrink the title
+first and truncate ids only as a last resort, use compact dates, and omit the
 display column unless hidden entries are included or the user explicitly asks
 for that field.
 
