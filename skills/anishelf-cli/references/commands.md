@@ -195,6 +195,11 @@ ani tmdb search --limit 10 --json
 `tmdb search` is anime-only. Use it for global discovery; use `lib search` for
 the user's initialized AniShelf library.
 
+When a local library cache exists, each result carries `library_ids` (the saved
+movie or series id plus any saved season ids; `[]` when not saved) and
+`summary.in_library` counts saved results. Both are omitted when no cache is
+available, so check for the key rather than treating absence as "not saved".
+
 ## JSON Shapes
 
 Prefer JSON for agent work:

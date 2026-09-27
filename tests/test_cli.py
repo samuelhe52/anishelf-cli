@@ -1340,6 +1340,69 @@ def test_tmdb_search_json_output_is_stable(monkeypatch) -> None:
     }
 
 
+def test_tmdb_search_marks_titles_already_in_the_library(tmp_path, monkeypatch) -> None:
+    from tests.support import create_seeded_cache_store, live_record
+
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record("movie:55", "movie", 55),
+        live_record("season:95:2:902", "season", 902),
+        live_record("series:95", "series", 95),
+    )
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie", 55, "Alien", release_date="1979-05-25", overview="", poster_path=""
+            ),
+            _tmdb_match(
+                "movie", 56, "Aliens", release_date="1986-07-18", overview="", poster_path=""
+            ),
+        ),
+        series=(
+            _tmdb_match(
+                "series", 95, "Alien Nation", release_date="1989-09-18", overview="", poster_path=""
+            ),
+        ),
+    )
+
+    machine = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+    human = runner.invoke(app, ["tmdb", "search", "Alien"])
+
+    assert machine.exit_code == 0, machine.output
+    payload = json.loads(machine.stdout)
+    assert payload["summary"]["in_library"] == 2
+    assert [match["library_ids"] for match in payload["results"]["movies"]] == [["movie:55"], []]
+    assert payload["results"]["series"][0]["library_ids"] == ["season:95:2:902", "series:95"]
+    assert human.exit_code == 0, human.output
+    assert "In library  2" in human.stdout
+    assert "yes, S2" in human.stdout
+
+
+def test_tmdb_search_omits_library_markers_without_a_local_cache(monkeypatch) -> None:
+    _install_tmdb_search_client(
+        monkeypatch,
+        expected_query=TMDbTitleSearchQuery(title="Alien", year=None, entry_type="all"),
+        movies=(
+            _tmdb_match(
+                "movie", 55, "Alien", release_date="1979-05-25", overview="", poster_path=""
+            ),
+        ),
+        series=(),
+    )
+
+    machine = runner.invoke(app, ["tmdb", "search", "Alien", "--json"])
+    human = runner.invoke(app, ["tmdb", "search", "Alien"])
+
+    assert machine.exit_code == 0, machine.output
+    payload = json.loads(machine.stdout)
+    assert "in_library" not in payload["summary"]
+    assert "library_ids" not in payload["results"]["movies"][0]
+    assert "Library" not in human.stdout
+
+
 def test_tmdb_search_accepts_root_level_json_output(monkeypatch) -> None:
     _install_tmdb_search_client(
         monkeypatch,

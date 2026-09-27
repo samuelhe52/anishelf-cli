@@ -153,6 +153,10 @@ ani tmdb search "Frieren" --limit 5
 ani tmdb search --year 2024 --type series
 ```
 
+When a local library cache exists, results are marked with what you already
+saved: `yes` for the movie or series itself and `S<n>` for saved seasons (JSON:
+`library_ids` per result and `summary.in_library`).
+
 Export your cached library:
 
 ```bash
