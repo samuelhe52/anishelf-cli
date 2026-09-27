@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any, Literal
 
@@ -329,7 +330,9 @@ def metadata_target_from_entry(entry: LibraryEntryModel) -> TMDbSummaryIdentity 
     )
 
 
-def placeholders(values: set[int] | list[str] | list[dict[str, Any]]) -> str:
+def placeholders(
+    values: set[int] | list[str] | list[dict[str, Any]] | Sequence[str],
+) -> str:
     return ", ".join("?" for _ in values)
 
 

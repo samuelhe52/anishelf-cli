@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -49,7 +50,8 @@ class LibraryQueryStore(Protocol):
         self,
         *,
         include_tombstones: bool = False,
-        watch_status: str | None = None,
+        watch_statuses: Sequence[str] | None = None,
+        entry_types: Sequence[str] | None = None,
         hidden: bool | None = None,
         favorite: bool | None = None,
         on_display: bool | None = None,
@@ -180,23 +182,28 @@ def build_library_list_result(
     *,
     metadata_depth: MetadataDepth,
     cache: LibraryEntriesCacheResult,
-    watch_status: str | None,
+    watch_statuses: Sequence[str] = (),
+    entry_types: Sequence[str] = (),
     show_hidden: bool,
     favorite: bool,
     sort: LibraryListSort,
+    reverse: bool = False,
     limit: int | None,
     metadata_language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE,
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     gaps: list[MetadataCoverageGap | None] = []
+    # Reversing must see the full ordered set, so the limit then applies afterwards.
+    postfetch_limit = reverse or _sort_requires_postfetch_sort(sort)
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
-        watch_status=watch_status,
+        watch_statuses=tuple(watch_statuses) or None,
+        entry_types=tuple(entry_types) or None,
         hidden=None,
         favorite=True if favorite else None,
         on_display=None if show_hidden else True,
         sort=sort.value,
-        limit=None if _sort_requires_postfetch_sort(sort) else limit,
+        limit=None if postfetch_limit else limit,
     )
     if _sort_requires_summary_metadata(sort):
         gaps.append(
@@ -223,7 +230,9 @@ def build_library_list_result(
     entries = sort_entries_for_list(sort_entries, sort)
     if _sort_requires_summary_metadata(sort) and metadata_depth is MetadataDepth.NONE:
         entries = strip_entry_metadata(entries)
-    if _sort_requires_postfetch_sort(sort) and limit is not None:
+    if reverse:
+        entries.reverse()
+    if postfetch_limit and limit is not None:
         entries = entries[:limit]
     gaps.extend(
         _attach_coverage_gap(
@@ -241,10 +250,12 @@ def build_library_list_result(
         metadata_missing=_metadata_missing(gaps),
         warnings=_coverage_warnings(gaps),
         filters=library_list_filters_payload(
-            watch_status=watch_status,
+            watch_statuses=watch_statuses,
+            entry_types=entry_types,
             show_hidden=show_hidden,
             favorite=favorite,
             sort=sort,
+            reverse=reverse,
             limit=limit,
         ),
     )
@@ -434,17 +445,21 @@ def metadata_payload(metadata_depth: MetadataDepth) -> LibraryEntriesMetadataRes
 
 def library_list_filters_payload(
     *,
-    watch_status: str | None,
+    watch_statuses: Sequence[str] = (),
+    entry_types: Sequence[str] = (),
     favorite: bool,
     show_hidden: bool,
     sort: LibraryListSort,
+    reverse: bool = False,
     limit: int | None,
 ) -> LibraryListFiltersResult:
     return LibraryListFiltersResult(
-        watch_status=watch_status,
+        watch_status=tuple(watch_statuses) or None,
+        entry_type=tuple(entry_types) or None,
         show_hidden=show_hidden,
         favorite=favorite,
         sort=sort.value,
+        reverse=reverse,
         limit=limit,
     )
 

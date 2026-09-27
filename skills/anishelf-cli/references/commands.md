@@ -77,9 +77,16 @@ List entries:
 ```bash
 ani lib list --json
 ani lib list --watch-status watching --limit 20 --json
+ani lib list -w watching -w planToWatch --type series --json
+ani lib list --sort saved --reverse --limit 5 --json
 ani lib list --favorite --sort updated --style list
 ani lib list --fields title,id,status,score
 ```
+
+Repeat `--watch-status` or `--type` to match any of several values. `--reverse`
+reverses the final order (including tie-breakers and unscored or undated
+entries) before `--limit` applies. JSON `filters.watch_status` and
+`filters.entry_type` are lists, or `null` when not filtered.
 
 Search the initialized library:
 

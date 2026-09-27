@@ -2013,10 +2013,86 @@ def test_library_list_filters_sorts_and_limits_without_jq(tmp_path, monkeypatch)
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["filters"]["watch_status"] == "watching"
+    assert payload["filters"]["watch_status"] == ["watching"]
     assert payload["filters"]["show_hidden"] is True
     assert payload["filters"]["sort"] == "title"
     assert [entry["id"] for entry in payload["entries"]] == ["movie:66"]
+
+
+def _seed_filter_library(monkeypatch, tmp_path) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record(
+            "movie:55",
+            "movie",
+            55,
+            date_saved="2026-05-01T00:00:00Z",
+            watch_status="watching",
+        ),
+        _live_record(
+            "series:22",
+            "series",
+            22,
+            date_saved="2026-05-03T00:00:00Z",
+            watch_status="watched",
+        ),
+        _live_record(
+            "season:22:1:33",
+            "season",
+            33,
+            date_saved="2026-05-04T00:00:00Z",
+            watch_status="planToWatch",
+        ),
+        _live_record(
+            "movie:66",
+            "movie",
+            66,
+            date_saved="2026-05-02T00:00:00Z",
+            watch_status="dropped",
+        ),
+    )
+
+
+def _listed_ids(args: list[str]) -> tuple[list[str], dict[str, object]]:
+    result = runner.invoke(app, ["--json", "lib", "list", "--sort", "saved", *args])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    return [entry["id"] for entry in payload["entries"]], payload["filters"]
+
+
+def test_library_list_repeated_watch_status_matches_any(tmp_path, monkeypatch) -> None:
+    _seed_filter_library(monkeypatch, tmp_path)
+
+    ids, filters = _listed_ids(["-w", "watching", "-w", "planToWatch", "-w", "watching"])
+
+    assert ids == ["season:22:1:33", "movie:55"]
+    assert filters["watch_status"] == ["watching", "planToWatch"]
+
+
+def test_library_list_filters_by_entry_type(tmp_path, monkeypatch) -> None:
+    _seed_filter_library(monkeypatch, tmp_path)
+
+    movie_ids, movie_filters = _listed_ids(["--type", "movie"])
+    mixed_ids, _ = _listed_ids(["--type", "season", "--type", "series"])
+
+    assert movie_ids == ["movie:66", "movie:55"]
+    assert movie_filters["entry_type"] == ["movie"]
+    assert mixed_ids == ["season:22:1:33", "series:22"]
+
+
+def test_library_list_reverse_applies_limit_after_reversing(tmp_path, monkeypatch) -> None:
+    _seed_filter_library(monkeypatch, tmp_path)
+
+    newest_first, default_filters = _listed_ids([])
+    oldest_first, reverse_filters = _listed_ids(["--reverse", "--limit", "2"])
+
+    assert newest_first == ["season:22:1:33", "series:22", "movie:66", "movie:55"]
+    assert oldest_first == ["movie:55", "movie:66"]
+    assert default_filters["reverse"] is False
+    assert default_filters["watch_status"] is None
+    assert default_filters["entry_type"] is None
+    assert reverse_filters["reverse"] is True
 
 
 def test_library_list_accepts_short_filter_and_limit_options(tmp_path, monkeypatch) -> None:
@@ -2033,7 +2109,7 @@ def test_library_list_accepts_short_filter_and_limit_options(tmp_path, monkeypat
 
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
-    assert payload["filters"]["watch_status"] == "watching"
+    assert payload["filters"]["watch_status"] == ["watching"]
     assert payload["filters"]["limit"] == 1
     assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
 

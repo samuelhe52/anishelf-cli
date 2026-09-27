@@ -60,6 +60,7 @@ from anishelf_cli.library.queries import (
 from anishelf_cli.library.records import WATCH_STATUS_VALUES
 from anishelf_cli.models import (
     HumanOutputStyle,
+    LibraryEntryType,
     LibraryListSort,
     LibraryWatchStatus,
     MetadataDepth,
@@ -399,8 +400,19 @@ def library_list(
     fields: FieldListOption = None,
     output_style: OutputStyleOption = None,
     watch_status: Annotated[
-        LibraryWatchStatus | None,
-        typer.Option("--watch-status", "-w", help="Filter by watch status."),
+        list[LibraryWatchStatus] | None,
+        typer.Option(
+            "--watch-status",
+            "-w",
+            help="Filter by watch status. Repeat to match any of several statuses.",
+        ),
+    ] = None,
+    entry_type: Annotated[
+        list[LibraryEntryType] | None,
+        typer.Option(
+            "--type",
+            help="Filter by entry type. Repeat to match any of several types.",
+        ),
     ] = None,
     show_hidden: Annotated[
         bool,
@@ -431,6 +443,10 @@ def library_list(
             ),
         ),
     ] = LibraryListSort.UPDATED,
+    reverse: Annotated[
+        bool,
+        typer.Option("--reverse", "-r", help="Reverse the sort order."),
+    ] = False,
     limit: Annotated[
         int | None,
         typer.Option("--limit", "-l", min=1, help="Limit the number of entries returned."),
@@ -447,7 +463,8 @@ def library_list(
     preferred_language = _preferred_metadata_language()
     request_language = _metadata_language(tmdb_language, preferred_language=preferred_language)
     ad_hoc_language = request_language != preferred_language
-    watch_status_value = watch_status.value if watch_status is not None else None
+    watch_statuses = tuple(dict.fromkeys(status.value for status in watch_status or ()))
+    entry_types = tuple(dict.fromkeys(kind.value for kind in entry_type or ()))
     resolved_show_hidden = _show_hidden_requested(show_hidden)
     store, refresh_result = _library_read_store(sync=sync)
     try:
@@ -455,10 +472,12 @@ def library_list(
             store,
             metadata_depth=metadata_depth,
             cache=cache_summary_payload(store, refresh_result),
-            watch_status=watch_status_value,
+            watch_statuses=watch_statuses,
+            entry_types=entry_types,
             show_hidden=resolved_show_hidden,
             favorite=favorite,
             sort=sort,
+            reverse=reverse,
             limit=limit,
             metadata_language=preferred_language,
             live_metadata=ad_hoc_language and metadata_depth is not MetadataDepth.NONE,

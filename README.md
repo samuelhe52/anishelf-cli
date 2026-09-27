@@ -118,8 +118,14 @@ List and filter entries:
 ani lib list
 ani lib list --watch-status watching
 ani lib list --favorite --sort updated --limit 20
+ani lib list -w watching -w planToWatch --type series
+ani lib list --sort saved --reverse --limit 10
 ani lib list --style list --fields title,id,status,score
 ```
+
+Repeat `--watch-status` or `--type` (`movie`, `series`, `season`) to match any
+of several values. `--reverse` flips the chosen sort order before `--limit`
+applies.
 
 Search your cached library:
 

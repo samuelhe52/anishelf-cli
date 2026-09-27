@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -216,7 +216,8 @@ class LibraryCacheStore:
         self,
         *,
         include_tombstones: bool = False,
-        watch_status: str | None = None,
+        watch_statuses: Sequence[str] | None = None,
+        entry_types: Sequence[str] | None = None,
         hidden: bool | None = None,
         favorite: bool | None = None,
         on_display: bool | None = None,
@@ -227,9 +228,12 @@ class LibraryCacheStore:
         params: list[Any] = []
         if not include_tombstones:
             where_parts.append("kind = 'snapshot'")
-        if watch_status is not None:
-            where_parts.append("watch_status = ?")
-            params.append(watch_status)
+        if watch_statuses:
+            where_parts.append(f"watch_status IN ({metadata.placeholders(watch_statuses)})")
+            params.extend(watch_statuses)
+        if entry_types:
+            where_parts.append(f"entry_type IN ({metadata.placeholders(entry_types)})")
+            params.extend(entry_types)
         if hidden is not None:
             where_parts.append("kind = 'snapshot'")
             where_parts.append("on_display = ?")
