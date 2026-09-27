@@ -229,7 +229,10 @@ def initialize_library_store(
                 collect_metadata_targets=True,
                 progress_callback=progress_callback,
             ).refresh()
-            emit_metadata_hydration_failures(refresh_result.metadata_error_messages)
+            emit_metadata_hydration_failures(
+                refresh_result.metadata_error_messages,
+                retry_hint="The next `ani lib sync` retries them.",
+            )
             return store, refresh_result
     except (
         CloudKitWhoamiError,
@@ -264,22 +267,22 @@ def refresh_metadata_targets(
         depth=depth,
         progress_callback=progress_callback,
     )
-    emit_metadata_hydration_failures(result.error_messages)
+    emit_metadata_hydration_failures(
+        result.error_messages,
+        retry_hint="Re-run the command to retry them.",
+    )
     return result
 
 
 MAX_REPORTED_METADATA_FAILURES = 5
 
 
-def emit_metadata_hydration_failures(error_messages: Sequence[str]) -> None:
+def emit_metadata_hydration_failures(error_messages: Sequence[str], *, retry_hint: str) -> None:
     if not error_messages:
         return
     count = len(error_messages)
     noun = "entry" if count == 1 else "entries"
-    emit_warning(
-        f"TMDb metadata could not be fetched for {count} {noun}. "
-        "`ani lib sync` retries entries with missing metadata."
-    )
+    emit_warning(f"TMDb metadata could not be fetched for {count} {noun}. {retry_hint}")
     for message in sorted(error_messages)[:MAX_REPORTED_METADATA_FAILURES]:
         emit_warning(f"  {message}")
     if count > MAX_REPORTED_METADATA_FAILURES:

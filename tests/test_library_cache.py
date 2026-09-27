@@ -33,7 +33,7 @@ from anishelf_cli.models.transport.cloudkit import (
     CloudKitZoneChangesResponse,
 )
 from anishelf_cli.secrets import SecretStorageUnavailableError
-from anishelf_cli.tmdb.client import TMDbRequestError, TMDbSummaryIdentity
+from anishelf_cli.tmdb.client import TMDbClient, TMDbRequestError, TMDbSummaryIdentity
 from anishelf_cli.tmdb.tokens import TMDbAPIToken
 from tests.support import (
     cloudkit_record,
@@ -594,12 +594,12 @@ def test_cache_sync_skips_outdated_metadata_scan_when_target_collection_disabled
             assert sync_token == "t1"
             return ZoneChangesPage(records=[], sync_token="t2", more_coming=False)
 
-    def fail_outdated_scan(self) -> list[TMDbSummaryIdentity]:
-        raise AssertionError("outdated metadata scan should be skipped")
+    def fail_outdated_scan(self, **kwargs: object) -> list[TMDbSummaryIdentity]:
+        raise AssertionError("incomplete metadata scan should be skipped")
 
     monkeypatch.setattr(
         LibraryCacheStore,
-        "outdated_metadata_summary_targets",
+        "incomplete_metadata_summary_targets",
         fail_outdated_scan,
     )
 
@@ -726,6 +726,63 @@ def test_cache_sync_retries_old_metadata_failures_without_new_entries(
     attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
     assert attached is not None
     assert attached.name == "Alien"
+
+
+def test_cache_sync_does_not_hydrate_entries_deleted_in_the_same_sync(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+
+    class FakeExecutor:
+        def fetch_zone_changes(
+            self,
+            *,
+            sync_token: str | None,
+            desired_record_types: list[str] | None = None,
+        ) -> ZoneChangesPage:
+            _ = desired_record_types
+            assert sync_token == "t1"
+            return ZoneChangesPage(
+                records=[_tombstone_record("movie:55", "movie", 55)],
+                sync_token="t2",
+                more_coming=False,
+            )
+
+    class RecordingTMDb:
+        def __init__(self) -> None:
+            self.targets: list[tuple[str, int]] = []
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            self.targets.append((identity.entry_type, identity.tmdb_id))
+            return _metadata_summary(identity.entry_type, identity.tmdb_id, name="Alien")
+
+    tmdb = RecordingTMDb()
+
+    result = LibraryCacheSync(
+        store=store,
+        executor=FakeExecutor(),  # type: ignore[arg-type]
+        tmdb_client=tmdb,
+    ).refresh()
+
+    assert result.metadata_requested == 0
+    assert tmdb.targets == []
+
+
+def test_metadata_hydration_failure_warning_caps_listed_entries(capsys) -> None:
+    from anishelf_cli.cli.library_service import emit_metadata_hydration_failures
+
+    messages = [
+        f"movie:{tmdb_id}: TMDb metadata request failed (HTTP 404)." for tmdb_id in range(7)
+    ]
+
+    emit_metadata_hydration_failures(messages, retry_hint="Retry later.")
+
+    stderr_lines = capsys.readouterr().err.splitlines()
+    assert stderr_lines[0] == "TMDb metadata could not be fetched for 7 entries. Retry later."
+    assert stderr_lines[1:6] == [f"  {message}" for message in sorted(messages)[:5]]
+    assert stderr_lines[6] == "  ...and 2 more."
+    assert len(stderr_lines) == 7
 
 
 def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
@@ -1440,19 +1497,22 @@ def test_library_sync_warns_with_entry_ids_when_metadata_hydration_fails(
             json={"zones": [{"records": [], "syncToken": "t2", "moreComing": False}]},
         )
 
-    class FailingTMDbClient:
-        def __init__(self, api_key: str) -> None:
-            _ = api_key
+    def tmdb_handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError(f"connection refused for {request.url}", request=request)
 
-        def fetch_summary(self, identity) -> LibraryEntryMetadata:
-            raise TMDbRequestError("TMDb metadata request failed (HTTP 404).")
+    def failing_tmdb_client(api_key: str) -> TMDbClient:
+        return TMDbClient(
+            api_key,
+            client=httpx.Client(transport=httpx.MockTransport(tmdb_handler)),
+            max_attempts=1,
+        )
 
     monkeypatch.setattr(
         library_commands,
         "_make_http_client",
         lambda: httpx.Client(transport=httpx.MockTransport(handler)),
     )
-    monkeypatch.setattr(library_commands, "TMDbClient", FailingTMDbClient)
+    monkeypatch.setattr(library_commands, "TMDbClient", failing_tmdb_client)
 
     result = runner.invoke(app, ["--json", "lib", "sync"])
 
@@ -1460,8 +1520,11 @@ def test_library_sync_warns_with_entry_ids_when_metadata_hydration_fails(
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["metadata_requested"] == 1
     assert payload["summary"]["cache"]["metadata_errors"] == 1
-    assert "TMDb metadata could not be fetched for 1 entry." in result.stderr
-    assert "movie:55: TMDb metadata request failed (HTTP 404)." in result.stderr
+    assert (
+        "TMDb metadata could not be fetched for 1 entry. The next `ani lib sync` retries them."
+        in result.stderr
+    )
+    assert "  movie:55: TMDb metadata request failed (ConnectError)." in result.stderr
     assert "tmdb-secret-token" not in result.output
 
 

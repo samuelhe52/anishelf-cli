@@ -196,16 +196,7 @@ class LibraryCacheSync:
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
         pages = 0
         records = 0
-        # Retry entries whose earlier hydration failed as well as shallow ones;
-        # otherwise one transient TMDb error leaves an entry unhydrated forever.
-        metadata_targets = (
-            self.store.incomplete_metadata_summary_targets(
-                language=self.metadata_language,
-                depth=self.metadata_depth,
-            )
-            if self.collect_metadata_targets
-            else []
-        )
+        metadata_targets: list[TMDbSummaryIdentity] = []
         next_token: str | None = sync_token
         self._emit_progress("sync-started", rebuilt=False)
         logger.debug("Library cache incremental sync -> started")
@@ -233,6 +224,16 @@ class LibraryCacheSync:
             )
             next_token = page.sync_token
             if not page.more_coming:
+                if self.collect_metadata_targets:
+                    # Retry entries whose earlier hydration failed as well as shallow
+                    # ones, or one transient TMDb error leaves an entry unhydrated
+                    # forever. Scan after applying pages so deleted entries drop out.
+                    metadata_targets.extend(
+                        self.store.incomplete_metadata_summary_targets(
+                            language=self.metadata_language,
+                            depth=self.metadata_depth,
+                        )
+                    )
                 targets_to_hydrate = self._metadata_targets_to_hydrate(
                     metadata_targets,
                     limit_targets=True,

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar
@@ -346,15 +348,26 @@ MAX_RETRY_DELAY_SECONDS = 10.0
 
 def _retry_delay_seconds(attempt: int, response: httpx.Response | None) -> float:
     # Honor TMDb's rate-limit hint when present; otherwise back off exponentially
-    # so parallel hydration workers do not exhaust their retries inside one window.
+    # with jitter so parallel hydration workers do not retry in lockstep.
     if response is not None:
-        retry_after = response.headers.get("Retry-After")
+        retry_after = _retry_after_seconds(response)
         if retry_after is not None:
-            try:
-                return min(max(float(retry_after), 0.0), MAX_RETRY_DELAY_SECONDS)
-            except ValueError:
-                pass
-    return min(0.5 * 2.0 ** (attempt - 1), MAX_RETRY_DELAY_SECONDS)
+            return retry_after
+    base = min(0.5 * 2.0 ** (attempt - 1), MAX_RETRY_DELAY_SECONDS)
+    return base + random.uniform(0, base / 4)
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds):
+        return None
+    return min(max(seconds, 0.0), MAX_RETRY_DELAY_SECONDS)
 
 
 def _retryable_status(status_code: int) -> bool:
