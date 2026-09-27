@@ -2095,6 +2095,83 @@ def test_library_list_reverse_applies_limit_after_reversing(tmp_path, monkeypatc
     assert reverse_filters["reverse"] is True
 
 
+def test_library_list_reverse_keeps_missing_sort_values_last(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:1", "movie", 1),
+        _live_record("movie:2", "movie", 2),
+        _live_record("movie:3", "movie", 3),
+    )
+    store.upsert_metadata_summary(_metadata_summary("movie", 1, name="Alpha"))
+    store.upsert_metadata_summary(_metadata_summary("movie", 2, name="Beta"))
+
+    reversed_titles = runner.invoke(
+        app,
+        ["--json", "lib", "list", "--sort", "title", "-r", "--metadata", "none"],
+    )
+
+    assert reversed_titles.exit_code == 0, reversed_titles.output
+    assert [entry["id"] for entry in json.loads(reversed_titles.stdout)["entries"]] == [
+        "movie:2",
+        "movie:1",
+        "movie:3",
+    ]
+
+
+def test_library_list_reverse_score_lists_lowest_scores_before_unscored(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    from tests.support import live_record
+
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record("movie:1", "movie", 1, score=5),
+        live_record("movie:2", "movie", 2, score=2),
+        live_record("movie:3", "movie", 3, score=None),
+    )
+
+    default_order = runner.invoke(app, ["--json", "lib", "list", "--sort", "score"])
+    lowest = runner.invoke(
+        app,
+        ["--json", "lib", "list", "--sort", "score", "--reverse", "--limit", "2"],
+    )
+
+    assert [entry["id"] for entry in json.loads(default_order.stdout)["entries"]] == [
+        "movie:1",
+        "movie:2",
+        "movie:3",
+    ]
+    assert [entry["id"] for entry in json.loads(lowest.stdout)["entries"]] == [
+        "movie:2",
+        "movie:1",
+    ]
+
+
+def test_library_list_type_and_status_filters_combine(tmp_path, monkeypatch) -> None:
+    _seed_filter_library(monkeypatch, tmp_path)
+
+    ids, _ = _listed_ids(["--entry-type", "movie", "-w", "watching", "-w", "watched"])
+    invalid = runner.invoke(app, ["lib", "list", "--type", "tv"])
+
+    assert ids == ["movie:55"]
+    assert invalid.exit_code == 2
+
+
+def test_library_list_human_output_names_filters_when_nothing_matches(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    _seed_filter_library(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["lib", "list", "--type", "season", "-w", "dropped"])
+
+    assert result.exit_code == 0, result.output
+    assert "No library entries matched the filters." in result.stdout
+
+
 def test_library_list_accepts_short_filter_and_limit_options(tmp_path, monkeypatch) -> None:
     store = create_seeded_cache_store(
         monkeypatch,

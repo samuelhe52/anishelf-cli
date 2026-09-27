@@ -222,6 +222,7 @@ class LibraryCacheStore:
         favorite: bool | None = None,
         on_display: bool | None = None,
         sort: str = "updated",
+        reverse: bool = False,
         limit: int | None = None,
     ) -> list[LibraryEntryModel]:
         where_parts: list[str] = []
@@ -248,7 +249,7 @@ class LibraryCacheStore:
             params.append(1 if on_display else 0)
 
         where = f"WHERE {' AND '.join(where_parts)}" if where_parts else ""
-        order_by = schema.list_order_by(sort)
+        order_by = schema.list_order_by(sort, reverse=reverse)
         limit_clause = ""
         if limit is not None:
             limit_clause = "LIMIT ?"

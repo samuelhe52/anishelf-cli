@@ -124,8 +124,8 @@ ani lib list --style list --fields title,id,status,score
 ```
 
 Repeat `--watch-status` or `--type` (`movie`, `series`, `season`) to match any
-of several values. `--reverse` flips the chosen sort order before `--limit`
-applies.
+of several values. `--reverse` flips the sort direction; entries without a value
+for the sort key (unscored, undated, or without metadata) stay last.
 
 Search your cached library:
 

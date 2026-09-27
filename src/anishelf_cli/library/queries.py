@@ -56,6 +56,7 @@ class LibraryQueryStore(Protocol):
         favorite: bool | None = None,
         on_display: bool | None = None,
         sort: str = "updated",
+        reverse: bool = False,
         limit: int | None = None,
     ) -> list[LibraryEntryModel]: ...
 
@@ -193,8 +194,7 @@ def build_library_list_result(
     live_metadata: bool = False,
 ) -> LibraryEntriesResult:
     gaps: list[MetadataCoverageGap | None] = []
-    # Reversing must see the full ordered set, so the limit then applies afterwards.
-    postfetch_limit = reverse or _sort_requires_postfetch_sort(sort)
+    postfetch_limit = _sort_requires_postfetch_sort(sort)
     entries = store.list_entry_models_filtered(
         include_tombstones=False,
         watch_statuses=tuple(watch_statuses) or None,
@@ -203,6 +203,7 @@ def build_library_list_result(
         favorite=True if favorite else None,
         on_display=None if show_hidden else True,
         sort=sort.value,
+        reverse=reverse,
         limit=None if postfetch_limit else limit,
     )
     if _sort_requires_summary_metadata(sort):
@@ -227,11 +228,9 @@ def build_library_list_result(
             entries,
             language=metadata_language,
         )
-    entries = sort_entries_for_list(sort_entries, sort)
+    entries = sort_entries_for_list(sort_entries, sort, reverse=reverse)
     if _sort_requires_summary_metadata(sort) and metadata_depth is MetadataDepth.NONE:
         entries = strip_entry_metadata(entries)
-    if reverse:
-        entries.reverse()
     if postfetch_limit and limit is not None:
         entries = entries[:limit]
     gaps.extend(
@@ -467,23 +466,30 @@ def library_list_filters_payload(
 def sort_entries_for_list(
     entries: list[LibraryEntryModel],
     sort: LibraryListSort,
+    *,
+    reverse: bool = False,
 ) -> list[LibraryEntryModel]:
+    """Order metadata-backed sorts; entries lacking the sort value always go last."""
     if sort is LibraryListSort.TITLE:
+        titled = [entry for entry in entries if entry.metadata_title is not None]
+        untitled = [entry for entry in entries if entry.metadata_title is None]
         return sorted(
-            entries,
-            key=lambda entry: (
-                entry.metadata_title is None,
-                entry.title.lower(),
-                entry.identity,
-            ),
-        )
+            titled,
+            key=lambda entry: (entry.title.lower(), entry.identity),
+            reverse=reverse,
+        ) + sorted(untitled, key=lambda entry: entry.identity, reverse=reverse)
     if sort is LibraryListSort.AIR_DATE:
-        entries_by_identity = sorted(entries, key=lambda entry: entry.identity)
-        return sorted(
-            entries_by_identity,
+        dated = [entry for entry in entries if _air_date_sort_value(entry)]
+        undated = [entry for entry in entries if not _air_date_sort_value(entry)]
+        # Newest first, ties by id; reversing flips both.
+        ordered = sorted(
+            sorted(dated, key=lambda entry: entry.identity),
             key=lambda entry: _air_date_sort_value(entry) or "",
             reverse=True,
         )
+        if reverse:
+            ordered.reverse()
+        return ordered + sorted(undated, key=lambda entry: entry.identity, reverse=reverse)
     return entries
 
 

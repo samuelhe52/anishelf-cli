@@ -177,6 +177,7 @@ def live_record(
     notes: str = "Round trip",
     parent_series_id: int | None = None,
     season_number: int | None = None,
+    score: int | None = 4,
 ) -> dict[str, Any]:
     fields: dict[str, Any] = {
         "schemaVersion": 2,
@@ -196,6 +197,10 @@ def live_record(
         "libraryUpdatedAt": "2026-05-10T00:00:00Z",
         "trackingUpdatedAt": "2026-05-11T00:00:00Z",
     }
+    if score is None:
+        del fields["score"]
+    else:
+        fields["score"] = score
     if custom_poster_path is not None:
         fields["customPosterPath"] = custom_poster_path
     if custom_poster_url is not None:

@@ -411,6 +411,7 @@ def library_list(
         list[LibraryEntryType] | None,
         typer.Option(
             "--type",
+            "--entry-type",
             help="Filter by entry type. Repeat to match any of several types.",
         ),
     ] = None,
@@ -527,6 +528,7 @@ def library_list(
             metadata_depth=metadata_depth,
         ),
         metadata_depth=metadata_depth,
+        filtered=bool(watch_statuses or entry_types or favorite),
     )
 
 

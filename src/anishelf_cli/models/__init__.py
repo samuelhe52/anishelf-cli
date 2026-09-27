@@ -74,6 +74,7 @@ __all__ = [
     "AppState",
     "CallbackStrategy",
     "HumanOutputStyle",
+    "LibraryEntryType",
     "LibraryIdentity",
     "LibraryIdentityError",
     "LibraryListSort",

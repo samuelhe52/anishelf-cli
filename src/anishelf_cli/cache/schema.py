@@ -176,40 +176,30 @@ def create_metadata_items_indexes(db: sqlite3.Connection) -> None:
     )
 
 
-def list_order_by(sort: str) -> str:
+def list_order_by(sort: str, *, reverse: bool = False) -> str:
+    # Reversing flips every sort direction but keeps missing values last, so a
+    # reversed score sort lists the lowest scores rather than unscored entries.
+    primary = "ASC" if reverse else "DESC"
+    secondary = "DESC" if reverse else "ASC"
+    updated = f"{UPDATED_SORT_EXPRESSION} {primary} NULLS LAST"
+    identity = f"identity {secondary}"
     if sort == "saved":
-        return "ORDER BY date_saved DESC NULLS LAST, identity ASC"
+        return f"ORDER BY date_saved {primary} NULLS LAST, {identity}"
     if sort == "updated":
-        return f"ORDER BY {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
-    if sort == "title":
+        return f"ORDER BY {updated}, {identity}"
+    if sort in {"title", "air-date"}:
+        # Ordered in Python after metadata is attached.
         return "ORDER BY identity ASC"
     if sort == "score":
-        return (
-            f"ORDER BY score DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
-            "identity ASC"
-        )
+        return f"ORDER BY score {primary} NULLS LAST, {updated}, {identity}"
     if sort == "started":
-        return (
-            f"ORDER BY date_started DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
-            "identity ASC"
-        )
+        return f"ORDER BY date_started {primary} NULLS LAST, {updated}, {identity}"
     if sort == "finished":
-        return (
-            f"ORDER BY date_finished DESC NULLS LAST, {UPDATED_SORT_EXPRESSION} DESC NULLS LAST, "
-            "identity ASC"
-        )
+        return f"ORDER BY date_finished {primary} NULLS LAST, {updated}, {identity}"
     if sort == "type":
-        return (
-            f"ORDER BY {ENTRY_TYPE_SORT_EXPRESSION} ASC, "
-            f"{UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
-        )
+        return f"ORDER BY {ENTRY_TYPE_SORT_EXPRESSION} {secondary}, {updated}, {identity}"
     if sort == "watch-status":
-        return (
-            f"ORDER BY {WATCH_STATUS_SORT_EXPRESSION} ASC, "
-            f"{UPDATED_SORT_EXPRESSION} DESC NULLS LAST, identity ASC"
-        )
-    if sort == "air-date":
-        return "ORDER BY identity ASC"
+        return f"ORDER BY {WATCH_STATUS_SORT_EXPRESSION} {secondary}, {updated}, {identity}"
     raise LibraryCacheError(f"Unsupported library list sort: {sort}.")
 
 
