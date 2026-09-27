@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import math
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Literal, TypeVar
@@ -59,7 +61,7 @@ class TMDbClient:
     api_key: str
     language: str = config.DEFAULT_TMDB_METADATA_LANGUAGE
     timeout_seconds: float = 20.0
-    max_attempts: int = 3
+    max_attempts: int = 4
     client: httpx.Client = field(default_factory=httpx.Client, repr=False)
 
     def _redactor(self) -> SecretRedactor:
@@ -160,7 +162,9 @@ class TMDbClient:
         except TMDbRequestError:
             raise
         except Exception as exc:
-            raise TMDbRequestError("TMDb metadata request failed.") from exc
+            raise TMDbRequestError(
+                f"TMDb metadata request failed{_request_failure_detail(exc)}."
+            ) from exc
 
     def _translations(self, base_path: str, depth: MetadataDepth) -> TranslationDictionaries | None:
         if depth is MetadataDepth.SUMMARY:
@@ -245,6 +249,8 @@ class TMDbClient:
                 if not _retryable_status(exc.response.status_code) or attempt == attempts:
                     raise
                 last_error = exc
+                time.sleep(_retry_delay_seconds(attempt, exc.response))
+                continue
             except httpx.TransportError as exc:
                 logger.debug(
                     f"TMDb transport error <- GET {url}: {exc.__class__.__name__}: {exc}",
@@ -255,7 +261,7 @@ class TMDbClient:
                 last_error = exc
             else:
                 return response
-            time.sleep(min(0.25 * attempt, 1.0))
+            time.sleep(_retry_delay_seconds(attempt, None))
 
         raise TMDbRequestError("TMDb request failed.") from last_error
 
@@ -325,6 +331,43 @@ def _title_search_match(
         poster_path=nonempty_string_or_none(item.poster_path),
         details_url=details_link(TMDbSummaryIdentity(entry_type=entry_type, tmdb_id=item.id)),
     )
+
+
+def _request_failure_detail(exc: Exception) -> str:
+    # Never include the exception text: httpx messages embed the request URL,
+    # which carries the TMDb API key as a query parameter.
+    if isinstance(exc, httpx.HTTPStatusError):
+        return f" (HTTP {exc.response.status_code})"
+    if isinstance(exc, httpx.TransportError):
+        return f" ({exc.__class__.__name__})"
+    return ""
+
+
+MAX_RETRY_DELAY_SECONDS = 10.0
+
+
+def _retry_delay_seconds(attempt: int, response: httpx.Response | None) -> float:
+    # Honor TMDb's rate-limit hint when present; otherwise back off exponentially
+    # with jitter so parallel hydration workers do not retry in lockstep.
+    if response is not None:
+        retry_after = _retry_after_seconds(response)
+        if retry_after is not None:
+            return retry_after
+    base = min(0.5 * 2.0 ** (attempt - 1), MAX_RETRY_DELAY_SECONDS)
+    return base + random.uniform(0, base / 4)
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    value = response.headers.get("Retry-After")
+    if value is None:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        return None
+    if not math.isfinite(seconds):
+        return None
+    return min(max(seconds, 0.0), MAX_RETRY_DELAY_SECONDS)
 
 
 def _retryable_status(status_code: int) -> bool:

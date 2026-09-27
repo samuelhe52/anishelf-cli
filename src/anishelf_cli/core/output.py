@@ -268,6 +268,13 @@ def emit_error(message: str, *, redactor: SecretRedactor | None = None) -> None:
     console(stderr=True).print(f"[red]{output}[/red]")
 
 
+def emit_warning(message: str, *, redactor: SecretRedactor | None = None) -> None:
+    # Plain echo rather than Rich: warnings can carry TMDb-derived text that must
+    # not be parsed as markup, and one warning line should stay one line in logs.
+    output = redactor.redact(message) if redactor else message
+    typer.secho(output, fg="yellow", err=True)
+
+
 def emit_progress(message: str, *, redactor: SecretRedactor | None = None) -> None:
     output = redactor.redact(message) if redactor else message
     typer.echo(f"[progress] {output}", err=True)
