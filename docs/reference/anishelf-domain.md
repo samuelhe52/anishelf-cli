@@ -106,14 +106,16 @@ dev-only entry point is intentionally added.
 
 ## Batch And Output
 
-Commands that naturally accept one id should usually accept many. Batch
-input can grow from positional arguments first, then stdin/file/JSONL when a
-real workflow needs it.
+Commands that naturally accept one id should usually accept many. `lib get`
+accepts positional ids and `-` for whitespace-separated ids on stdin (so JSON
+output piped through `jq -r '.entries[].id'` feeds it directly). File or JSONL
+input can follow when a real workflow needs it.
 
 Batch output should preserve caller order, keep item-level errors, and keep
 progress or diagnostics on stderr. `lib get` exits nonzero only when no
 requested item is found; partial failures remain item-level errors in the output
-envelope, so agents should inspect `summary.errors`.
+envelope, so agents should inspect `summary.errors`, or pass `--strict` to exit 1
+on any item error.
 `lib get` uses an ordered `items` collection because each requested id can
 resolve to either an entry or an item-level error. Homogeneous library
 collection commands (`lib list`, `lib search`, and `lib export`) use `entries`.

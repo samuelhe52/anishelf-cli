@@ -139,7 +139,12 @@ Read specific entries by AniShelf id:
 ani lib get movie:55
 ani lib get series:1399
 ani lib get season:1399:1:3624
+ani lib search "Alien" --json | jq -r '.entries[].id' | ani lib get -
 ```
+
+`-` reads whitespace-separated ids from stdin (whole lines starting with `#`
+are ignored); empty stdin, or a terminal instead of a pipe, exits 2. `lib get` exits 1 only when nothing is found; add `--strict` to also
+fail when any requested id is invalid or missing.
 
 Search TMDb anime directly:
 

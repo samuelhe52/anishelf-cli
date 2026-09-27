@@ -1264,3 +1264,133 @@ def _tombstone_record(
         parent_series_id=parent_series_id,
         season_number=season_number,
     )
+
+
+def _seed_get_library(tmp_path, monkeypatch) -> None:
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        _live_record("movie:55", "movie", 55),
+        _live_record("series:22", "series", 22),
+    )
+
+
+def test_library_get_reads_ids_from_stdin_in_caller_order(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "series:22", "-", "--metadata", "none"],
+        input="# ids from a pipeline\nmovie:55  movie:404\n\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [item["id"] for item in payload["items"]] == [
+        "series:22",
+        "movie:55",
+        "movie:404",
+    ]
+    assert payload["summary"] == {"requested": 3, "found": 2, "errors": 1}
+
+
+def test_library_get_rejects_empty_stdin(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["--json", "lib", "get", "-"], input="\n# nothing\n")
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "No AniShelf ids were provided on stdin." in result.stderr
+
+
+def test_library_get_strict_fails_on_partial_errors(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    lenient = runner.invoke(app, ["--json", "lib", "get", "movie:55", "bogus"])
+    strict = runner.invoke(app, ["--json", "lib", "get", "movie:55", "bogus", "--strict"])
+    strict_clean = runner.invoke(app, ["--json", "lib", "get", "movie:55", "--strict"])
+
+    assert lenient.exit_code == 0, lenient.output
+    assert strict.exit_code == 1
+    assert json.loads(strict.stdout)["summary"]["errors"] == 1
+    assert strict_clean.exit_code == 0, strict_clean.output
+
+
+def test_library_get_stdin_handles_bom_crlf_and_duplicates(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "-", "--metadata", "none"],
+        input="﻿movie:55\r\nmovie:55\r\nseries:22\r\n",
+    )
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert [item["id"] for item in payload["items"]] == ["movie:55", "movie:55", "series:22"]
+    assert payload["summary"] == {"requested": 3, "found": 3, "errors": 0}
+
+
+@pytest.mark.parametrize(
+    ("args", "stdin", "message"),
+    [
+        (["-", "-"], "movie:55\n", "Pass `-` at most once"),
+        (["-"], b"movie:55\n\xff\n", "not valid UTF-8"),
+    ],
+)
+def test_library_get_rejects_unusable_stdin(
+    tmp_path,
+    monkeypatch,
+    args: list[str],
+    stdin: str | bytes,
+    message: str,
+) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    result = runner.invoke(app, ["--json", "lib", "get", *args], input=stdin)
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert message in result.stderr
+
+
+def test_library_get_refuses_to_wait_on_an_interactive_terminal(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+    monkeypatch.setattr(library_commands, "_stdin_is_interactive", lambda: True)
+
+    result = runner.invoke(app, ["--json", "lib", "get", "-"])
+
+    assert result.exit_code == 2
+    assert "pipe them in" in result.stderr
+
+
+def test_library_get_does_not_read_stdin_without_a_dash(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+
+    # Undecodable stdin would fail with exit 2 if it were read.
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "movie:55", "--metadata", "none"],
+        input=b"\xff\xfe",
+    )
+
+    assert result.exit_code == 0, result.output
+
+
+def test_library_get_handles_batches_larger_than_one_sql_chunk(tmp_path, monkeypatch) -> None:
+    _seed_get_library(tmp_path, monkeypatch)
+    missing_ids = [f"movie:{100_000 + index}" for index in range(1_200)]
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "get", "-", "--metadata", "none"],
+        input="\n".join([*missing_ids, "series:22"]),
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["summary"] == {
+        "requested": 1_201,
+        "found": 1,
+        "errors": 1_200,
+    }
