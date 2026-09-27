@@ -28,7 +28,7 @@ branch, pass `--repo-url` and `--ref`.
 Equivalent manual beta install:
 
 ```bash
-uv tool install --python 3.13 git+https://github.com/samuelhe52/anishelf-cli.git@v0.1.1
+uv tool install --python 3.13 git+https://github.com/samuelhe52/anishelf-cli.git@v0.2.0
 uv tool update-shell
 ani --help
 ```

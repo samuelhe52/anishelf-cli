@@ -35,7 +35,7 @@ delete AniShelf entries in CloudKit.
 Install the tagged GitHub release as a `uv` tool:
 
 ```bash
-uv tool install --python 3.13 git+https://github.com/samuelhe52/anishelf-cli.git@v0.1.1
+uv tool install --python 3.13 git+https://github.com/samuelhe52/anishelf-cli.git@v0.2.0
 ```
 
 This installs the `ani` command into your shell. If your shell cannot find it,

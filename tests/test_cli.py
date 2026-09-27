@@ -166,7 +166,7 @@ def test_root_version_falls_back_to_source_version(monkeypatch: pytest.MonkeyPat
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert result.stdout == "ani 0.1.1\n"
+    assert result.stdout == "ani 0.2.0\n"
     assert result.stderr == ""
 
 
