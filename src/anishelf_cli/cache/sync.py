@@ -7,7 +7,7 @@ from typing import Protocol
 
 from pydantic import Field
 
-from anishelf_cli.cache.metadata import dedupe_summary_targets
+from anishelf_cli.cache.metadata import dedupe_summary_targets, metadata_key_from_target
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
@@ -44,6 +44,11 @@ class LibraryCacheRefreshResult(AniShelfBaseModel):
     metadata_requested: int = 0
     metadata_hydrated: int = 0
     metadata_errors: int = 0
+    metadata_error_messages: tuple[str, ...] = Field(
+        default_factory=tuple,
+        exclude=True,
+        repr=False,
+    )
     metadata_targets: tuple[TMDbSummaryIdentity, ...] = Field(
         default_factory=tuple,
         exclude=True,
@@ -116,6 +121,7 @@ def _refresh_result_with_hydration(
             "metadata_requested": hydration_result.requested,
             "metadata_hydrated": hydration_result.hydrated,
             "metadata_errors": hydration_result.errors,
+            "metadata_error_messages": hydration_result.error_messages,
         }
     )
 
@@ -190,8 +196,10 @@ class LibraryCacheSync:
     def _incremental(self, sync_token: str) -> LibraryCacheRefreshResult:
         pages = 0
         records = 0
+        # Retry entries whose earlier hydration failed as well as shallow ones;
+        # otherwise one transient TMDb error leaves an entry unhydrated forever.
         metadata_targets = (
-            self.store.outdated_metadata_summary_targets(
+            self.store.incomplete_metadata_summary_targets(
                 language=self.metadata_language,
                 depth=self.metadata_depth,
             )
@@ -424,14 +432,14 @@ def fetch_metadata_summaries(
     fetch = getattr(tmdb_client, "fetch_metadata", None)
     with ThreadPoolExecutor(max_workers=worker_count) as pool:
         if callable(fetch):
-            futures = [pool.submit(fetch, target, depth) for target in targets]
+            futures = {pool.submit(fetch, target, depth): target for target in targets}
         else:
-            futures = [pool.submit(tmdb_client.fetch_summary, target) for target in targets]
+            futures = {pool.submit(tmdb_client.fetch_summary, target): target for target in targets}
         for future in as_completed(futures):
             try:
                 summaries.append(future.result())
             except TMDbRequestError as exc:
-                error_messages.append(str(exc))
+                error_messages.append(f"{metadata_key_from_target(futures[future])}: {exc}")
             if progress_callback is not None:
                 progress_callback(
                     len(summaries) + len(error_messages),

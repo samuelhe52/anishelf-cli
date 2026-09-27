@@ -268,6 +268,11 @@ def emit_error(message: str, *, redactor: SecretRedactor | None = None) -> None:
     console(stderr=True).print(f"[red]{output}[/red]")
 
 
+def emit_warning(message: str, *, redactor: SecretRedactor | None = None) -> None:
+    output = redactor.redact(message) if redactor else message
+    console(stderr=True).print(f"[yellow]{output}[/yellow]")
+
+
 def emit_progress(message: str, *, redactor: SecretRedactor | None = None) -> None:
     output = redactor.redact(message) if redactor else message
     typer.echo(f"[progress] {output}", err=True)

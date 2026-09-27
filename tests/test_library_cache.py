@@ -679,7 +679,7 @@ def test_cache_sync_hydrates_metadata_with_bounded_parallel_requests(
     }
 
 
-def test_cache_sync_does_not_retry_old_metadata_failures_without_new_entries(
+def test_cache_sync_retries_old_metadata_failures_without_new_entries(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -719,9 +719,13 @@ def test_cache_sync_does_not_retry_old_metadata_failures_without_new_entries(
     assert first.metadata_requested == 1
     assert first.metadata_hydrated == 0
     assert first.metadata_errors == 1
-    assert second.metadata_requested == 0
-    assert second.metadata_hydrated == 0
-    assert store.attach_metadata_summary_models(store.list_entry_models())[0].metadata is None
+    assert first.metadata_error_messages == ("movie:55: temporary failure",)
+    assert second.metadata_requested == 1
+    assert second.metadata_hydrated == 1
+    assert second.metadata_errors == 0
+    attached = store.attach_metadata_summary_models(store.list_entry_models())[0].metadata
+    assert attached is not None
+    assert attached.name == "Alien"
 
 
 def test_season_metadata_uses_full_identity_context_for_cache_and_hydration(
@@ -1378,9 +1382,11 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
             assert api_key == "tmdb-secret-token"
 
         def fetch_summary(self, identity) -> LibraryEntryMetadata:
-            assert identity.entry_type == "series"
-            assert identity.tmdb_id == 22
-            return _metadata_summary("series", 22, name="Alien Nation")
+            return _metadata_summary(
+                identity.entry_type,
+                identity.tmdb_id,
+                name=f"Name {identity.tmdb_id}",
+            )
 
     monkeypatch.setattr(
         library_commands,
@@ -1394,19 +1400,69 @@ def test_library_sync_hydrates_tmdb_metadata_and_emits_progress(
     assert result.exit_code == 0, result.output
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["records"] == 1
-    assert payload["summary"]["cache"]["metadata_requested"] == 1
-    assert payload["summary"]["cache"]["metadata_hydrated"] == 1
+    # The new series:22 plus the seeded movie:55, whose metadata was never hydrated.
+    assert payload["summary"]["cache"]["metadata_requested"] == 2
+    assert payload["summary"]["cache"]["metadata_hydrated"] == 2
     assert payload["summary"]["cache"]["metadata_errors"] == 0
     assert "[progress] Starting local library cache sync from CloudKit." in result.stderr
     assert "[progress] Fetched page 1: 1 records (1 total)." in result.stderr
-    assert "[progress] Hydrating TMDb metadata for 1 entries." in result.stderr
-    assert "[progress] TMDb metadata 1/1 complete (0 errors)." in result.stderr
+    assert "[progress] Hydrating TMDb metadata for 2 entries." in result.stderr
+    assert "[progress] TMDb metadata 2/2 complete (0 errors)." in result.stderr
     refreshed = initialized_store.attach_metadata_summary_models(
         initialized_store.list_entry_models()
     )
     series = next(entry for entry in refreshed if entry.identity == "series:22")
     assert series.metadata is not None
-    assert series.metadata.name == "Alien Nation"
+    assert series.metadata.name == "Name 22"
+
+
+def test_library_sync_warns_with_entry_ids_when_metadata_hydration_fails(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    secret_store = _store_with_cloudkit_token("web-secret-token")
+
+    monkeypatch.setenv("ANI_CLOUDKIT_API_TOKEN", "api-secret-token")
+    monkeypatch.setattr(library_commands, "default_secret_store", lambda: secret_store)
+    monkeypatch.setattr(library_commands, "library_lock_factory", lambda path: null_lock(path))
+    monkeypatch.setattr(
+        library_commands,
+        "resolve_tmdb_api_token",
+        lambda store: TMDbAPIToken("tmdb-secret-token", "env:ANI_TMDB_API_KEY"),
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/users/current"):
+            return httpx.Response(200, json={"userRecordName": "_user"})
+        return httpx.Response(
+            200,
+            json={"zones": [{"records": [], "syncToken": "t2", "moreComing": False}]},
+        )
+
+    class FailingTMDbClient:
+        def __init__(self, api_key: str) -> None:
+            _ = api_key
+
+        def fetch_summary(self, identity) -> LibraryEntryMetadata:
+            raise TMDbRequestError("TMDb metadata request failed (HTTP 404).")
+
+    monkeypatch.setattr(
+        library_commands,
+        "_make_http_client",
+        lambda: httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+    monkeypatch.setattr(library_commands, "TMDbClient", FailingTMDbClient)
+
+    result = runner.invoke(app, ["--json", "lib", "sync"])
+
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.stdout)
+    assert payload["summary"]["cache"]["metadata_requested"] == 1
+    assert payload["summary"]["cache"]["metadata_errors"] == 1
+    assert "TMDb metadata could not be fetched for 1 entry." in result.stderr
+    assert "movie:55: TMDb metadata request failed (HTTP 404)." in result.stderr
+    assert "tmdb-secret-token" not in result.output
 
 
 def test_library_init_reports_tmdb_secure_storage_failure(

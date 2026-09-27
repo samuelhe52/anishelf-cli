@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from pathlib import Path
@@ -26,7 +26,7 @@ from anishelf_cli.cache.sync import (
 from anishelf_cli.cloudkit.api_token import MissingCloudKitAPITokenError
 from anishelf_cli.cloudkit.executor import CloudKitExecutor, CloudKitWhoamiError, LockFactory
 from anishelf_cli.core.logging import get_logger
-from anishelf_cli.core.output import emit_error, emit_progress
+from anishelf_cli.core.output import emit_error, emit_progress, emit_warning
 from anishelf_cli.library import LibraryRecordDecodeError
 from anishelf_cli.library.queries import cache_summary_payload
 from anishelf_cli.models import MetadataDepth
@@ -229,6 +229,7 @@ def initialize_library_store(
                 collect_metadata_targets=True,
                 progress_callback=progress_callback,
             ).refresh()
+            emit_metadata_hydration_failures(refresh_result.metadata_error_messages)
             return store, refresh_result
     except (
         CloudKitWhoamiError,
@@ -263,11 +264,26 @@ def refresh_metadata_targets(
         depth=depth,
         progress_callback=progress_callback,
     )
-    if result.requested == 1 and result.errors:
-        emit_error(
-            result.error_messages[0] if result.error_messages else "TMDb metadata request failed."
-        )
+    emit_metadata_hydration_failures(result.error_messages)
     return result
+
+
+MAX_REPORTED_METADATA_FAILURES = 5
+
+
+def emit_metadata_hydration_failures(error_messages: Sequence[str]) -> None:
+    if not error_messages:
+        return
+    count = len(error_messages)
+    noun = "entry" if count == 1 else "entries"
+    emit_warning(
+        f"TMDb metadata could not be fetched for {count} {noun}. "
+        "`ani lib sync` retries entries with missing metadata."
+    )
+    for message in sorted(error_messages)[:MAX_REPORTED_METADATA_FAILURES]:
+        emit_warning(f"  {message}")
+    if count > MAX_REPORTED_METADATA_FAILURES:
+        emit_warning(f"  ...and {count - MAX_REPORTED_METADATA_FAILURES} more.")
 
 
 def emit_library_cache_progress(progress: LibraryCacheProgress) -> None:

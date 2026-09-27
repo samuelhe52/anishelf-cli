@@ -468,3 +468,60 @@ def test_tmdb_client_preserves_validation_error_details_for_search_responses() -
         match=r"TMDb response had an unexpected shape: results\.0\.id:",
     ):
         tmdb.search_titles(TMDbTitleSearchQuery(title="Alien"))
+
+
+def test_tmdb_client_metadata_failure_names_http_status_without_leaking_api_key() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, json={"status_message": "not found"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-key", client=client)
+
+    with pytest.raises(TMDbRequestError) as exc_info:
+        tmdb.fetch_metadata(TMDbSummaryIdentity(entry_type="series", tmdb_id=62450))
+
+    assert str(exc_info.value) == "TMDb metadata request failed (HTTP 404)."
+    assert "tmdb-secret-key" not in str(exc_info.value)
+
+
+def test_tmdb_client_retries_rate_limits_honoring_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("anishelf_cli.tmdb.client.time.sleep", sleeps.append)
+    responses = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": "3"}),
+            httpx.Response(503),
+            httpx.Response(200, json={"id": 55, "title": "Alien"}),
+        ]
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return next(responses)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-key", client=client)
+
+    metadata = tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
+
+    assert metadata.name == "Alien"
+    assert sleeps == [3.0, 1.0]
+
+
+def test_tmdb_client_caps_retry_after_and_gives_up_after_max_attempts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr("anishelf_cli.tmdb.client.time.sleep", sleeps.append)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(429, headers={"Retry-After": "600"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    tmdb = TMDbClient("tmdb-secret-key", client=client, max_attempts=3)
+
+    with pytest.raises(TMDbRequestError, match=r"\(HTTP 429\)"):
+        tmdb.fetch_summary(TMDbSummaryIdentity(entry_type="movie", tmdb_id=55))
+
+    assert sleeps == [10.0, 10.0]
