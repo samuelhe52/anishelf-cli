@@ -184,11 +184,6 @@ class CloudKitExecutor:
                 json_payload=json_payload,
                 error_context=error_context,
             )
-            # Register the header successor before anything logs this response.
-            redactor.register(
-                successor_web_auth_token({}, response.headers),
-                "cloudkit-successor-web-auth-token",
-            )
             payload = self._parse_response(response, redactor, response_description)
 
             successor_token = successor_web_auth_token(payload, response.headers)
@@ -199,6 +194,7 @@ class CloudKitExecutor:
                 logger.debug(
                     "CloudKit web auth token -> cleared after serverErrorCode=%s",
                     payload.get("serverErrorCode"),
+                    extra={"redactor": redactor},
                 )
                 raise CloudKitAuthenticationFailedError(
                     "Your saved CloudKit login expired and was removed; run `ani auth login`.",
@@ -316,6 +312,11 @@ class CloudKitExecutor:
                     "Check your network connection and try again.",
                     redactor=redactor,
                 ) from exc
+            # Register the header successor before anything logs this response.
+            redactor.register(
+                successor_web_auth_token({}, response.headers),
+                "cloudkit-successor-web-auth-token",
+            )
             logger.debug(
                 "CloudKit response <- "
                 f"HTTP {response.status_code} {method.upper()} {response.request.url} "

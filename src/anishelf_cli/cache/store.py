@@ -45,7 +45,11 @@ def _logged_read[**P, R](method: Callable[P, R]) -> Callable[P, R]:
         started = time.perf_counter()
         result = method(*args, **kwargs)
         bound = signature.bind(*args, **kwargs).arguments
-        parts = [f"{name}={_log_value(value)}" for name, value in bound.items() if name != "self"]
+        parts = [
+            f"{name}={_log_value(value, redact_text=name == 'query')}"
+            for name, value in bound.items()
+            if name != "self"
+        ]
         if isinstance(result, Sized):
             parts.append(f"rows={len(result)}")
         elif isinstance(result, CacheMetadataStatusResult):
@@ -57,10 +61,16 @@ def _logged_read[**P, R](method: Callable[P, R]) -> Callable[P, R]:
     return wrapper
 
 
-def _log_value(value: object) -> str:
+def _log_value(value: object, *, redact_text: bool = False) -> str:
     if isinstance(value, Enum):
         return str(value.value)
-    if value is None or isinstance(value, str | int | float | bool):
+    if isinstance(value, str):
+        # Free text (search queries) is sized, not echoed; other strings are
+        # quoted when needed so a value can never forge a separate log line.
+        if redact_text:
+            return f"<{len(value)} chars>"
+        return value if value.isprintable() and " " not in value else repr(value)
+    if value is None or isinstance(value, int | float | bool):
         return str(value)
     if isinstance(value, tuple) and all(isinstance(item, str | Enum) for item in value):
         return ",".join(_log_value(item) for item in value) or "none"
