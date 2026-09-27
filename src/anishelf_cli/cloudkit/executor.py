@@ -179,9 +179,14 @@ class CloudKitExecutor:
                 json_payload=json_payload,
                 error_context=error_context,
             )
+            # Register the header successor before anything logs this response.
+            redactor.register(
+                successor_web_auth_token({}, response.headers),
+                "cloudkit-successor-web-auth-token",
+            )
             payload = self._parse_response(response, redactor, response_description)
 
-            successor_token = successor_web_auth_token(payload)
+            successor_token = successor_web_auth_token(payload, response.headers)
             redactor.register(successor_token, "cloudkit-successor-web-auth-token")
 
             if _is_authentication_failure(response, payload):
@@ -197,6 +202,9 @@ class CloudKitExecutor:
                     redactor=redactor,
                 )
 
+            # Error responses keep the stored token. Live CloudKit still accepted a
+            # predecessor whose successor went unused, and storing state from a
+            # failed request risks keeping a token CloudKit never committed.
             if response.is_error:
                 raise CloudKitRequestFailedError(
                     _cloudkit_failure_message(f"{error_context} failed", response, payload),
