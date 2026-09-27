@@ -109,8 +109,11 @@ on `lib search` caps visible local matches after filtering; `--limit` on
 `tmdb search` caps total grouped rows returned to the user.
 
 Low-level CloudKit zone, record, change, and schema-check commands are
-diagnostics. Keep them out of the normal user command tree unless a future
-dev-only entry point is intentionally added.
+diagnostics. Keep them out of the normal user command tree; surface them through
+`--verbose` instead. During sync, `--verbose` logs one `CloudKit schema` line
+per page with record types, `schemaVersion` counts, deletions, and the names
+(never values) of `LibraryEntry` fields this CLI does not decode, which is the
+first signal of schema drift against the AniShelf app.
 
 ## Batch And Output
 

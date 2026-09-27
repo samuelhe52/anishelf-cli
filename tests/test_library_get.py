@@ -1100,6 +1100,20 @@ def test_library_init_verbose_cloudkit_logs_are_redacted(
     assert "[debug] CloudKit payload <- HTTP 200" in result.stderr
     assert "[debug] Library cache refresh decision -> rebuild" in result.stderr
     assert "[debug] TMDb summary client -> configured source=env:ANI_TMDB_API_KEY" in result.stderr
+    assert "command=lib init" in result.stderr
+    assert (
+        "[debug] CloudKit schema <- page=1 recordTypes=LibraryEntry:1 schemaVersions=2:1 "
+        "deleted=0 unknownFields=none"
+    ) in result.stderr
+    assert "[debug] Library cache page -> applied page=1 records=1 elapsed=" in result.stderr
+    assert "[debug] CloudKit web auth token -> kept, response carried no successor" in (
+        result.stderr
+    )
+    assert (
+        "[debug] TMDb metadata hydration -> complete requested=1 hydrated=1 errors=0 elapsed="
+        in (result.stderr)
+    )
+    assert "[debug] Command -> finished elapsed=" in result.stderr
     assert "json={" not in result.stderr
     assert '"syncToken"' not in result.stderr
     assert "t1" not in result.stderr

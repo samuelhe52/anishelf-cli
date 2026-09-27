@@ -1,6 +1,6 @@
 ---
 name: anishelf-cli
-description: Operate the read-only AniShelf CLI (`ani`) for user-authorized AniShelf library inspection, cache-first reads, search, metadata refresh, TMDb anime lookup, JSON export, and CloudKit auth status checks. Use when a user asks an agent to inspect or search their AniShelf library, run `ani auth`, `ani config`, `ani lib`, or `ani tmdb` commands, produce jq-friendly JSON from AniShelf data, troubleshoot local cache/auth state without exposing secrets, or install/bootstrap anishelf-cli when `ani` is unavailable.
+description: Operate the read-only AniShelf CLI (`ani`) for user-authorized AniShelf library inspection, cache-first reads, filtered listing, search, library stats, metadata refresh, TMDb anime lookup (marking titles already saved), JSON/JSONL/CSV export, and CloudKit auth status checks. Use when a user asks an agent to inspect or search their AniShelf library, run `ani auth`, `ani config`, `ani lib`, or `ani tmdb` commands, produce jq-friendly JSON from AniShelf data, troubleshoot local cache/auth state without exposing secrets, or install/bootstrap anishelf-cli when `ani` is unavailable.
 ---
 
 # AniShelf CLI
@@ -19,6 +19,8 @@ output with optional TMDb anime metadata, and emits scriptable JSON.
 - Prefer `ani ... --json` for agent workflows and parse stdout; progress,
   warnings, and diagnostics belong on stderr.
 - Treat exported library JSON as private user data.
+- Use `-v` (before the command group) only to diagnose failures; it adds
+  redacted `[debug]` lines to stderr.
 - Do not attempt CloudKit writes. This CLI is for inspection, cache refresh,
   metadata hydration, search, and export only.
 - Use separated option values for metadata, such as `--metadata summary`; do
@@ -35,11 +37,17 @@ output with optional TMDb anime metadata, and emits scriptable JSON.
 
 ```bash
 ani lib status --json
-ani lib list --json
+ani lib list -w watching -w planToWatch --type series --json
 ani lib search "Frieren" --limit 10 --json
 ani lib get movie:55 --json
+ani lib stats --json
+ani lib export --format csv -o library.csv
 ani tmdb search "Frieren" --limit 5 --json
 ```
+
+`lib stats` summarizes counts by type, watch status, and score, finishes per
+year, and top genres. `tmdb search` results carry `library_ids` for titles the
+user already saved.
 
 Collection commands use `.entries[]`. `lib get` uses `.items[]` because batch
 lookups can mix found entries and item-level errors. Inspect summary fields and

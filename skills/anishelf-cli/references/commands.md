@@ -241,5 +241,7 @@ For the entry field contract, read `references/entries.md`.
   `summary.metadata_missing`, run `ani lib sync --json` to retry those entries.
 - If auth fails, run `ani auth status --json`, then `ani auth login` when the
   user is present for browser or callback handling.
-- Use `-v` only for redacted diagnostics. Keep diagnostics on stderr separate
-  from JSON stdout.
+- Use `ani -v ...` (root option, before the command group) for redacted
+  `[debug]` diagnostics on stderr: request timing and CloudKit request ids,
+  auth token handling, cache queries, and during `lib sync` any
+  `unknownFields=` other than `none`, which signals AniShelf schema drift.

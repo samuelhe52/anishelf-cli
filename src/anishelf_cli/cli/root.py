@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import platform
 import sys
 import termios
+import time
 import webbrowser
 from importlib import metadata
 from typing import Annotated, Any, TextIO
@@ -11,6 +13,7 @@ import httpx
 import typer
 from typer.core import TyperGroup
 
+from anishelf_cli import config
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cli import groups
 from anishelf_cli.cli.common import json_output_requested
@@ -31,6 +34,7 @@ from anishelf_cli.cloudkit.executor import (
     CloudKitWhoamiError,
     cloudkit_web_auth_token_lock,
 )
+from anishelf_cli.core.logging import elapsed_ms, get_logger
 from anishelf_cli.core.output import emit_error, emit_json, set_current_app_state
 from anishelf_cli.core.redaction import SecretRedactor
 from anishelf_cli.models import AppState, CallbackStrategy, SecretBackend
@@ -56,6 +60,9 @@ from anishelf_cli.secrets import (
 
 class AniTyperGroup(TyperGroup):
     def parse_args(self, ctx: Any, args: list[str]) -> list[str]:
+        if ctx.parent is None:
+            # Click consumes the subcommand tokens before the root callback runs.
+            ctx.meta[_COMMAND_ARGS_META_KEY] = list(args)
         for arg in args:
             if arg.startswith("--metadata="):
                 raise typer.BadParameter(
@@ -87,6 +94,34 @@ auth_app = typer.Typer(
 whoami_lock_factory = None
 
 
+logger = get_logger(__name__)
+_COMMAND_ARGS_META_KEY = "anishelf_cli.command_args"
+_DIAGNOSTIC_ENV_PREFIXES = ("ANI_", "ANISHELF_", "TMDB_", "PYTHON_KEYRING_")
+
+
+def _command_path(ctx: typer.Context) -> str:
+    """Name the invoked subcommands without echoing any argument values.
+
+    Only tokens that resolve to a registered group or command are kept, and the
+    walk stops at the first leaf command, so option and argument values never
+    appear.
+    """
+    names: list[str] = []
+    command: object = ctx.command
+    for token in ctx.meta.get(_COMMAND_ARGS_META_KEY, ()):
+        if token.startswith("-"):
+            continue
+        get_command = getattr(command, "get_command", None)
+        if not callable(get_command):
+            break
+        subcommand = get_command(ctx, token)
+        if subcommand is None:
+            break
+        names.append(token)
+        command = subcommand
+    return " ".join(names) or ctx.invoked_subcommand or "none"
+
+
 def _package_version() -> str:
     try:
         return metadata.version("anishelf-cli")
@@ -115,7 +150,7 @@ def root_callback(
         typer.Option(
             "--verbose",
             "-v",
-            help="Emit redacted network diagnostics to stderr.",
+            help="Emit redacted network, auth, cache, and timing diagnostics to stderr.",
         ),
     ] = False,
     version: Annotated[
@@ -135,6 +170,39 @@ def root_callback(
     )
     set_current_app_state(state)
     ctx.obj = state
+    if verbose:
+        _log_runtime_diagnostics(ctx)
+
+
+def _log_runtime_diagnostics(ctx: typer.Context) -> None:
+    started = time.perf_counter()
+    logger.debug(
+        "Runtime -> ani=%s python=%s platform=%s command=%s",
+        _package_version(),
+        platform.python_version(),
+        platform.platform(terse=True),
+        _command_path(ctx),
+    )
+    config_file = config.user_config_file()
+    logger.debug(
+        "Paths -> config=%s configExists=%s cache=%s data=%s",
+        config_file,
+        config_file.exists(),
+        config.cache_dir(),
+        config.data_dir(),
+    )
+    try:
+        backend = config.load_secret_defaults().backend.value
+    except config.UserConfigError:
+        backend = "invalid-config"
+    # Names only: several of these variables hold API keys or app tokens.
+    overrides = sorted(name for name in os.environ if name.startswith(_DIAGNOSTIC_ENV_PREFIXES))
+    logger.debug(
+        "Environment -> secretsBackend=%s overrides=%s",
+        backend,
+        ",".join(overrides) or "none",
+    )
+    ctx.call_on_close(lambda: logger.debug("Command -> finished elapsed=%s", elapsed_ms(started)))
 
 
 def _make_http_client() -> httpx.Client:

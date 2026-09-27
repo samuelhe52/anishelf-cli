@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import Counter
+from collections.abc import Sequence
 from typing import cast
 from urllib.parse import urlsplit
 
@@ -34,6 +36,55 @@ WATCH_STATUS_VALUES = DOMAIN_WATCH_STATUS_VALUES
 
 class LibraryRecordDecodeError(ValueError):
     pass
+
+
+def _known_library_entry_fields() -> frozenset[str]:
+    # Fields without an alias (such as `notes` and `score`) use their own name.
+    return frozenset(
+        str(field.validation_alias or name)
+        for model in (CloudKitLibraryEntrySnapshotFields, CloudKitLibraryEntryTombstoneFields)
+        for name, field in model.model_fields.items()
+    )
+
+
+KNOWN_LIBRARY_ENTRY_FIELDS = _known_library_entry_fields()
+
+
+def library_record_schema_summary(records: Sequence[CloudKitRecord]) -> str:
+    """Summarize a page's record shapes so --verbose can surface schema drift.
+
+    Lists record types, LibraryEntry schema versions, deletions, and field names
+    this CLI does not decode (which it otherwise ignores silently). Field values
+    are never included.
+    """
+    record_types: Counter[str] = Counter()
+    schema_versions: Counter[str] = Counter()
+    unknown_fields: Counter[str] = Counter()
+    deleted = 0
+    for record in records:
+        if record.is_deleted:
+            deleted += 1
+            continue
+        record_types[record.record_type or "missing"] += 1
+        if record.record_type != LIBRARY_ENTRY_RECORD_TYPE:
+            continue
+        version_field = record.fields.get("schemaVersion")
+        schema_versions[str(version_field.value) if version_field else "missing"] += 1
+        unknown_fields.update(
+            name for name in record.fields if name not in KNOWN_LIBRARY_ENTRY_FIELDS
+        )
+    return (
+        f"recordTypes={_counter_log(record_types)} "
+        f"schemaVersions={_counter_log(schema_versions)} "
+        f"deleted={deleted} "
+        f"unknownFields={_counter_log(unknown_fields)}"
+    )
+
+
+def _counter_log(counter: Counter[str]) -> str:
+    if not counter:
+        return "none"
+    return ",".join(f"{name}:{count}" for name, count in sorted(counter.items()))
 
 
 def decode_library_entry_record(record: CloudKitRecord) -> LibraryEntryModel:

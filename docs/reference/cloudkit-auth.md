@@ -69,6 +69,13 @@ four attempts with a short linear backoff. Read errors, timeouts after sending,
 and HTTP error responses are surfaced immediately with the transport error class
 and a network hint.
 
+Under `--verbose` the executor logs, without any token values: how long it
+waited for the token lock; each response's status, attempt, elapsed time, and
+`X-Apple-Request-UUID` (as `requestId`, which Apple can trace); and the token
+outcome (`rolled forward`, `kept`, `successor ignored` on an error response, or
+`cleared` after an authentication failure). Other response headers are never
+logged, because `X-Apple-CloudKit-Web-Auth-Token` carries the successor token.
+
 ## Security
 
 Never print app auth, `ckWebAuthToken`, successor web auth tokens, TMDb API keys,

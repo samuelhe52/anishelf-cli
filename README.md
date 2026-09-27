@@ -354,7 +354,9 @@ ani lib get movie:55 --json
 ```
 
 JSON output keeps progress and diagnostics off stdout so it can be piped to
-tools such as `jq`:
+tools such as `jq`. Add `-v`/`--verbose` for redacted `[debug]` diagnostics on
+stderr: request timing and CloudKit request ids, auth token rolling, cache
+queries, and unknown CloudKit fields during sync.
 
 ```bash
 ani lib status --json | jq '.summary'

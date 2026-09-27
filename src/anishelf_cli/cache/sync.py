@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -11,8 +12,9 @@ from anishelf_cli.cache.metadata import dedupe_summary_targets, metadata_key_fro
 from anishelf_cli.cache.store import LibraryCacheStore
 from anishelf_cli.cloudkit.executor import CloudKitChangeTokenExpiredError, CloudKitExecutor
 from anishelf_cli.config import DEFAULT_TMDB_METADATA_LANGUAGE
-from anishelf_cli.core.logging import get_logger
+from anishelf_cli.core.logging import elapsed_ms, get_logger
 from anishelf_cli.library import LIBRARY_ENTRY_RECORD_TYPE
+from anishelf_cli.library.records import library_record_schema_summary
 from anishelf_cli.models import MetadataDepth
 from anishelf_cli.models.common import AniShelfBaseModel
 from anishelf_cli.models.domain import LibraryEntryMetadata, TMDbSummaryIdentity
@@ -205,6 +207,12 @@ class LibraryCacheSync:
                 sync_token=next_token,
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
+            logger.debug(
+                "CloudKit schema <- page=%s %s",
+                pages + 1,
+                library_record_schema_summary(page.records),
+            )
+            apply_started = time.perf_counter()
             metadata_targets.extend(
                 self.store.apply_page_and_collect_new_summary_targets(
                     page,
@@ -212,6 +220,12 @@ class LibraryCacheSync:
                     metadata_language=self.metadata_language,
                     metadata_depth=self.metadata_depth,
                 )
+            )
+            logger.debug(
+                "Library cache page -> applied page=%s records=%s elapsed=%s",
+                pages + 1,
+                len(page.records),
+                elapsed_ms(apply_started),
             )
             pages += 1
             records += len(page.records)
@@ -265,6 +279,12 @@ class LibraryCacheSync:
                 sync_token=next_token,
                 desired_record_types=[LIBRARY_ENTRY_RECORD_TYPE],
             )
+            logger.debug(
+                "CloudKit schema <- page=%s %s",
+                pages + 1,
+                library_record_schema_summary(page.records),
+            )
+            apply_started = time.perf_counter()
             metadata_targets.extend(
                 self.store.apply_page_and_collect_new_summary_targets(
                     page,
@@ -272,6 +292,12 @@ class LibraryCacheSync:
                     metadata_language=self.metadata_language,
                     metadata_depth=self.metadata_depth,
                 )
+            )
+            logger.debug(
+                "Library cache page -> applied page=%s records=%s elapsed=%s",
+                pages + 1,
+                len(page.records),
+                elapsed_ms(apply_started),
             )
             pages += 1
             records += len(page.records)
@@ -357,6 +383,7 @@ def hydrate_metadata_targets(
         logger.debug("TMDb summary hydration -> skipped reason=no-targets")
         return MetadataHydrationResult(requested=0, hydrated=0, errors=0)
 
+    hydration_started = time.perf_counter()
     logger.debug(
         "TMDb metadata hydration -> started targets=%s depth=%s workers=%s",
         len(targets_to_hydrate),
@@ -402,10 +429,11 @@ def hydrate_metadata_targets(
     )
     store.upsert_metadata_summaries(summaries, depth=depth)
     logger.debug(
-        "TMDb metadata hydration -> complete requested=%s hydrated=%s errors=%s",
+        "TMDb metadata hydration -> complete requested=%s hydrated=%s errors=%s elapsed=%s",
         len(targets_to_hydrate),
         len(summaries),
         len(error_messages),
+        elapsed_ms(hydration_started),
     )
     return MetadataHydrationResult(
         requested=len(targets_to_hydrate),
