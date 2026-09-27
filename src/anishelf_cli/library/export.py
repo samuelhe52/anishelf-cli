@@ -35,8 +35,23 @@ CSV_COLUMNS: tuple[str, ...] = (
     "homepage",
 )
 
-_FREE_TEXT_COLUMNS = ("title", "notes", "genres")
-_FORMULA_TRIGGERS = ("=", "+", "-", "@", "\t", "\r")
+# Typed columns hold only ids and scores, which never start with a formula trigger.
+_TYPED_COLUMNS = frozenset({"tmdb_id", "parent_series_id", "season_number", "score"})
+# ASCII triggers plus their full-width forms (U+FF1D, U+FF0B, U+FF0D, U+FF20),
+# which some spreadsheets also evaluate.
+_FORMULA_TRIGGERS = (
+    "=",
+    "+",
+    "-",
+    "@",
+    "\t",
+    "\r",
+    "\n",
+    "\uff1d",
+    "\uff0b",
+    "\uff0d",
+    "\uff20",
+)
 
 _FORMATS_BY_SUFFIX = {
     ".json": ExportFormat.JSON,
@@ -67,22 +82,31 @@ def render_export(
     return _render_csv(entries, display_titles)
 
 
-def write_export_file(path: Path, content: str) -> None:
+def write_export_file(path: Path, content: str, *, encoding: str = "utf-8") -> None:
     """Write an export atomically and readable only by the current user.
 
     Exports hold private library data, so they never pass through a
-    world-readable state, and a failed write never leaves a truncated file.
+    world-readable state, and an interrupted write never replaces the target
+    with a truncated file. A symlinked target is replaced by a regular file
+    rather than written through.
     """
-    directory = path.parent if str(path.parent) else Path(".")
-    fd, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=directory)
+    fd, temp_name = tempfile.mkstemp(prefix=".ani-export.", suffix=".tmp", dir=path.parent)
     try:
-        with os.fdopen(fd, "w", encoding="utf-8", newline="") as handle:
+        with os.fdopen(fd, "w", encoding=encoding, newline="") as handle:
             handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.chmod(temp_name, 0o600)
         os.replace(temp_name, path)
     except BaseException:
         Path(temp_name).unlink(missing_ok=True)
         raise
+
+
+def file_encoding_for_format(export_format: ExportFormat) -> str:
+    # Excel only detects UTF-8 in a CSV file with a byte order mark; without one,
+    # Japanese and Chinese titles open as mojibake. Streams stay BOM-free.
+    return "utf-8-sig" if export_format is ExportFormat.CSV else "utf-8"
 
 
 def _render_csv(
@@ -126,10 +150,10 @@ def _csv_row(entry: Mapping[str, Any], display_titles: Mapping[str, str]) -> dic
         "tmdb_url": _tmdb_url(entry),
         "homepage": metadata.get("link_to_details"),
     }
-    cells = {key: _csv_value(value) for key, value in row.items()}
-    for key in _FREE_TEXT_COLUMNS:
-        cells[key] = _neutralize_formula(cells[key])
-    return cells
+    return {
+        key: _csv_value(value) if key in _TYPED_COLUMNS else _neutralize_formula(_csv_value(value))
+        for key, value in row.items()
+    }
 
 
 def _tmdb_url(entry: Mapping[str, Any]) -> str | None:
@@ -147,9 +171,10 @@ def _tmdb_url(entry: Mapping[str, Any]) -> str | None:
 
 
 def _neutralize_formula(value: str) -> str:
-    # Titles and genres come from TMDb, so a cell starting with a formula trigger
-    # could run as a formula when the CSV is opened in a spreadsheet.
-    if value.startswith(_FORMULA_TRIGGERS):
+    # Titles, genres, and homepages come from TMDb, which anyone can edit, so a cell
+    # starting with a formula trigger could run as a formula in a spreadsheet.
+    # Spreadsheets ignore leading spaces, so check past them too.
+    if value.lstrip(" ").startswith(_FORMULA_TRIGGERS):
         return f"'{value}"
     return value
 

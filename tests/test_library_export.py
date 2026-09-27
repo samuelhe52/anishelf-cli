@@ -169,12 +169,13 @@ def test_library_export_writes_output_file_and_reports_it(tmp_path, monkeypatch)
 
     assert human.exit_code == 0, human.output
     assert "Format   csv" in human.stdout
-    assert human_path.read_text().startswith("id,title,")
+    # CSV files carry a UTF-8 byte order mark so spreadsheets decode CJK titles.
+    assert human_path.read_bytes().startswith(b"\xef\xbb\xbfid,title,")
     assert machine.exit_code == 0, machine.output
     result = json.loads(machine.stdout)
     assert result["format"] == "json"
     assert result["entries"] == 2
-    assert result["path"] == str(json_path)
+    assert result["path"] == str(json_path.resolve())
     assert len(json.loads(json_path.read_text())["entries"]) == 2
 
 
@@ -199,3 +200,80 @@ def test_library_export_without_format_keeps_human_summary(tmp_path, monkeypatch
     assert result.exit_code == 0, result.output
     assert "Library export" in result.stdout
     assert "Entries  2" in result.stdout
+
+
+def test_csv_export_neutralizes_every_tmdb_derived_text_cell() -> None:
+    content = render_export(
+        _payload(
+            _entry(
+                notes="  =1+1",
+                metadata={
+                    "genres": [{"id": 1, "name": "@cmd"}],
+                    "link_to_details": "=HYPERLINK(1)",
+                    "on_air_date": "\uff1d1+1",
+                },
+            )
+        ),
+        ExportFormat.CSV,
+        display_titles={},
+    )
+
+    row = next(csv.DictReader(io.StringIO(content)))
+    assert row["homepage"] == "'=HYPERLINK(1)"
+    assert row["genres"] == "'@cmd"
+    assert row["notes"] == "'  =1+1"
+    assert row["on_air_date"] == "'\uff1d1+1"
+    assert row["tmdb_id"] == "33"
+
+
+def test_write_export_file_keeps_the_old_file_when_the_write_fails(tmp_path, monkeypatch) -> None:
+    import pytest
+
+    path = tmp_path / "library.json"
+    path.write_text("old")
+
+    def fail_replace(source: object, target: object) -> None:
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr("anishelf_cli.library.export.os.replace", fail_replace)
+
+    with pytest.raises(OSError):
+        write_export_file(path, "new\n")
+
+    assert path.read_text() == "old"
+    assert [child.name for child in tmp_path.iterdir()] == ["library.json"]
+
+
+def test_library_export_reports_missing_output_directory(tmp_path, monkeypatch) -> None:
+    _seed(monkeypatch, tmp_path)
+
+    result = runner.invoke(app, ["lib", "export", "-o", str(tmp_path / "missing" / "lib.csv")])
+
+    assert result.exit_code == 2
+    assert result.stdout == ""
+    assert "does not exist" in result.stderr
+
+
+def test_library_export_dash_output_streams_to_stdout(tmp_path, monkeypatch) -> None:
+    _seed(monkeypatch, tmp_path)
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["lib", "export", "-o", "-", "--format", "jsonl"])
+
+    assert result.exit_code == 0, result.output
+    assert len(result.stdout.splitlines()) == 2
+    assert not (tmp_path / "-").exists()
+
+
+def test_library_export_explicit_format_overrides_output_suffix(tmp_path, monkeypatch) -> None:
+    _seed(monkeypatch, tmp_path)
+    path = tmp_path / "library.csv"
+
+    result = runner.invoke(
+        app,
+        ["--json", "lib", "export", "-o", str(path), "--format", "jsonl"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert json.loads(result.stdout)["format"] == "jsonl"
+    assert len(path.read_text().splitlines()) == 2

@@ -157,13 +157,17 @@ ani lib export --format jsonl | jq -r '.id'
 ```
 
 `--output` (`-o`) writes the file readable only by you, choosing the format
-from `--format` or the file extension (`.json`, `.jsonl`/`.ndjson`, `.csv`).
-Without `--output`, `--format json|jsonl|csv` streams to stdout, and `--json`
-prints the full JSON envelope. CSV has one row per entry with stable columns
-(title, ids, status, score, dates, episode progress, notes, air date, genres,
-TMDb URL, homepage); cells that would start a spreadsheet formula are prefixed
-with `'`. Exports contain private library data, so treat them like any other
-personal file.
+from `--format` or the file extension (`.json`, `.jsonl`/`.ndjson`, `.csv`);
+`-o -` means stdout. Without `--output`, `--format json|jsonl|csv` streams to
+stdout, and `--json` prints the full JSON envelope. Exports contain private
+library data, so treat them like any other personal file.
+
+CSV has one row per entry with stable columns (title, ids, status, score,
+dates, episode progress, notes, air date, genres, TMDb URL, homepage). `genres`
+and `homepage` need `--metadata details` or `full`. CSV files written with `-o`
+start with a UTF-8 byte order mark so Excel shows Japanese and Chinese text
+correctly. Text cells that would start a spreadsheet formula get a leading `'`,
+so CSV is lossy for such values; use JSON or JSONL when you need exact data.
 
 ## Cache And Sync
 

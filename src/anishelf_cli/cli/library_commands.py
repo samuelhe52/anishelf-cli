@@ -53,6 +53,7 @@ from anishelf_cli.library import (
 )
 from anishelf_cli.library.export import (
     export_format_for_path,
+    file_encoding_for_format,
     render_export,
     write_export_file,
 )
@@ -702,6 +703,13 @@ def library_export(
     ] = False,
 ) -> None:
     machine_output = json_output_requested(ctx, json_output)
+    if output is not None and str(output) == "-":
+        # `-o -` conventionally means stdout.
+        output = None
+        export_format = export_format or ExportFormat.JSON
+    if output is not None and not output.parent.is_dir():
+        emit_error(f"Cannot write export: directory {output.parent} does not exist.")
+        raise typer.Exit(code=2)
     resolved_format = _resolve_export_format(
         export_format,
         output=output,
@@ -763,12 +771,12 @@ def library_export(
         typer.echo(content, nl=False)
         return
     try:
-        write_export_file(output, content)
+        write_export_file(output, content, encoding=file_encoding_for_format(resolved_format))
     except OSError as exc:
         emit_error(f"Could not write export to {output}: {exc.strerror or exc}.")
         raise typer.Exit(code=2) from exc
     written = LibraryExportFileResult(
-        path=str(output),
+        path=str(output.resolve()),
         format=resolved_format.value,
         entries=len(result.entries),
         cache=result.cache,
