@@ -52,3 +52,7 @@ the authority. Do not infer schema shape from this CLI alone.
 - Attach both build artifacts to each release: the wheel
   `anishelf_cli-<version>-py3-none-any.whl` and the source distribution
   `anishelf_cli-<version>.tar.gz`.
+- Pushing a `v<version>` tag that matches `pyproject.toml` runs
+  `.github/workflows/release.yml`, which runs `make check`, builds both
+  artifacts, and creates a draft release with them attached. Replace the
+  placeholder notes with the `## Changes` bullets, then publish the draft.
