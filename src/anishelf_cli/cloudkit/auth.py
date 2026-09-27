@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from ipaddress import ip_address
@@ -23,11 +23,13 @@ logger = get_logger(__name__)
 # - database v1 endpoints are rooted at /database/1/{container}/{environment}/{operation}
 # - API-token auth appends ckAPIToken and, after sign-in, ckWebAuthToken
 # - missing user auth returns AUTHENTICATION_REQUIRED with redirectURL
-# - returned web-auth tokens are single-round-trip and replaced by a response token
+# - each authenticated response returns a successor web-auth token to use next
 # The official docs confirm the callback query key. They do not name the exact
 # successor response key; those keys are kept as local observed fixture evidence.
 # Live production responses (checked 2026-09-27) carry the successor only in the
 # X-Apple-CloudKit-Web-Auth-Token header, and it authenticates as the same user.
+# The predecessor also kept working there, but that is observed, not documented,
+# so the executor still treats a sent token as possibly consumed.
 CLOUDKIT_AUTH_BEHAVIOR_FIXTURE: dict[str, Any] = {
     "docs": [
         "https://developer.apple.com/library/archive/documentation/DataManagement/"
@@ -186,14 +188,16 @@ def _cloudkit_login_response_log(response: httpx.Response, payload: object) -> s
 
 def successor_web_auth_token(
     payload: dict[str, Any],
-    headers: Mapping[str, str] | None = None,
+    headers: httpx.Headers | None = None,
 ) -> str | None:
     if headers is not None:
-        header_token = headers.get(
+        # Headers.get joins repeated headers with ", ", which would store an invalid
+        # token and clear the login on the next request; accept only a single value.
+        values = headers.get_list(
             CLOUDKIT_AUTH_BEHAVIOR_FIXTURE["observed_successor_token_response_header"]
         )
-        if header_token:
-            return header_token
+        if len(values) == 1 and values[0]:
+            return values[0]
     for key in CLOUDKIT_AUTH_BEHAVIOR_FIXTURE["observed_successor_token_response_keys"]:
         token = payload.get(key)
         if isinstance(token, str) and token:

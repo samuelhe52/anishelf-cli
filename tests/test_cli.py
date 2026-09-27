@@ -2457,9 +2457,72 @@ def test_cloudkit_executor_ignores_header_successor_on_error_response(
     with pytest.raises(CloudKitRequestFailedError) as raised:
         executor.get_current_user()
 
-    assert "header-successor-token" not in raised.value.redactor.redact(str(raised.value))
+    assert "header-successor-token" not in str(raised.value)
     descriptor = cloudkit_web_auth_token_secret()
     assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
+
+
+def test_cloudkit_executor_ignores_repeated_successor_header(tmp_path, monkeypatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers=[
+                ("X-Apple-CloudKit-Web-Auth-Token", "first-successor-token"),
+                ("X-Apple-CloudKit-Web-Auth-Token", "second-successor-token"),
+            ],
+            json={"userRecordName": "_user"},
+        )
+
+    executor, store, _ = _executor_with_handler(tmp_path, monkeypatch, handler)
+
+    executor.get_current_user()
+
+    # httpx would join the values into one invalid token; keep the stored login.
+    descriptor = cloudkit_web_auth_token_secret()
+    assert store.get_password(descriptor.service, descriptor.account) == "web-secret-token"
+
+
+def test_whoami_auth_failure_with_successor_header_clears_login(monkeypatch) -> None:
+    store = _store_with_web_auth_token("bad-web-secret-token")
+    descriptor = cloudkit_web_auth_token_secret()
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            401,
+            headers={"X-Apple-CloudKit-Web-Auth-Token": "header-successor-token"},
+            json={"serverErrorCode": "AUTHENTICATION_FAILED", "reason": "expired"},
+        ),
+    )
+
+    result = runner.invoke(app, ["--verbose", "--json", "auth", "status"])
+
+    assert result.exit_code == 2
+    assert store.get_password(descriptor.service, descriptor.account) is None
+    assert "header-successor-token" not in result.stdout + result.stderr
+
+
+def test_whoami_verbose_saves_header_successor_without_printing_it(monkeypatch) -> None:
+    store = _store_with_web_auth_token("old-web-secret-token")
+    descriptor = cloudkit_web_auth_token_secret()
+    _install_root_auth_store(monkeypatch, store)
+    _install_root_http_client(
+        monkeypatch,
+        lambda request: httpx.Response(
+            200,
+            headers={"X-Apple-CloudKit-Web-Auth-Token": "header-successor-token"},
+            json={"userRecordName": "_abc123"},
+        ),
+    )
+
+    result = runner.invoke(app, ["--verbose", "--json", "auth", "status"])
+
+    assert result.exit_code == 0, result.output
+    assert "[debug] CloudKit response" in result.stderr
+    assert store.get_password(descriptor.service, descriptor.account) == "header-successor-token"
+    combined = result.stdout + result.stderr
+    assert "header-successor-token" not in combined
+    assert "old-web-secret-token" not in combined
 
 
 def test_config_set_defaults_hydration_depth_accepts_only_cache_depths(
