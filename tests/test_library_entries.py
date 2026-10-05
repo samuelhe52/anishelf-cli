@@ -37,6 +37,8 @@ def test_library_entry_rejects_legacy_deleted_kind() -> None:
         ("on_display", "yes", "Library entry boolean value is invalid."),
         ("date_saved", 123, "Library entry date_saved value is invalid."),
         ("watch_status", 123, "Library entry watch_status value is invalid."),
+        ("is_rewatching", "true", "Library entry boolean value is invalid."),
+        ("rewatch_count", "2", "Library entry rewatch_count value is invalid."),
         ("date_started", 123, "Library entry date_started value is invalid."),
         ("date_finished", 123, "Library entry date_finished value is invalid."),
         (

@@ -55,6 +55,11 @@ item errors instead of relying only on the process exit code for batch reads, or
 pass `--strict` so any item error exits 1. Feed ids from another command with
 `... --json | jq -r '.entries[].id' | ani lib get - --json`.
 
+Entry JSON and JSON/JSONL/CSV exports include `is_rewatching` (an active rewatch,
+true only while `watch_status` is `watching`) and `rewatch_count` (completed
+rewatches, at least zero). Older CloudKit entries default to `false` / `0`.
+After a cache schema upgrade resets local state, run `ani lib init` to rebuild.
+
 ## References
 
 - For questions about the user's specific library, prefer reading

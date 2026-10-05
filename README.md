@@ -181,9 +181,9 @@ from `--format` or the file extension (`.json`, `.jsonl`/`.ndjson`, `.csv`);
 stdout, and `--json` prints the full JSON envelope. Exports contain private
 library data, so treat them like any other personal file.
 
-CSV has one row per entry with stable columns (title, ids, status, score,
-dates, episode progress, notes, air date, genres, TMDb URL, homepage). `genres`
-and `homepage` need `--metadata details` or `full`. CSV files written with `-o`
+CSV has one row per entry with stable columns (title, ids, status, rewatch
+tracking, score, dates, episode progress, notes, air date, genres, TMDb URL,
+homepage). `genres` and `homepage` need `--metadata details` or `full`. CSV files written with `-o`
 start with a UTF-8 byte order mark so Excel shows Japanese and Chinese text
 correctly. Text cells that would start a spreadsheet formula get a leading `'`,
 so CSV is lossy for such values; use JSON or JSONL when you need exact data.
@@ -367,6 +367,13 @@ ani lib search "Alien" --limit 5 --json | jq '.entries[].id'
 
 Collection commands emit entries under `.entries[]`. `lib get` emits `.items[]`
 because batch lookups can contain a mix of found entries and per-item errors.
+
+Entry JSON and JSON/JSONL/CSV exports include `is_rewatching` and
+`rewatch_count`, using the same names as AniShelf's export. The boolean marks an
+active rewatch and is true only while `watch_status` is `watching`; the count
+records completed rewatches and is never negative. Entries saved before
+rewatch tracking default to `false` and `0`. Upgrading from an older cache
+schema resets the local cache; run `ani lib init` to rebuild it from CloudKit.
 
 ## Configuration
 

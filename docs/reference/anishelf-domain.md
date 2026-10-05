@@ -19,9 +19,16 @@ Stable library ids are semantic record names:
 - `season:<parentSeriesID>:<seasonNumber>:<tmdbID>`
 
 `LibraryEntry` live snapshots should decode the id, TMDb IDs, entry type,
-display state, saved date, watch status, dates, score, favorite, notes, custom
-poster path, episode progress, and update clocks. Tombstones should decode from
-valid id fields plus `deletedAt`.
+display state, saved date, watch status, rewatch tracking, dates, score, favorite,
+notes, custom poster path, episode progress, and update clocks. Tombstones should
+decode from valid id fields plus `deletedAt`.
+
+Rewatch tracking uses optional CloudKit fields `isRewatching` and
+`rewatchCount`. Missing values default to `false` and `0`. As in the app,
+`isRewatching` is false unless `watchStatus` is `watching`, and negative
+`rewatchCount` values clamp to zero. Public JSON and JSON/JSONL/CSV exports use
+`is_rewatching` and `rewatch_count`, matching the app's export names. The count
+tracks completed rewatches; the active rewatch is represented by the boolean.
 
 Unsupported future schema versions should fail explicitly instead of silently
 dropping fields or guessing.
@@ -32,6 +39,12 @@ Full-library commands use CloudKit zone changes instead of broad queries. The
 cache is rebuildable, lives under the platform user cache directory, and keys
 state by CloudKit container, environment, database, zone, and authenticated
 `userRecordName`.
+
+Cache schema version `4` carries both rewatch fields in entry rows and decoded
+JSON. Opening an older cache uses the existing schema reset: discard library
+rows, metadata, staging rows, and change tokens, then recreate the schema.
+Run `ani lib init` to rebuild from CloudKit after the reset; no migration is
+needed for this rebuildable cache.
 
 Token advancement must be commit-after-apply: persist a durable change token
 only after the matching record changes have been applied. If CloudKit reports an

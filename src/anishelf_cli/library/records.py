@@ -139,6 +139,8 @@ def _snapshot_entry_from_cloudkit_fields(
             on_display=fields.on_display,
             date_saved=fields.date_saved,
             watch_status=fields.watch_status,
+            is_rewatching=fields.is_rewatching or False,
+            rewatch_count=fields.rewatch_count or 0,
             date_started=fields.date_started,
             date_finished=fields.date_finished,
             is_date_tracking_enabled=fields.is_date_tracking_enabled,

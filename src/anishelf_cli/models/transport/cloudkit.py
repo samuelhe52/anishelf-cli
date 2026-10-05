@@ -253,6 +253,16 @@ class CloudKitLibraryEntrySnapshotFields(CloudKitLibraryEntryCommonFields):
         validation_alias="watchStatus",
         serialization_alias="watchStatus",
     )
+    is_rewatching: CloudKitBoolValue | None = Field(
+        default=False,
+        validation_alias="isRewatching",
+        serialization_alias="isRewatching",
+    )
+    rewatch_count: CloudKitIntValue | None = Field(
+        default=0,
+        validation_alias="rewatchCount",
+        serialization_alias="rewatchCount",
+    )
     date_started: CloudKitDateTimeValue | None = Field(
         default=None,
         validation_alias="dateStarted",

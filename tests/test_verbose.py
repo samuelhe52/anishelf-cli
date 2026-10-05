@@ -111,7 +111,7 @@ def test_verbose_tmdb_retry_logs_delay_and_timing(monkeypatch) -> None:
 
 def test_schema_summary_reports_nothing_unknown_for_supported_records() -> None:
     records = [
-        cloudkit_record(live_record("movie:55", "movie", 55)),
+        cloudkit_record(live_record("movie:55", "movie", 55, is_rewatching=True, rewatch_count=2)),
         cloudkit_record(
             live_record("season:10:1:100", "season", 100, custom_poster_path="posters/a.jpg")
         ),
@@ -125,7 +125,7 @@ def test_schema_summary_reports_nothing_unknown_for_supported_records() -> None:
 
 def test_schema_summary_names_unknown_fields_without_values() -> None:
     drifted = live_record("movie:55", "movie", 55)
-    drifted["fields"]["rewatchCount"] = {"value": 424242, "type": "INT64"}
+    drifted["fields"]["futureField"] = {"value": 424242, "type": "INT64"}
     drifted["fields"]["schemaVersion"] = {"value": 3, "type": "INT64"}
     other = {"recordName": "settings", "recordType": "LibrarySettings", "fields": {}}
     deleted = {"recordName": "movie:56", "deleted": True}
@@ -136,7 +136,7 @@ def test_schema_summary_names_unknown_fields_without_values() -> None:
 
     assert summary == (
         "recordTypes=LibraryEntry:1,LibrarySettings:1 schemaVersions=3:1 "
-        "deleted=1 unknownFields=rewatchCount:1"
+        "deleted=1 unknownFields=futureField:1"
     )
     assert "424242" not in summary
 

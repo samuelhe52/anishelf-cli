@@ -169,6 +169,8 @@ def live_record(
     *,
     date_saved: str = "2026-05-01T00:00:00Z",
     watch_status: str = "watched",
+    is_rewatching: bool | None = None,
+    rewatch_count: int | None = None,
     on_display: bool = True,
     using_custom_poster: bool = False,
     custom_poster_path: str | None = None,
@@ -201,6 +203,10 @@ def live_record(
         del fields["score"]
     else:
         fields["score"] = score
+    if is_rewatching is not None:
+        fields["isRewatching"] = is_rewatching
+    if rewatch_count is not None:
+        fields["rewatchCount"] = rewatch_count
     if custom_poster_path is not None:
         fields["customPosterPath"] = custom_poster_path
     if custom_poster_url is not None:

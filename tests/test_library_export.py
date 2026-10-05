@@ -34,6 +34,8 @@ def _entry(**overrides: object) -> dict[str, object]:
         "parent_series_id": 22,
         "season_number": 2,
         "watch_status": "watching",
+        "is_rewatching": True,
+        "rewatch_count": 2,
         "score": None,
         "favorite": True,
         "on_display": False,
@@ -75,6 +77,8 @@ def test_csv_export_flattens_entries_with_stable_columns() -> None:
         "parent_series_id": "22",
         "season_number": "2",
         "watch_status": "watching",
+        "is_rewatching": "true",
+        "rewatch_count": "2",
         "score": "",
         "favorite": "true",
         "on_display": "false",
@@ -136,7 +140,9 @@ def _seed(monkeypatch, tmp_path) -> None:
     store = create_seeded_cache_store(
         monkeypatch,
         tmp_path,
-        live_record("movie:55", "movie", 55),
+        live_record(
+            "movie:55", "movie", 55, watch_status="watching", is_rewatching=True, rewatch_count=2
+        ),
         live_record("series:22", "series", 22),
     )
     store.upsert_metadata_summary(metadata_summary("movie", 55, name="Alien"))
@@ -154,9 +160,19 @@ def test_library_export_streams_requested_format_to_stdout(tmp_path, monkeypatch
         "movie:55",
         "series:22",
     ]
+    entries = {entry["id"]: entry for entry in map(json.loads, jsonl.stdout.splitlines())}
+    assert entries["movie:55"]["is_rewatching"] is True
+    assert entries["movie:55"]["rewatch_count"] == 2
+    assert entries["series:22"]["is_rewatching"] is False
+    assert entries["series:22"]["rewatch_count"] == 0
     assert csv_result.exit_code == 0, csv_result.output
     titles = {row["id"]: row["title"] for row in csv.DictReader(io.StringIO(csv_result.stdout))}
     assert titles == {"movie:55": "Alien", "series:22": "Cowboy Bebop"}
+    rows = {row["id"]: row for row in csv.DictReader(io.StringIO(csv_result.stdout))}
+    assert rows["movie:55"]["is_rewatching"] == "true"
+    assert rows["movie:55"]["rewatch_count"] == "2"
+    assert rows["series:22"]["is_rewatching"] == "false"
+    assert rows["series:22"]["rewatch_count"] == "0"
 
 
 def test_library_export_writes_output_file_and_reports_it(tmp_path, monkeypatch) -> None:
@@ -176,7 +192,12 @@ def test_library_export_writes_output_file_and_reports_it(tmp_path, monkeypatch)
     assert result["format"] == "json"
     assert result["entries"] == 2
     assert result["path"] == str(json_path.resolve())
-    assert len(json.loads(json_path.read_text())["entries"]) == 2
+    entries = {entry["id"]: entry for entry in json.loads(json_path.read_text())["entries"]}
+    assert len(entries) == 2
+    assert entries["movie:55"]["is_rewatching"] is True
+    assert entries["movie:55"]["rewatch_count"] == 2
+    assert entries["series:22"]["is_rewatching"] is False
+    assert entries["series:22"]["rewatch_count"] == 0
 
 
 def test_library_export_rejects_json_flag_with_streamed_non_json_format(

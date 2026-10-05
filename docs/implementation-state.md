@@ -43,6 +43,11 @@ spec.
   explicit CloudKit refresh before serving results.
 - `lib get` accepts `-` to read whitespace-separated ids from stdin and
   `--strict` to exit 1 on any item error.
+- Library snapshots carry `is_rewatching` and `rewatch_count` through CloudKit
+  decoding, cache storage, JSON reads, and JSON/JSONL/CSV exports. Older records
+  default to `false` / `0`; rewatching is valid only while `watching`, and negative
+  counts clamp to zero. Cache schema version `4` uses the existing reset mechanism for
+  older caches; rebuild them with `lib init`.
 - `lib search <query>` searches cached titles, translations, parent-series
   metadata, overviews, notes, and on-air dates in the same priority order as
   AniShelf's library search, and accepts `--limit`. Metadata-dependent reads
