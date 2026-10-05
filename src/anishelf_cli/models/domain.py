@@ -292,6 +292,8 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
     on_display: StrictBool
     date_saved: NonEmptyStr
     watch_status: StrictStr
+    is_rewatching: StrictBool = False
+    rewatch_count: StrictInt = 0
     date_started: NonEmptyStr | None = None
     date_finished: NonEmptyStr | None = None
     is_date_tracking_enabled: StrictBool
@@ -314,6 +316,14 @@ class LibraryEntrySnapshot(_LibraryEntryBase):
                 f"Library entry watch_status value is invalid. Expected one of: {valid}."
             )
         return value
+
+    @model_validator(mode="after")
+    def _normalize_rewatch_tracking(self) -> Self:
+        object.__setattr__(
+            self, "is_rewatching", self.is_rewatching and self.watch_status == "watching"
+        )
+        object.__setattr__(self, "rewatch_count", max(0, self.rewatch_count))
+        return self
 
     @model_validator(mode="after")
     def _validate_metadata_identity(self) -> Self:

@@ -338,6 +338,8 @@ def test_library_init_then_get_success_json(tmp_path, monkeypatch) -> None:
     assert entry["date_started"] == "2026-05-02"
     assert entry["date_finished"] == "2026-05-09"
     assert entry["watch_status"] == "watched"
+    assert entry["is_rewatching"] is False
+    assert entry["rewatch_count"] == 0
     assert "using_custom_poster" not in entry
     assert "custom_poster_path" not in entry
     assert "library_updated_at" not in entry
@@ -397,7 +399,13 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     tmp_path,
     monkeypatch,
 ) -> None:
-    _install_cached_entry(tmp_path, monkeypatch, _live_record("movie:55", "movie", 55))
+    _install_cached_entry(
+        tmp_path,
+        monkeypatch,
+        live_record(
+            "movie:55", "movie", 55, watch_status="watching", is_rewatching=True, rewatch_count=2
+        ),
+    )
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
         library_commands,
@@ -415,6 +423,8 @@ def test_library_get_uses_existing_cache_without_cloudkit_requests(
     payload = json.loads(result.stdout)
     assert payload["summary"] == {"requested": 1, "found": 1, "errors": 0}
     assert payload["items"][0]["entry"]["id"] == "movie:55"
+    assert payload["items"][0]["entry"]["is_rewatching"] is True
+    assert payload["items"][0]["entry"]["rewatch_count"] == 2
     assert requests == []
 
 
@@ -1180,12 +1190,13 @@ def test_library_decoder_rejects_future_schema_versions() -> None:
 
 
 def test_library_decoder_accepts_cloudkit_int64_boolean_wrappers() -> None:
-    record = _live_record("movie:55", "movie", 55)
+    record = live_record("movie:55", "movie", 55, watch_status="watching", rewatch_count=2)
     for field in (
         "onDisplay",
         "isDateTrackingEnabled",
         "favorite",
         "usingCustomPoster",
+        "isRewatching",
     ):
         record["fields"][field] = {
             "type": "INT64",
@@ -1199,6 +1210,35 @@ def test_library_decoder_accepts_cloudkit_int64_boolean_wrappers() -> None:
     assert decoded.favorite is True
     assert decoded.using_custom_poster is False
     assert decoded.custom_poster_path is None
+    assert decoded.is_rewatching is True
+    assert decoded.rewatch_count == 2
+
+
+@pytest.mark.parametrize(
+    ("watch_status", "rewatch_fields", "expected_rewatching", "expected_count"),
+    [
+        ("watching", {}, False, 0),
+        ("watching", {"isRewatching": None, "rewatchCount": None}, False, 0),
+        ("watching", {"isRewatching": True, "rewatchCount": 3}, True, 3),
+        ("watching", {"isRewatching": False, "rewatchCount": -1}, False, 0),
+        ("planToWatch", {"isRewatching": True, "rewatchCount": 2}, False, 2),
+        ("watched", {"isRewatching": True, "rewatchCount": 2}, False, 2),
+        ("dropped", {"isRewatching": True, "rewatchCount": 2}, False, 2),
+    ],
+)
+def test_library_decoder_normalizes_optional_rewatch_tracking(
+    watch_status: str,
+    rewatch_fields: dict[str, object],
+    expected_rewatching: bool,
+    expected_count: int,
+) -> None:
+    record = live_record("movie:55", "movie", 55, watch_status=watch_status)
+    record["fields"].update({name: {"value": value} for name, value in rewatch_fields.items()})
+
+    decoded = decode_library_entry_record(_cloudkit_record(record))
+
+    assert decoded.is_rewatching is expected_rewatching
+    assert decoded.rewatch_count == expected_count
 
 
 def test_library_decoder_accepts_empty_notes() -> None:

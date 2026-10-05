@@ -211,7 +211,16 @@ def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> Non
     scope = LibraryCacheScope.default_for_user("_user_a")
     store = create_cache_store(monkeypatch, tmp_path, user_record_name="_user_a")
     page = ZoneChangesPage(
-        records=[_live_record("movie:55", "movie", 55)],
+        records=[
+            live_record(
+                "movie:55",
+                "movie",
+                55,
+                watch_status="watching",
+                is_rewatching=True,
+                rewatch_count=2,
+            )
+        ],
         sync_token="t1",
         more_coming=False,
     )
@@ -222,10 +231,79 @@ def test_cache_apply_page_is_idempotent_and_scoped(tmp_path, monkeypatch) -> Non
     assert store.read_sync_token() == "t1"
     entries = store.list_entry_models()
     assert [entry.identity for entry in entries] == ["movie:55"]
+    assert entries[0].is_rewatching is True
+    assert entries[0].rewatch_count == 2
+    with sqlite3.connect(store.path) as db:
+        assert db.execute(
+            "SELECT is_rewatching, rewatch_count FROM library_entries"
+        ).fetchone() == (1, 2)
+    store.apply_page(
+        ZoneChangesPage(
+            records=[
+                live_record(
+                    "movie:55",
+                    "movie",
+                    55,
+                    watch_status="watched",
+                    is_rewatching=False,
+                    rewatch_count=3,
+                )
+            ],
+            sync_token="t2",
+            more_coming=False,
+        ),
+        staging=False,
+    )
+    updated = LibraryCacheStore.for_scope(scope).list_entry_models()[0]
+    assert updated.is_rewatching is False
+    assert updated.rewatch_count == 3
+    with sqlite3.connect(store.path) as db:
+        assert db.execute(
+            "SELECT is_rewatching, rewatch_count FROM library_entries"
+        ).fetchone() == (0, 3)
     assert (
         LibraryCacheStore.for_scope(scope).path
         != LibraryCacheStore.for_scope(LibraryCacheScope.default_for_user("_user_b")).path
     )
+
+
+def test_cache_schema_upgrade_discards_old_rows_and_tokens(tmp_path, monkeypatch) -> None:
+    store = create_seeded_cache_store(monkeypatch, tmp_path, live_record("movie:55", "movie", 55))
+    store.upsert_metadata_summary(_metadata_summary("movie", 55, name="Alien"))
+    store.begin_rebuild()
+    store.apply_page(
+        ZoneChangesPage(
+            records=[live_record("series:22", "series", 22)], sync_token="stage", more_coming=True
+        ),
+        staging=True,
+    )
+    with sqlite3.connect(store.path) as db:
+        db.execute("UPDATE cache_meta SET value = '3' WHERE key = 'schema_version'")
+        for table in ("library_entries", "library_entries_stage"):
+            db.execute(f"ALTER TABLE {table} DROP COLUMN is_rewatching")
+            db.execute(f"ALTER TABLE {table} DROP COLUMN rewatch_count")
+
+    store.initialize()
+
+    assert store.list_entry_models() == []
+    assert store.read_sync_token() is None
+    with sqlite3.connect(store.path) as db:
+        assert db.execute(
+            "SELECT value FROM cache_meta WHERE key = 'schema_version'"
+        ).fetchone() == ("4",)
+        assert (
+            db.execute("SELECT value FROM cache_meta WHERE key = 'rebuild_sync_token'").fetchone()
+            is None
+        )
+        assert db.execute("SELECT COUNT(*) FROM tmdb_metadata_items").fetchone() == (0,)
+        assert (
+            db.execute(
+                "SELECT name FROM sqlite_master WHERE name = 'library_entries_stage'"
+            ).fetchone()
+            is None
+        )
+        columns = {row[1] for row in db.execute("PRAGMA table_info(library_entries)")}
+        assert {"is_rewatching", "rewatch_count"} <= columns
 
 
 def test_cache_updated_sort_query_uses_snapshot_sort_index(tmp_path, monkeypatch) -> None:
@@ -944,7 +1022,16 @@ def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
             assert sync_token is None
             assert [entry.identity for entry in store.list_entry_models()] == ["movie:55"]
             return ZoneChangesPage(
-                records=[_live_record("series:22", "series", 22)],
+                records=[
+                    live_record(
+                        "series:22",
+                        "series",
+                        22,
+                        watch_status="watching",
+                        is_rewatching=True,
+                        rewatch_count=2,
+                    )
+                ],
                 sync_token="new",
                 more_coming=False,
             )
@@ -954,6 +1041,8 @@ def test_expired_token_rebuild_preserves_old_rows_until_final_promotion(
     assert result.rebuilt is True
     assert store.read_sync_token() == "new"
     assert [entry.identity for entry in store.list_entry_models()] == ["series:22"]
+    assert store.list_entry_models()[0].is_rewatching is True
+    assert store.list_entry_models()[0].rewatch_count == 2
 
 
 def test_executor_fetches_zone_changes_with_pagination_token(monkeypatch) -> None:
@@ -1640,7 +1729,13 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
     tmp_path,
     monkeypatch,
 ) -> None:
-    create_seeded_cache_store(monkeypatch, tmp_path, _live_record("movie:55", "movie", 55))
+    create_seeded_cache_store(
+        monkeypatch,
+        tmp_path,
+        live_record(
+            "movie:55", "movie", 55, watch_status="watching", is_rewatching=True, rewatch_count=2
+        ),
+    )
     requests: list[httpx.Request] = []
     monkeypatch.setattr(
         library_commands,
@@ -1658,6 +1753,8 @@ def test_library_list_reads_existing_cache_without_cloudkit_update(
     payload = json.loads(result.stdout)
     assert payload["summary"]["cache"]["mode"] == "cached"
     assert [entry["id"] for entry in payload["entries"]] == ["movie:55"]
+    assert payload["entries"][0]["is_rewatching"] is True
+    assert payload["entries"][0]["rewatch_count"] == 2
     assert requests == []
 
 

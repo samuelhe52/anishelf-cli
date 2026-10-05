@@ -21,6 +21,8 @@ CSV_COLUMNS: tuple[str, ...] = (
     "parent_series_id",
     "season_number",
     "watch_status",
+    "is_rewatching",
+    "rewatch_count",
     "score",
     "favorite",
     "on_display",
@@ -35,8 +37,10 @@ CSV_COLUMNS: tuple[str, ...] = (
     "homepage",
 )
 
-# Typed columns hold only ids and scores, which never start with a formula trigger.
-_TYPED_COLUMNS = frozenset({"tmdb_id", "parent_series_id", "season_number", "score"})
+# Typed columns hold only ids, scores, and counts, which never start with a formula trigger.
+_TYPED_COLUMNS = frozenset(
+    {"tmdb_id", "parent_series_id", "season_number", "score", "rewatch_count"}
+)
 # ASCII triggers plus their full-width forms (U+FF1D, U+FF0B, U+FF0D, U+FF20),
 # which some spreadsheets also evaluate.
 _FORMULA_TRIGGERS = (
@@ -132,6 +136,8 @@ def _csv_row(entry: Mapping[str, Any], display_titles: Mapping[str, str]) -> dic
         "parent_series_id": entry.get("parent_series_id"),
         "season_number": entry.get("season_number"),
         "watch_status": entry.get("watch_status"),
+        "is_rewatching": entry.get("is_rewatching"),
+        "rewatch_count": entry.get("rewatch_count"),
         "score": entry.get("score"),
         "favorite": entry.get("favorite"),
         "on_display": entry.get("on_display"),

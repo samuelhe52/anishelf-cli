@@ -4,7 +4,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-CACHE_SCHEMA_VERSION = "3"
+CACHE_SCHEMA_VERSION = "4"
 TMDB_METADATA_SOURCE_VERSION = "tmdb.metadata.v1"
 TMDB_SUMMARY_SOURCE_VERSION = TMDB_METADATA_SOURCE_VERSION
 ZONE_SYNC_TOKEN_META_KEY = "zone_sync_token"
@@ -99,6 +99,8 @@ def entries_table_sql(table: str) -> str:
             parent_series_id INTEGER,
             season_number INTEGER,
             watch_status TEXT,
+            is_rewatching INTEGER,
+            rewatch_count INTEGER,
             score INTEGER,
             favorite INTEGER,
             on_display INTEGER,
